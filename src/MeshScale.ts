@@ -102,13 +102,13 @@ export class MeshScale {
                 const instance = this.#services.get(msg.service)
 
                 const args = msg.args.map(arg => arg != '__FUNCTION__' ? arg : (...args) => {
-                    sender_node_id && transporter.publish(sender_node_id, { id: msg.id, type: 'callback', args })
+                    sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'callback', args })
                 })
                 try {
                     const response = await instance?.[msg.method]?.(...args)
-                    sender_node_id && transporter.request(sender_node_id, { id: msg.id, type: 'response', response })
+                    sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'response', response })
                 } catch (error) {
-                    sender_node_id && transporter.request(sender_node_id, { id: msg.id, type: 'error', error })
+                    sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'error', error })
                 }
                 return
             }
@@ -142,7 +142,7 @@ export class MeshScale {
         transporter.listen('#join', (sender_node_id: string, node: MeshScaleNode) => this.#on_node_discovered(node, transporter))
 
         const me = await this.$metadata()
-        await transporter.publish('#join', me)
+        await transporter.publish('#join', null, me)
     }
 
     async #on_node_discovered(node: MeshScaleNode, transporter: MeshScaleTransporter) {
@@ -181,7 +181,7 @@ export class MeshScale {
         })
 
 
-        !node.linked.includes(this.node_id) && await transporter.publish('#join', await this.$metadata())
+        !node.linked.includes(this.node_id) && await transporter.publish('#join', null, await this.$metadata())
 
     }
 
@@ -220,7 +220,8 @@ export class MeshScale {
             for (let i = retry_count; i > 0; i--) {
                 for (const [__, transporter] of this.#nodes.get(node_id)?.transporters || []) {
                     try {
-                        await transporter.request(
+                        await transporter.publish(
+                            node_id,
                             node_id,
                             { type: 'rpc', id: rid, args, method, service }
                         )
@@ -241,7 +242,7 @@ export class MeshScale {
         this.#pending_join_mesh && clearTimeout(this.#pending_join_mesh)
         this.#pending_join_mesh = setTimeout(async () => {
             const me = await this.$metadata()
-            this.#transporters.forEach(t => t.publish('#join', me))
+            this.#transporters.forEach(t => t.publish('#join', null, me))
         }, 1000)
     }
 
@@ -258,7 +259,7 @@ export class MeshScale {
     }
 
     async publish(topic: string, data: any) {
-        this.#transporters.forEach(t => t.publish(topic, data))
+        this.#transporters.forEach(t => t.publish(topic, null, data))
     }
 
     async subscribe(topic: string, cb: (data: any) => any) {
