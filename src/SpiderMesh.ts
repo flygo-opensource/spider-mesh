@@ -3,13 +3,13 @@ import { get } from 'http'
 import { readFileSync, existsSync } from 'fs'
 import { networkInterfaces } from 'os'
 import { DeepProxy } from './DeepProxy'
-import { MeshScaleNode, MeshScaleNodeMetadata } from './MeshScaleNode'
-import { MeshScaleTransporter } from './MeshScaleTransporter'
+import { SpiderMeshNode, SpiderMeshNodeMetadata } from './SpiderMeshNode'
+import { SpiderMeshTransporter } from './SpiderMeshTransporter'
 import { RPCOptions, RPCOptionsList } from './RPCOptions'
 import { RemoteService } from './RemoteService'
 import os from 'os'
 
-export class MeshScale {
+export class SpiderMesh {
 
     #package_json = existsSync(`package.json`) ? JSON.parse(readFileSync(`package.json`, 'utf8')) || {} : {}
     public readonly node_id = randomUUID()
@@ -17,12 +17,12 @@ export class MeshScale {
 
     #services = new Map<string, {
         last_call_index: number
-        nodes: MeshScaleNode[]
+        nodes: SpiderMeshNode[]
     }>
 
-    #nodes = new Map<string, MeshScaleNode>
+    #nodes = new Map<string, SpiderMeshNode>
 
-    #transporters = new Map<string, MeshScaleTransporter>
+    #transporters = new Map<string, SpiderMeshTransporter>
 
     #rpc_queue = new Map<string, {
         success: Function,
@@ -64,17 +64,17 @@ export class MeshScale {
             services: [...this.#services.keys()],
             namespace: this.namespace,
             linked: [...this.#nodes.keys()],
-        } as MeshScaleNodeMetadata
+        } as SpiderMeshNodeMetadata
     }
 
-    async add_transporter(factory: { new(...args): MeshScaleTransporter }) {
+    async add_transporter(factory: { new(...args): SpiderMeshTransporter }) {
         const transporter = new factory(this.node_id, this.namespace)
-        this.#transporters.set(transporter.id, transporter)
+        this.#transporters.set(factory.name, transporter)
         transporter.on_node_offline(id => {
             const node = this.#nodes.get(id)
             if (!node) return
-            process.env.MESHSCALE_DEBUG && console.log(`Node ${id} offline`)
-            node.transporters?.delete(transporter.id)
+            process.env.SpiderMesh_DEBUG && console.log(`Node ${id} offline`)
+            node.transporters?.delete(factory.name)
             node.transporters?.size == 0 && this.#nodes.delete(id)
             this.#services.forEach(service => service.nodes = service.nodes?.filter(node => node.id != id));
             [...this.#rpc_queue.entries()].forEach(([rid, { reject }]) => {
@@ -139,27 +139,28 @@ export class MeshScale {
             }
         })
 
-        transporter.listen('#join', (sender_node_id: string, node: MeshScaleNode) => this.#on_node_discovered(node, transporter))
+        transporter.listen('#join', (sender_node_id: string, node: SpiderMeshNode) => this.#on_node_discovered(node, transporter))
 
         const me = await this.$metadata()
         await transporter.publish('#join', null, me)
     }
 
-    async #on_node_discovered(node: MeshScaleNode, transporter: MeshScaleTransporter) {
+    async #on_node_discovered(node: SpiderMeshNode, transporter: SpiderMeshTransporter) {
 
         if (node.id == this.node_id) return
 
-        process.env.MESHSCALE_DEBUG && console.log(`New node `, node)
+        process.env.SpiderMesh_DEBUG && console.log(`New node `, node)
 
         const discovered = this.#nodes.get(node.id)
-        const new_node: MeshScaleNode = {
+        const new_node: SpiderMeshNode = {
             ...discovered,
             ...node,
             transporters: discovered?.transporters || new Map(),
             offline: false
         }
         this.#nodes.set(node.id, new_node)
-        this.#nodes.get(node.id)?.transporters?.set(transporter.id, transporter)
+        const transporter_name = Object.getPrototypeOf(transporter).constructor.name
+        this.#nodes.get(node.id)?.transporters?.set(transporter_name, transporter)
         node.services.forEach(service => {
             const $service = this.#services.get(service)
 

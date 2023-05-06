@@ -3,6 +3,7 @@ import dgram from 'dgram'
 import { createConnection, createServer, Server, NetConnectOpts } from "net";
 import { networkInterfaces } from 'os'
 import { Duplex, PassThrough } from "stream";
+import { SpiderMeshTransporter } from "./SpiderMeshTransporter";
 
 async function tryCatch<T>(fn: (...args: any[]) => T | Promise<T> | Promise<T>) {
     try {
@@ -71,9 +72,7 @@ const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: Ne
 }
 
 
-export class BuiltinTransporter {
-
-    public readonly id = 'lan-transporter'
+export class BuiltinTransporter implements SpiderMeshTransporter {
 
     #node_offline_callbacks = new Map<string, (node_id: string) => any>
     #listeners = new Map<string, Map<string, (from_node_id: string, data: any) => any>>
@@ -93,11 +92,9 @@ export class BuiltinTransporter {
     }>
 
     constructor(
-        private node_id: string,
-        private namespace: string,
-
+        public readonly node_id: string,
+        public readonly namespace: string,
     ) {
-
         setTimeout(async () => {
             while (true) {
                 this.#initing = this.#init()
@@ -234,14 +231,14 @@ export class BuiltinTransporter {
 
     async #add_node(host: string, new_node: HelloMessage, tcp_socket?: Duplex) {
 
-        process.env.MESHSCALE_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] New node [${host}]`, new_node)
+        process.env.SpiderMesh_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] New node [${host}]`, new_node)
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
 
             const socket = await initAutoReconnectConnection({ host, port: new_node.port, timeout: 2500 }) || tcp_socket
             if (!socket) return
 
             const on_offline = (e) => {
-                process.env.MESHSCALE_TCP_DEBUG && console.log(`Node offline: ${new_node.node_id}`)
+                process.env.SpiderMesh_TCP_DEBUG && console.log(`Node offline: ${new_node.node_id}`)
                 this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
                 this.#nodes_map.delete(new_node.node_id)
             }
@@ -318,5 +315,4 @@ export class BuiltinTransporter {
 
     }
 
-}
-
+} 
