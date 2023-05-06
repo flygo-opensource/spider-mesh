@@ -4,6 +4,7 @@ import { createConnection, createServer, Server, NetConnectOpts } from "net";
 import { networkInterfaces } from 'os'
 import { Duplex, PassThrough } from "stream";
 import { SpiderMeshTransporter } from "./SpiderMeshTransporter";
+import { TcpNetConnectOpts } from "net";
 
 async function tryCatch<T>(fn: (...args: any[]) => T | Promise<T> | Promise<T>) {
     try {
@@ -39,7 +40,7 @@ const PRIVATE_SUBNET = process.env.PRIVATE_SUBNET
 const SEEDING_IP = process.env.SEEDING_IP
 
 
-const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: NetConnectOpts & { reconnect_intervel?: number }) => {
+const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: TcpNetConnectOpts & { reconnect_intervel?: number }) => {
 
     return new Promise<Duplex | null>(async s => {
 
@@ -198,7 +199,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             data: {
                 node_id: this.node_id,
                 port: tcp_port,
-                listening_events: ['#hello', '#join', ...this.#listeners.keys(), this.node_id],
+                listening_events: ['#hello', ...this.#listeners.keys()],
                 peers: [... this.#nodes_map.values()].map(({ host, listening_events, node_id, port }) => ({ listening_events, node_id, port, host }))
             } as HelloMessage,
             namespace: this.namespace,
@@ -231,19 +232,19 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     async #add_node(host: string, new_node: HelloMessage, tcp_socket?: Duplex) {
 
-        process.env.SpiderMesh_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] New node [${host}]`, new_node)
+        process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] New node [${host}]`, new_node)
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
 
             const socket = await initAutoReconnectConnection({ host, port: new_node.port, timeout: 2500 }) || tcp_socket
             if (!socket) return
 
             const on_offline = (e) => {
-                process.env.SpiderMesh_TCP_DEBUG && console.log(`Node offline: ${new_node.node_id}`)
+                process.env.SPIDERMESH_TCP_DEBUG && console.log(`Node offline: ${new_node.node_id}`)
                 this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
                 this.#nodes_map.delete(new_node.node_id)
             }
-            socket.on('error', e => on_offline)
-            socket.on('close', e => on_offline)
+            socket.on('error', on_offline)
+            socket.on('close', on_offline)
             this.#nodes_map.set(new_node.node_id, { ...new_node, host, socket })
 
             new_node.peers.every(p => p.node_id != this.node_id) && await this.#hello(socket)

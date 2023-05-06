@@ -73,7 +73,7 @@ export class SpiderMesh {
         transporter.on_node_offline(id => {
             const node = this.#nodes.get(id)
             if (!node) return
-            process.env.SpiderMesh_DEBUG && console.log(`Node ${id} offline`)
+            process.env.SPIDERMESH_DEBUG && console.log(`Node ${id} offline`)
             node.transporters?.delete(factory.name)
             node.transporters?.size == 0 && this.#nodes.delete(id)
             this.#services.forEach(service => service.nodes = service.nodes?.filter(node => node.id != id));
@@ -149,7 +149,7 @@ export class SpiderMesh {
 
         if (node.id == this.node_id) return
 
-        process.env.SpiderMesh_DEBUG && console.log(`New node `, node)
+        process.env.SPIDERMESH_DEBUG && console.log(`New node `, node)
 
         const discovered = this.#nodes.get(node.id)
         const new_node: SpiderMeshNode = {

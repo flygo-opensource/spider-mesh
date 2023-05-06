@@ -1,7 +1,7 @@
 
 export const ServiceInstanceList = new Array<{ name: string, instance: any }>()
 
-export const SpiderMeshMicroservice = () => (factory: { new(...args: any[]): any }) => {
+export const SpiderMeshMicroservice = () => (factory: { new(...args: any[]): any }, descriptor) => {
 
     const C = class extends factory {
         constructor(...args: any[]) {
@@ -12,7 +12,9 @@ export const SpiderMeshMicroservice = () => (factory: { new(...args: any[]): any
             })
         }
     }
-    Object.defineProperty(C, 'name', factory.name)
-    return C
+    Object.defineProperty(C, 'name', {
+        value: factory.name
+    })
+    return C as any
 }
 
