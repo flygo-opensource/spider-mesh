@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
 import dgram from 'dgram'
-import { Socket, createConnection, createServer, Server } from "net";
+import { createConnection, createServer, Server, NetConnectOpts } from "net";
 import { networkInterfaces } from 'os'
+import { Duplex, PassThrough } from "stream";
 
 async function tryCatch<T>(fn: (...args: any[]) => T | Promise<T> | Promise<T>) {
     try {
@@ -33,8 +34,41 @@ type HelloMessage = TcpNode & {
 
 const UDP_MULTICAST_PORT = Number(process.env.UDP_MULTICAST_PORT || 10001)
 const MULTICAST_IP = process.env.MULTICAST_IP || '239.255.255.250'
-const PRIVATE_SUBNET = process.env.PRIVATE_SUBNET || '10.104.16'
+const PRIVATE_SUBNET = process.env.PRIVATE_SUBNET
 const SEEDING_IP = process.env.SEEDING_IP
+
+
+const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: NetConnectOpts & { reconnect_intervel?: number }) => {
+
+    return new Promise<Duplex | null>(async s => {
+
+        const $ = new PassThrough()
+
+        for (let i = 1; i <= reconnect_intervel; i++) {
+            const socket = await new Promise<Duplex | null>(s => {
+                const socket = createConnection(options)
+                socket.on('connect', () => s(socket))
+                socket.on('error', () => s(null))
+                socket.on('timeout', () => s(null))
+            })
+            if (socket) {
+                s($)
+                $.pipe(socket)
+                socket.on('data', data => $.emit('data', data))
+                socket.on('close', () => $.emit('close'))
+                i = 1
+                await new Promise(s => socket.on('error', s))
+                await new Promise(s => setTimeout(s, 500))
+                continue
+            }
+            return s(null)
+
+        }
+        $.emit('error')
+
+    })
+
+}
 
 
 export class BuiltinTransporter {
@@ -45,7 +79,7 @@ export class BuiltinTransporter {
     #listeners = new Map<string, Map<string, (from_node_id: string, data: any) => any>>
 
     #nodes_map = new Map<string, TcpNode & {
-        socket?: Socket
+        socket?: Duplex
     }>
 
     #events_map = new Map<string, Set<string>>()
@@ -55,9 +89,26 @@ export class BuiltinTransporter {
         tcp_port: number;
         next: () => Promise<void>;
         wait_error: () => Promise<any>;
-        flush: () => dgram.Socket;
+        flush: () => void;
     }>
 
+    constructor(
+        private node_id: string,
+        private namespace: string,
+
+    ) {
+
+        setTimeout(async () => {
+            while (true) {
+                this.#initing = this.#init()
+                const task = await this.#initing
+                await task.next()
+                await task.wait_error()
+                await task.flush()
+            }
+        })
+
+    }
     async #init() {
 
         // Create UDP
@@ -116,31 +167,34 @@ export class BuiltinTransporter {
                 if (SEEDING_IP) {
                     const ips = SEEDING_IP.split(',').map(c => c.trim().split(':'))
                     for (const [host, port] of ips) {
-                        this.#add_node(host, {
-                            host,
-                            listening_events: [],
-                            node_id: '',
-                            peers: [],
-                            port: Number(port)
-                        })
+                        const socket = await initAutoReconnectConnection({ host, port: Number(port), timeout: 2500, })
+                        socket?.on('data', data => this.#on_message(host, data, socket))
+                        socket && this.#hello(socket)
                     }
                 }
 
             },
             wait_error: () => new Promise<any>(async s => {
                 await new Promise(s => {
+                    udp.on('close', s)
+                    udp.on('error', s)
                     server.on('error', s)
                     server.on('drop', s)
                     server.on('close', s)
                 })
             }),
 
-            flush: () => udp.close()
+            flush: () => {
+                udp.close()
+                server.close()
+            }
         }
 
     }
 
-    async #hello(socket?: Socket, udp_socket?: { socket: dgram.Socket, host: string }) {
+
+
+    async #hello(socket?: Duplex, udp_socket?: { socket: dgram.Socket, host: string }) {
         const { tcp_port } = await this.#initing
 
         const msg: MeshMessage = {
@@ -160,60 +214,11 @@ export class BuiltinTransporter {
         socket?.write(buffer)
         udp_socket?.socket.send(buffer, UDP_MULTICAST_PORT, udp_socket.host)
     }
-    constructor(
-        private node_id: string,
-        private namespace: string,
-
-    ) {
-        console.log({ ME: node_id })
-
-        setTimeout(async () => {
-            while (true) {
-                this.#initing = this.#init()
-                const task = await this.#initing
-                await task.next()
-                await task.wait_error()
-                await task.flush()
-            }
-        })
-
-    }
-
-    async #add_node(host: string, new_node: HelloMessage, tcp_socket?: Socket) {
-
-        console.log(`[${new Date().toLocaleTimeString()}] New node [${host}]`, new_node)
-
-        const socket = await new Promise<Socket | null>(s => {
-            const socket = createConnection({ host, port: new_node.port, timeout: 2500 })
-            socket.on('connect', () => s(socket))
-            socket.on('error', () => s(null))
-            socket.on('timeout', () => s(null))
-        }) || tcp_socket
-
-        if (!socket) return
-
-        socket.listenerCount('data') == 0 && socket.on('data', data => this.#on_message(host, data))
-        const on_offline = (e) => {
-            console.log(e)
-            console.log(`Node offline: ${new_node.node_id}`)
-            this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
-            this.#nodes_map.delete(new_node.node_id)
-        }
-        socket.on('error', on_offline)
-        socket.on('close', on_offline)
-        new_node.node_id && this.#nodes_map.set(new_node.node_id, { ...new_node, host, socket })
-        for (const event of new_node.listening_events) {
-            !this.#events_map.has(event) && this.#events_map.set(event, new Set())
-            this.#events_map.get(event)?.add(new_node.node_id)
-        }
-
-        new_node.peers.every(p => p.node_id != this.node_id) && await this.#hello(socket)
-        new_node.peers.filter(peer => peer.node_id != this.node_id && !this.#nodes_map.has(peer.node_id)).forEach(peer => this.#add_node(host, { ...peer, peers: [] }))
-    }
-
-    async #on_message(remote_address: string, data: Buffer, tcp_socket?: Socket) {
 
 
+
+
+    async #on_message(remote_address: string, data: Buffer, tcp_socket?: Duplex) {
         if (!remote_address) return
         const [_, msg] = await tryCatch<MeshMessage>(() => JSON.parse(data.toString('utf8')))
         if (!msg) return
@@ -227,6 +232,35 @@ export class BuiltinTransporter {
         this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
     }
 
+    async #add_node(host: string, new_node: HelloMessage, tcp_socket?: Duplex) {
+
+        process.env.MESHSCALE_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] New node [${host}]`, new_node)
+        if (!this.#nodes_map.get(new_node.node_id)?.socket) {
+
+            const socket = await initAutoReconnectConnection({ host, port: new_node.port, timeout: 2500 }) || tcp_socket
+            if (!socket) return
+
+            const on_offline = (e) => {
+                process.env.MESHSCALE_TCP_DEBUG && console.log(`Node offline: ${new_node.node_id}`)
+                this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
+                this.#nodes_map.delete(new_node.node_id)
+            }
+            socket.on('error', e => on_offline)
+            socket.on('close', e => on_offline)
+            this.#nodes_map.set(new_node.node_id, { ...new_node, host, socket })
+
+            new_node.peers.every(p => p.node_id != this.node_id) && await this.#hello(socket)
+        }
+
+        for (const event of new_node.listening_events) {
+            !this.#events_map.has(event) && this.#events_map.set(event, new Set())
+            this.#events_map.get(event)?.add(new_node.node_id)
+        }
+
+
+
+        new_node.peers.filter(peer => peer.node_id != this.node_id && !this.#nodes_map.has(peer.node_id)).forEach(peer => this.#add_node(host, { ...peer, peers: [] }))
+    }
 
     on_node_offline(cb: (node_id: string) => any) {
         const id = randomUUID()
@@ -260,7 +294,6 @@ export class BuiltinTransporter {
         data: T,
         queue?: boolean
     ) {
-        console.log(`Publish ${event}`, data)
 
         const msg: MeshMessage = {
             data,
@@ -287,6 +320,3 @@ export class BuiltinTransporter {
 
 }
 
-
-// const b = new BuiltinTransporter(`Server#${Date.now()}`, 'test', ['#hi'])
-// b.listen('#hi', console.log)

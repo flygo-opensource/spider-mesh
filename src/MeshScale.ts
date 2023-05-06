@@ -73,7 +73,7 @@ export class MeshScale {
         transporter.on_node_offline(id => {
             const node = this.#nodes.get(id)
             if (!node) return
-            console.log(`Node ${id} offline`)
+            process.env.MESHSCALE_DEBUG && console.log(`Node ${id} offline`)
             node.transporters?.delete(transporter.id)
             node.transporters?.size == 0 && this.#nodes.delete(id)
             this.#services.forEach(service => service.nodes = service.nodes?.filter(node => node.id != id));
@@ -149,7 +149,7 @@ export class MeshScale {
 
         if (node.id == this.node_id) return
 
-        console.log(`New node `, node)
+        process.env.MESHSCALE_DEBUG && console.log(`New node `, node)
 
         const discovered = this.#nodes.get(node.id)
         const new_node: MeshScaleNode = {
