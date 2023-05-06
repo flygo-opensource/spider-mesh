@@ -259,11 +259,11 @@ export class SpiderMesh {
         }) as RemoteService<T>
     }
 
-    async publish(topic: string, data: any) {
+    async publish<T = any>(topic: string, data: T) {
         this.#transporters.forEach(t => t.publish(topic, null, data))
     }
 
-    async subscribe(topic: string, cb: (data: any) => any) {
+    async subscribe<T = any>(topic: string, cb: (from_node_id: string, data: T) => any) {
         const subscriptions = [... this.#transporters.values()].map(t => t.listen(topic, cb))
         return { unsubscribe: () => subscriptions.forEach(s => s.unsubscribe()) }
     }
