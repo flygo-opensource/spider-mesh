@@ -17,4 +17,7 @@ export type SpiderMeshTransporter = {
         data: T,
         queue?: boolean
     ): Promise<void>
-} 
+}
+
+
+export type SpiderMeshTransporterFactory = { new(...args: any[]): SpiderMeshTransporter }

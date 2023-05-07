@@ -1,4 +1,5 @@
 import { Duplex } from "stream"
+import { SpiderMesh } from "../SpiderMesh"
 
 
 export const EventSubscriberHook = Symbol.for('SubscribeEventHook')
@@ -28,16 +29,21 @@ export const createMicroserviceEvent = <T>(event: string) => {
         }
     }
 
+    const publisher = (data: T) => requests.emit(event, data)
 
-    class Publisher {
+    class EventPublisherClass {
         publish(data: T) {
-            requests.emit('data', data)
+            requests.emit(event, data)
         }
     }
 
-    return [Publisher, subscribe_event_decorator] as [
-        typeof Publisher,
-        typeof subscribe_event_decorator
+
+
+
+    return [EventPublisherClass, subscribe_event_decorator, publisher] as [
+        typeof EventPublisherClass,
+        typeof subscribe_event_decorator,
+        typeof publisher
     ]
 }
 

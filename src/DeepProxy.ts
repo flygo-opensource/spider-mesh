@@ -17,8 +17,8 @@ export class DeepProxy {
 
                 if (method == 'then') return null
 
-                if (method.startsWith('set_')) {
-                    const m = method.split('set_')[1]
+                if (method.startsWith('$set_')) {
+                    const m = method.split('$set_')[1]
                     if (this.options_list.includes(m)) {
                         return value => {
                             this.#options[m] = value

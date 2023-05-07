@@ -234,7 +234,6 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
         process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] New node [${host}]`, new_node)
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
-
             const socket = await initAutoReconnectConnection({ host, port: new_node.port, timeout: 2500 }) || tcp_socket
             if (!socket) return
 
