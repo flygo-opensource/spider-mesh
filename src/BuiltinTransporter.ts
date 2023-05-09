@@ -167,8 +167,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 if (SEEDING_IP) {
                     const ips = SEEDING_IP.split(',').map(c => c.trim().split(':'))
                     for (const [host, port] of ips) {
-                       
-                        const socket = await initAutoReconnectConnection({ host, port: Number(port), timeout: 2500, })
+
+                        const socket = await initAutoReconnectConnection({ host, port: Number(port), keepAlive: true })
                         socket?.on('data', data => this.#on_message(host, data, socket))
                         socket && this.#hello(socket)
                     }
@@ -233,13 +233,13 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     async #add_node(host: string, new_node: HelloMessage, tcp_socket?: Duplex) {
 
-        
+
         process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
 
         const remote_peers_included = new_node.peers.some(p => p.node_id == this.node_id)
 
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
-            const socket = await initAutoReconnectConnection({ host, port: new_node.port, timeout: 2500 }) || tcp_socket
+            const socket = await initAutoReconnectConnection({ host, port: new_node.port,   keepAlive: true }) || tcp_socket
             if (!socket) return
 
             const on_offline = (e) => {
@@ -256,7 +256,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             socket.on('close', on_offline)
             this.#nodes_map.set(new_node.node_id, { ...new_node, host, socket })
 
-            !remote_peers_included && await this.#hello(socket) 
+            !remote_peers_included && await this.#hello(socket)
         }
 
 

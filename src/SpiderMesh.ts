@@ -68,7 +68,7 @@ export class SpiderMesh {
     async $metadata() {
         const ips = Object.values(networkInterfaces()).map(itf => itf?.map(ip => ip.address) || []).flat(2)
         const { name, version } = this.#package_json
-        return {
+        const metadata = {
             id: this.node_id,
             name,
             version,
@@ -87,6 +87,9 @@ export class SpiderMesh {
             namespace: this.namespace,
             linked: [...this.#nodes.keys()],
         } as SpiderMeshNodeMetadata
+
+        process.env.SPIDERMESH_DEBUG && console.log({ me: metadata })
+        return metadata
     }
 
     async add_transporter(factory: { new(...args): SpiderMeshTransporter }) {
@@ -95,7 +98,7 @@ export class SpiderMesh {
         transporter.on_node_offline(id => {
             const node = this.#nodes.get(id)
             if (!node) return
-            process.env.SPIDERMESH_DEBUG && console.log(`Node ${id} offline`)
+            process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
             node.transporters?.delete(factory.name)
             node.transporters?.size == 0 && this.#nodes.delete(id)
             this.#remote_services.forEach(service => service.nodes = service.nodes?.filter(node => node.id != id));
@@ -164,8 +167,12 @@ export class SpiderMesh {
 
         transporter.listen('#join', (sender_node_id: string, node: SpiderMeshNode) => this.#on_node_discovered(node, transporter))
 
-        const me = await this.$metadata()
-        transporter.on_node_online(node_id => !this.#nodes.has(node_id) && transporter.publish('#join', null, me))
+        transporter.on_node_online(async node_id => {
+            if (!this.#nodes.has(node_id)) {
+                transporter.publish('#join', node_id, await this.$metadata())
+            }
+
+        })
 
     }
 
@@ -173,7 +180,7 @@ export class SpiderMesh {
 
         if (node.id == this.node_id) return
 
-        process.env.SPIDERMESH_DEBUG && console.log(`New node `, node)
+        process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] New node `, node)
 
         const discovered = this.#nodes.get(node.id)
         const new_node: SpiderMeshNode = {
@@ -318,6 +325,7 @@ export class SpiderMesh {
         if (list.length == 0) return
 
         for (const instance of list) {
+
             const prototype = Object.getPrototypeOf(instance)
             const name = prototype.constructor.name
 
@@ -344,6 +352,7 @@ export class SpiderMesh {
         // Wait remote service ready
         while (true) {
             await new Promise(s => setTimeout(s, 1000))
+            process.env.SPIDERMESH_DEBUG && console.log([...SpiderMesh.#LinkingServices.values()])
             if ([...SpiderMesh.#LinkingServices.values()].every(service => service.online)) {
                 break
             }
