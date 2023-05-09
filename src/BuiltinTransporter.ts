@@ -44,7 +44,7 @@ const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: Tc
 
     return new Promise<Duplex | null>(async s => {
 
-        const $ = new PassThrough() 
+        const $ = new PassThrough()
 
         for (let i = 1; i <= reconnect_intervel; i++) {
             const socket = await new Promise<Duplex | null>(s => {
@@ -53,7 +53,7 @@ const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: Tc
                 socket.on('error', () => s(null))
                 socket.on('timeout', () => s(null))
             })
-            if (socket) { 
+            if (socket) {
                 $.pipe(socket)
                 socket.on('data', data => $.emit('data', data))
                 socket.on('close', () => $.emit('close'))
@@ -76,6 +76,7 @@ const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: Tc
 export class BuiltinTransporter implements SpiderMeshTransporter {
 
     #node_offline_callbacks = new Map<string, (node_id: string) => any>
+    #node_online_callbacks = new Map<string, (node_id: string) => any>
     #listeners = new Map<string, Map<string, (from_node_id: string, data: any) => any>>
 
     #nodes_map = new Map<string, TcpNode & {
@@ -96,7 +97,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         public readonly node_id: string,
         public readonly namespace: string,
     ) {
-        process.env.SPIDERMESH_TCP_DEBUG &&   console.log(`[${new Date().toLocaleTimeString()}] Online ${node_id}`)
+        process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Online ${node_id}`)
         setTimeout(async () => {
             while (true) {
                 this.#initing = this.#init()
@@ -166,6 +167,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 if (SEEDING_IP) {
                     const ips = SEEDING_IP.split(',').map(c => c.trim().split(':'))
                     for (const [host, port] of ips) {
+                       
                         const socket = await initAutoReconnectConnection({ host, port: Number(port), timeout: 2500, })
                         socket?.on('data', data => this.#on_message(host, data, socket))
                         socket && this.#hello(socket)
@@ -231,7 +233,11 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     async #add_node(host: string, new_node: HelloMessage, tcp_socket?: Duplex) {
 
+        
         process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
+
+        const remote_peers_included = new_node.peers.some(p => p.node_id == this.node_id)
+
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
             const socket = await initAutoReconnectConnection({ host, port: new_node.port, timeout: 2500 }) || tcp_socket
             if (!socket) return
@@ -250,21 +256,31 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             socket.on('close', on_offline)
             this.#nodes_map.set(new_node.node_id, { ...new_node, host, socket })
 
-            new_node.peers.every(p => p.node_id != this.node_id) && await this.#hello(socket)
+            !remote_peers_included && await this.#hello(socket) 
         }
+
+
 
         for (const event of new_node.listening_events) {
             !this.#events_map.has(event) && this.#events_map.set(event, new Set())
             this.#events_map.get(event)?.add(new_node.node_id)
         }
 
-        // new_node.peers.filter(peer => peer.node_id != this.node_id && !this.#nodes_map.has(peer.node_id)).forEach(peer => this.#add_node(host, { ...peer, peers: [] }))
+        remote_peers_included && this.#node_online_callbacks.forEach(fn => fn(new_node.node_id))
+
+
     }
 
     on_node_offline(cb: (node_id: string) => any) {
         const id = randomUUID()
         this.#node_offline_callbacks.set(id, cb)
         return { unsubscribe: () => this.#node_offline_callbacks.delete(id) }
+    }
+
+    on_node_online(cb: (node_id: string) => any) {
+        const id = randomUUID()
+        this.#node_online_callbacks.set(id, cb)
+        return { unsubscribe: () => this.#node_online_callbacks.delete(id) }
     }
 
 
@@ -293,7 +309,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         node_id: string | null,
         data: T,
         queue?: boolean
-    ) { 
+    ) {
 
         const msg: MeshMessage = {
             data,

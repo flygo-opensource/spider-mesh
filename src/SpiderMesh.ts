@@ -38,13 +38,18 @@ export class SpiderMesh {
         target_node_id: string
     }>
 
-    #public_ip = new Promise<string | null>(s => {
-        get('http://api.ipify.org', (res) => {
-            res.setEncoding('utf8')
-            let rawData = ''
-            res.on('data', (chunk) => { rawData += chunk; })
-            res.on('end', () => s(rawData))
-        }).on('error', () => s(null))
+    #public_ip = new Promise<string | null>(async s => {
+        while (true) {
+            const ip = await new Promise<string | null>(s => {
+                get('http://api.ipify.org', (res) => {
+                    res.setEncoding('utf8')
+                    let rawData = ''
+                    res.on('data', (chunk) => { rawData += chunk; })
+                    res.on('end', () => s(rawData))
+                }).on('error', () => s(null))
+            })
+            if (ip != 'Bad Gateway') return s(ip)
+        }
     })
 
     static #LinkingServices = new Map<string, { online: boolean }>()
@@ -160,7 +165,8 @@ export class SpiderMesh {
         transporter.listen('#join', (sender_node_id: string, node: SpiderMeshNode) => this.#on_node_discovered(node, transporter))
 
         const me = await this.$metadata()
-        await transporter.publish('#join', null, me)
+        transporter.on_node_online(node_id => !this.#nodes.has(node_id) && transporter.publish('#join', null, me))
+
     }
 
     async #on_node_discovered(node: SpiderMeshNode, transporter: SpiderMeshTransporter) {
@@ -209,6 +215,8 @@ export class SpiderMesh {
     async #caculate_request_node_id(service: string, options: RPCOptions) {
         const $ = this.#remote_services.get(service)
         if (!$ || $.nodes.length == 0) return null
+        if (options.ip) return [...this.#nodes.values()].find(node => node.public_ip == options.ip || node.ip_addresses.includes(options.ip))?.id
+
         $.last_call_index = ($.last_call_index + 1) % $.nodes.length
         return $.nodes[$.last_call_index].id
     }
@@ -289,10 +297,19 @@ export class SpiderMesh {
         SpiderMesh.#LinkingServices.set(service_name, { online: false })
 
         return new Proxy({}, {
-            get: (_, method: string) => actions.has(method) || method.startsWith('$set_') ? new DeepProxy(
-                RPCOptionsList,
-                (method: string, options) => (...args) => this.rpc(service_name, method, args, options)
-            ).nest()[method] : null
+            get: (_, method: string) => {
+
+                if (method == '$list_nodes') return () => [...this.#nodes.values()].filter(node => node.services.includes(service_name))
+
+                if (actions.has(method) || method.startsWith('$set_')) {
+                    return new DeepProxy(
+                        RPCOptionsList,
+                        (method: string, options) => (...args) => this.rpc(service_name, method, args, options)
+                    ).nest()[method]
+                }
+
+                return null
+            }
         }) as RemoteService<T>
     }
 
