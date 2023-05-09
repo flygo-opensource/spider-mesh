@@ -125,7 +125,8 @@ export class SpiderMesh {
                     const response = await instance?.[msg.method]?.(...args)
                     sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'response', response })
                 } catch (error) {
-                    sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'error', error })
+                    const { code, message } = error as any
+                    sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'error', error: code || message || error })
                 }
                 return
             }

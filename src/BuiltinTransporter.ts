@@ -44,7 +44,7 @@ const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: Tc
 
     return new Promise<Duplex | null>(async s => {
 
-        const $ = new PassThrough()
+        const $ = new PassThrough() 
 
         for (let i = 1; i <= reconnect_intervel; i++) {
             const socket = await new Promise<Duplex | null>(s => {
@@ -53,12 +53,12 @@ const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: Tc
                 socket.on('error', () => s(null))
                 socket.on('timeout', () => s(null))
             })
-            if (socket) {
-                s($)
+            if (socket) { 
                 $.pipe(socket)
                 socket.on('data', data => $.emit('data', data))
                 socket.on('close', () => $.emit('close'))
                 i = 1
+                s($)
                 await new Promise(s => socket.on('error', s))
                 await new Promise(s => setTimeout(s, 500))
                 continue
@@ -96,6 +96,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         public readonly node_id: string,
         public readonly namespace: string,
     ) {
+        process.env.SPIDERMESH_TCP_DEBUG &&   console.log(`[${new Date().toLocaleTimeString()}] Online ${node_id}`)
         setTimeout(async () => {
             while (true) {
                 this.#initing = this.#init()
@@ -214,8 +215,6 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     }
 
 
-
-
     async #on_message(remote_address: string, data: Buffer, tcp_socket?: Duplex) {
         if (!remote_address) return
         const [_, msg] = await tryCatch<MeshMessage>(() => JSON.parse(data.toString('utf8')))
@@ -232,15 +231,20 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     async #add_node(host: string, new_node: HelloMessage, tcp_socket?: Duplex) {
 
-        process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] New node [${host}]`, new_node)
+        process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
             const socket = await initAutoReconnectConnection({ host, port: new_node.port, timeout: 2500 }) || tcp_socket
             if (!socket) return
 
             const on_offline = (e) => {
-                process.env.SPIDERMESH_TCP_DEBUG && console.log(`Node offline: ${new_node.node_id}`)
+                process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node.node_id}`)
                 this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
+                const node = this.#nodes_map.get(new_node.node_id)
+                node && node.listening_events.map(evt => {
+                    this.#events_map.get(evt)?.delete(node.node_id)
+                })
                 this.#nodes_map.delete(new_node.node_id)
+
             }
             socket.on('error', on_offline)
             socket.on('close', on_offline)
@@ -268,6 +272,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     #broadcast_listen: NodeJS.Timer
     listen<T = any>(topic: string, cb: (node_id: string, data: T) => any) {
+
         this.#broadcast_listen && clearTimeout(this.#broadcast_listen)
         this.#broadcast_listen = setTimeout(() => {
             // Notify about update
@@ -290,7 +295,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         node_id: string | null,
         data: T,
         queue?: boolean
-    ) {
+    ) { 
 
         const msg: MeshMessage = {
             data,
@@ -305,6 +310,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             node?.socket?.write(buffer)
             return
         }
+
 
 
         for (const node_id of this.#events_map.get(event) || []) {
