@@ -48,7 +48,8 @@ export class SpiderMesh {
                     res.on('end', () => s(rawData))
                 }).on('error', () => s(null))
             })
-            if (ip != 'Bad Gateway') return s(ip)
+            if (ip && ip != 'Bad Gateway') return s(ip)
+            await new Promise(s => setTimeout(s, 1000))
         }
     })
 
