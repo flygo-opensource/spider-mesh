@@ -166,12 +166,11 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 // Scan remote node ( <= internet)
                 if (SEEDING_IP) {
                     const ips = SEEDING_IP.split(',').map(c => c.trim().split(':'))
-                    for (const [host, port] of ips) {
-
-                        const socket = await initAutoReconnectConnection({ host, port: Number(port), keepAlive: true })
+                    await Promise.all(ips.map(async ([host, port]) => {
+                        const socket = await initAutoReconnectConnection({ host, port: Number(port), keepAlive: true, timeout: 5000 })
                         socket?.on('data', data => this.#on_message(host, data, socket))
                         socket && this.#hello(socket)
-                    }
+                    }))
                 }
 
             },
@@ -239,7 +238,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const remote_peers_included = new_node.peers.some(p => p.node_id == this.node_id)
 
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
-            const socket = await initAutoReconnectConnection({ host, port: new_node.port,   keepAlive: true }) || tcp_socket
+            const socket = await initAutoReconnectConnection({ host, port: new_node.port, keepAlive: true, timeout: 5000 }) || tcp_socket
             if (!socket) return
 
             const on_offline = (e) => {
