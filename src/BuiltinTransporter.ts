@@ -258,9 +258,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             this.#events_map.get(event)?.add(new_node.node_id)
         }
 
-
-
-        new_node.peers.filter(peer => peer.node_id != this.node_id && !this.#nodes_map.has(peer.node_id)).forEach(peer => this.#add_node(host, { ...peer, peers: [] }))
+        // new_node.peers.filter(peer => peer.node_id != this.node_id && !this.#nodes_map.has(peer.node_id)).forEach(peer => this.#add_node(host, { ...peer, peers: [] }))
     }
 
     on_node_offline(cb: (node_id: string) => any) {
