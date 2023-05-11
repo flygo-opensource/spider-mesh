@@ -12,6 +12,9 @@ import { BuiltinTransporter } from './BuiltinTransporter'
 import { listEventSubscribers } from './decorators/createMicroserviceEvent'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady'
 
+
+export type ServiceNodeMonitor = (online: boolean, node: SpiderMeshNode) => any
+
 export class SpiderMesh {
 
     #package_json = existsSync(`package.json`) ? JSON.parse(readFileSync(`package.json`, 'utf8')) || {} : {}
@@ -54,6 +57,8 @@ export class SpiderMesh {
     })
 
     static #LinkingServices = new Map<string, { online: boolean }>()
+
+    #services_status_monitor = new Map<string, Map<string, ServiceNodeMonitor>>()
 
     private constructor() { }
 
@@ -102,7 +107,14 @@ export class SpiderMesh {
             process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
             node.transporters?.delete(factory.name)
             node.transporters?.size == 0 && this.#nodes.delete(id)
-            this.#remote_services.forEach(service => service.nodes = service.nodes?.filter(node => node.id != id));
+            node.services.map(service => {
+                this.#services_status_monitor.get(service)?.forEach(
+                    fn => fn(false, node)
+                )
+            })
+            this.#remote_services.forEach(service => {
+                service.nodes = service.nodes?.filter(node => node.id != id)
+            });
             [...this.#rpc_queue.entries()].forEach(([rid, { reject }]) => {
                 reject(new Error('SERVICE_OFFLINE'))
                 this.#rpc_queue.delete(rid)
@@ -196,6 +208,10 @@ export class SpiderMesh {
 
         node.services.forEach(service => {
             SpiderMesh.#LinkingServices.set(service, { online: true })
+            this.#services_status_monitor.get(service)?.forEach(
+                fn => fn(true, new_node)
+            )
+
             const $service = this.#remote_services.get(service)
 
             if (!$service) {
@@ -308,6 +324,15 @@ export class SpiderMesh {
             get: (_, method: string) => {
 
                 if (method == '$list_nodes') return () => [...this.#nodes.values()].filter(node => node.services.includes(service_name))
+                if (method == '$monitor') return (cb: ServiceNodeMonitor) => {
+                    const hid = randomUUID()
+                    const map = this.#services_status_monitor.get(service_name) || new Map<string, ServiceNodeMonitor>()
+                    map.set(hid, cb)
+                    this.#services_status_monitor.set(service_name, map)
+                    return {
+                        unsubscribe: () => map.delete(hid)
+                    }
+                }
 
                 if (actions.has(method) || method.startsWith('$set_')) {
                     return new DeepProxy(

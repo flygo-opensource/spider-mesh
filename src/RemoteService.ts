@@ -1,5 +1,7 @@
+import { EventEmitter } from "stream";
 import { RPCOptions } from "./RPCOptions";
 import { SpiderMeshNode } from "./SpiderMeshNode";
+import { ServiceNodeMonitor } from "./SpiderMesh";
 
 export type RemoteService<T> = (
     {
@@ -7,6 +9,9 @@ export type RemoteService<T> = (
     } & {
         [key in keyof RPCOptions as `$set_${key}`]: (value: RPCOptions[key]) => RemoteService<T>
     } & {
-        $list_nodes:() => SpiderMeshNode[]
+        $list_nodes: () => SpiderMeshNode[]
+        $monitor: (cb: ServiceNodeMonitor) => {
+            unsubscribe: Function
+        },
     }
 )

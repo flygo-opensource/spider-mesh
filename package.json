@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/core",
   "type": "module",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -20,5 +20,9 @@
     "build": "tsc -v; rm -rf build && tsc -b tsconfig.json"
   },
   "author": "Duong Van Ba",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "JSONStream": "^1.3.5",
+    "event-stream": "^4.0.1"
+  }
 }

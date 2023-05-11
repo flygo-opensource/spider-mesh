@@ -1,18 +1,13 @@
 import { randomUUID } from "crypto";
 import dgram from 'dgram'
-import { createConnection, createServer, Server, NetConnectOpts } from "net";
+import { createConnection, createServer, Server, NetConnectOpts, Socket } from "net";
 import { networkInterfaces } from 'os'
-import { Duplex, PassThrough } from "stream";
+import { EventEmitter } from "events";
 import { SpiderMeshTransporter } from "./SpiderMeshTransporter";
 import { TcpNetConnectOpts } from "net";
+import { PassThrough } from "stream";
 
-async function tryCatch<T>(fn: (...args: any[]) => T | Promise<T> | Promise<T>) {
-    try {
-        return [null, typeof fn == 'function' ? await fn() : await fn] as [any, T]
-    } catch (e) {
-        return [e, null] as [any, T]
-    }
-}
+
 
 type MeshMessage<T = any> = {
     topic: string
@@ -34,43 +29,97 @@ type HelloMessage = TcpNode & {
     peers: TcpNode[]
 }
 
-const UDP_MULTICAST_PORT = Number(process.env.UDP_MULTICAST_PORT || 10001)
-const MULTICAST_IP = process.env.MULTICAST_IP || '239.255.255.250'
-const PRIVATE_SUBNET = process.env.PRIVATE_SUBNET
+const UDP_PORT = Number(process.env.UDP_PORT || 10001)
 const SEEDING_IP = process.env.SEEDING_IP
 
+class StableTCP extends EventEmitter {
 
-const initAutoReconnectConnection = ({ reconnect_intervel = 10, ...options }: TcpNetConnectOpts & { reconnect_intervel?: number }) => {
+    #input = new PassThrough()
 
-    return new Promise<Duplex | null>(async s => {
+    private constructor(
+        private options: TcpNetConnectOpts
+    ) {
+        super()
+    }
 
-        const $ = new PassThrough()
+    async #connect() {
+        return new Promise<Socket | null>(s => {
+            const socket = createConnection(this.options)
+            socket.on('ready', () => s(socket))
+            socket.on('connect', () => s(socket))
+            socket.on('timeout', () => s(null))
+            socket.on('error', (e) => s(null))
+        })
+    }
 
-        for (let i = 1; i <= reconnect_intervel; i++) {
-            const socket = await new Promise<Duplex | null>(s => {
-                const socket = createConnection(options)
-                socket.on('connect', () => s(socket))
-                socket.on('error', () => s(null))
-                socket.on('timeout', () => s(null))
-            })
-            if (socket) {
-                $.pipe(socket)
-                socket.on('data', data => $.emit('data', data))
-                socket.on('close', () => $.emit('close'))
-                i = 1
-                s($)
-                await new Promise(s => socket.on('error', s))
-                await new Promise(s => setTimeout(s, 500))
-                continue
+
+    #join_stream(socket: Socket) {
+        let buffer = ''
+        this.#input.removeAllListeners('data')
+        this.#input.on('data', data => socket.write(data))
+        socket.on('data', msg => {
+            buffer += msg.toString('utf8')
+            if (buffer.endsWith('\n')) {
+                try {
+                    const json = JSON.parse(buffer)
+                    buffer = ''
+                    this.emit('data', json)
+                } catch (e) {
+
+                }
             }
-            return s(null)
+        })
+    }
 
-        }
-        $.emit('error')
+    async #init() {
+        return await new Promise<boolean>(async s => {
+            for (let i = 0; i <= 5; i++) {
+                const socket = await this.#connect()
+                if (!socket) return s(false)
 
-    })
+                this.#join_stream(socket)
+                i = 0
+                s(true)
 
+                // await socket error here
+                const code = await new Promise(s => {
+                    socket.on('close', () => s('close'))
+                    socket.on('error', () => s('error'))
+                    socket.on('end', () => s('close'))
+                })
+
+                if (code == 'close') {
+                    this.emit('close')
+                    return
+                }
+
+                process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in 1 sec`)
+                await new Promise(s => setTimeout(s, 1000))
+            }
+            s(false)
+        })
+    }
+
+    static async connect(options: TcpNetConnectOpts) {
+        const instance = new this(options)
+        const success = await instance.#init()
+        return success ? instance : null
+    }
+
+    static async update(socket: Socket) {
+        const instance = new this({ host: '', port: 1 })
+        socket.on('error', () => instance.emit('error'))
+        socket.on('close', () => instance.emit('close'))
+        await instance.#join_stream(socket)
+        return instance
+    }
+
+    async write(data: any) {
+        const buffer = Buffer.from(JSON.stringify(data) + '\n')
+        this.#input.write(buffer)
+    }
 }
+
 
 
 export class BuiltinTransporter implements SpiderMeshTransporter {
@@ -80,7 +129,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     #listeners = new Map<string, Map<string, (from_node_id: string, data: any) => any>>
 
     #nodes_map = new Map<string, TcpNode & {
-        socket?: Duplex
+        socket: StableTCP
     }>
 
     #events_map = new Map<string, Set<string>>()
@@ -112,10 +161,20 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     async #init() {
 
         // Create UDP
-        const udp = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-        udp.bind(UDP_MULTICAST_PORT, () => udp.addMembership(MULTICAST_IP))
-        udp.on('message', (raw, rinfo) => {
-            this.#on_message(rinfo.address, raw)
+        const udp = dgram.createSocket({ type: 'udp4', reuseAddr: true })
+        udp.bind({
+            address: '0.0.0.0',
+            exclusive: false,
+            port: UDP_PORT
+        })
+
+        udp.on('message', async (raw, rinfo) => {
+            try {
+                const json = JSON.parse(raw.toString('utf-8'))
+                this.#on_message(rinfo.address, json)
+
+            } catch (e) {
+            }
         })
 
 
@@ -132,9 +191,12 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             }
         })
 
-        server.on('connection', socket => {
+        server.on('connection', async socket => {
             const remote_host = socket.remoteAddress?.split(':')?.pop()
-            remote_host && socket.on('data', data => this.#on_message(remote_host, data, socket))
+            if (remote_host) {
+                const stable_tcp = await StableTCP.update(socket)
+                stable_tcp.on('data', data => this.#on_message(remote_host, data, stable_tcp))
+            }
         })
 
 
@@ -146,19 +208,20 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             udp,
             tcp_port,
             next: async () => {
-                const broadcast_ips = [] as string[]
+                const broadcast_ips = ['127.0.0.1'] as string[]
 
-                // Add multicast IP
-                MULTICAST_IP && broadcast_ips.push(MULTICAST_IP)
-
-                // Scan subnet IP 
-                if (PRIVATE_SUBNET) {
-                    const current_ips = Object.values(networkInterfaces()).map(c => c?.map(f => f.address) || []).flat(2)
+                // Add multicast IP or scan all subnets
+                const current_ips = Object.values(networkInterfaces()).map(c => c?.map(f => f.address) || []).flat(2)
+                const current_ip = current_ips.find(ip => ip.startsWith('192.168'))
+                const subnet = current_ip?.split('.').slice(0, 3).join('.')
+                if (subnet) {
                     for (let i = 1; i <= 255; i++) {
-                        const host = `${PRIVATE_SUBNET}.${i}`
+                        const host = `${subnet}.${i}`
                         !current_ips.includes(host) && broadcast_ips.push(host)
                     }
                 }
+
+
 
                 // Hello via UDP
                 broadcast_ips.forEach(host => this.#hello(undefined, { host, socket: udp }))
@@ -167,9 +230,11 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 if (SEEDING_IP) {
                     const ips = SEEDING_IP.split(',').map(c => c.trim().split(':'))
                     await Promise.all(ips.map(async ([host, port]) => {
-                        const socket = await initAutoReconnectConnection({ host, port: Number(port), keepAlive: true, timeout: 5000 })
-                        socket?.on('data', data => this.#on_message(host, data, socket))
-                        socket && this.#hello(socket)
+                        const stable_tcp = await StableTCP.connect({ host, port: Number(port), keepAlive: true, timeout: 5000 })
+                        if (stable_tcp) {
+                            stable_tcp.on('data', data => this.#on_message(host, data, stable_tcp))
+                            this.#hello(stable_tcp)
+                        }
                     }))
                 }
 
@@ -194,7 +259,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
 
 
-    async #hello(socket?: Duplex, udp_socket?: { socket: dgram.Socket, host: string }) {
+    async #hello(socket?: StableTCP, udp_socket?: { socket: dgram.Socket, host: string }) {
         const { tcp_port } = await this.#initing
 
         const msg: MeshMessage = {
@@ -208,29 +273,33 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             sender_node_id: this.node_id,
             topic: '#hello'
         }
+        if (socket) {
+            socket?.write(msg)
+        }
+
+        if (udp_socket) {
+            const buffer = Buffer.from(JSON.stringify(msg), 'utf8')
+            udp_socket?.socket.send(buffer, UDP_PORT, udp_socket.host)
+        }
 
 
-        const buffer = Buffer.from(JSON.stringify(msg), 'utf8')
-        socket?.write(buffer)
-        udp_socket?.socket.send(buffer, UDP_MULTICAST_PORT, udp_socket.host)
     }
 
 
-    async #on_message(remote_address: string, data: Buffer, tcp_socket?: Duplex) {
+    async #on_message(remote_address: string, msg: MeshMessage, old_socket?: StableTCP) {
         if (!remote_address) return
-        const [_, msg] = await tryCatch<MeshMessage>(() => JSON.parse(data.toString('utf8')))
         if (!msg) return
         if (msg.sender_node_id == this.node_id) return
 
         // New node
         if (msg.topic == `#hello` && msg.namespace == this.namespace) {
-            return this.#add_node(remote_address, msg.data as HelloMessage, tcp_socket)
+            return this.#add_node(remote_address, msg.data as HelloMessage, old_socket)
         }
 
         this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
     }
 
-    async #add_node(host: string, new_node: HelloMessage, tcp_socket?: Duplex) {
+    async #add_node(host: string, new_node: HelloMessage, tcp_socket?: StableTCP) {
 
 
         process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
@@ -238,7 +307,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const remote_peers_included = new_node.peers.some(p => p.node_id == this.node_id)
 
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
-            const socket = await initAutoReconnectConnection({ host, port: new_node.port, keepAlive: true, timeout: 5000 }) || tcp_socket
+            const socket = await StableTCP.connect({ host, port: new_node.port, keepAlive: true, timeout: 5000 }) || tcp_socket
             if (!socket) return
 
             const on_offline = (e) => {
@@ -316,11 +385,10 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             sender_node_id: this.node_id,
             topic: event || node_id || '#'
         }
-        const buffer = Buffer.from(JSON.stringify(msg), 'utf8')
 
         if (node_id) {
             const node = this.#nodes_map.get(node_id)
-            node?.socket?.write(buffer)
+            node?.socket?.write(msg)
             return
         }
 
@@ -328,7 +396,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
         for (const node_id of this.#events_map.get(event) || []) {
             const node = this.#nodes_map.get(node_id)
-            node?.socket?.write(buffer)
+            node?.socket?.write(msg)
         }
 
 
