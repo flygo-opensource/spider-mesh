@@ -1,4 +1,3 @@
-import { EventEmitter } from "stream";
 import { RPCOptions } from "./RPCOptions";
 import { SpiderMeshNode } from "./SpiderMeshNode";
 import { ServiceNodeMonitor } from "./SpiderMesh";

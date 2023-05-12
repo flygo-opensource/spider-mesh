@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import dgram from 'dgram'
-import { createConnection, createServer, Server, NetConnectOpts, Socket } from "net";
+import { createConnection, createServer, Server, Socket } from "net";
 import { networkInterfaces } from 'os'
 import { EventEmitter } from "events";
 import { SpiderMeshTransporter } from "./SpiderMeshTransporter";
@@ -36,27 +36,17 @@ class StableTCP extends EventEmitter {
 
     #input = new PassThrough()
 
-    private constructor(
-        private options: TcpNetConnectOpts
-    ) {
+
+    private constructor() {
         super()
     }
 
-    async #connect() {
-        return new Promise<Socket | null>(s => {
-            const socket = createConnection(this.options)
-            socket.on('ready', () => s(socket))
-            socket.on('connect', () => s(socket))
-            socket.on('timeout', () => s(null))
-            socket.on('error', (e) => s(null))
-        })
-    }
 
-
-    #join_stream(socket: Socket) {
+    async #connect(socket: Socket) {
         let buffer = ''
         this.#input.removeAllListeners('data')
         this.#input.on('data', data => socket.write(data))
+
         socket.on('data', msg => {
             buffer += msg.toString('utf8')
             if (buffer.endsWith('\n')) {
@@ -69,15 +59,32 @@ class StableTCP extends EventEmitter {
                 }
             }
         })
+
+        const code = await new Promise(s => {
+            socket.on('close', () => s('close'))
+            socket.on('error', () => s('error'))
+            socket.on('end', () => s('close'))
+        })
+
+        if (code == 'close') {
+            this.emit('close')
+        }
     }
 
-    async #init() {
-        return await new Promise<boolean>(async s => {
+    static async init(options: TcpNetConnectOpts) {
+        const $this = new this()
+        await new Promise<boolean>(async s => {
             for (let i = 0; i <= 5; i++) {
-                const socket = await this.#connect()
+                const socket = await new Promise<Socket | null>(s => {
+                    const socket = createConnection(options)
+                    socket.on('ready', () => s(socket))
+                    socket.on('connect', () => s(socket))
+                    socket.on('timeout', () => s(null))
+                    socket.on('error', (e) => s(null))
+                })
                 if (!socket) return s(false)
 
-                this.#join_stream(socket)
+                await $this.#connect(socket)
                 i = 0
                 s(true)
 
@@ -89,29 +96,26 @@ class StableTCP extends EventEmitter {
                 })
 
                 if (code == 'close') {
-                    this.emit('close')
+                    $this.emit('close')
                     return
                 }
+
 
                 process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in 1 sec`)
                 await new Promise(s => setTimeout(s, 1000))
             }
             s(false)
         })
+        return $this
     }
 
-    static async connect(options: TcpNetConnectOpts) {
-        const instance = new this(options)
-        const success = await instance.#init()
-        return success ? instance : null
-    }
 
-    static async update(socket: Socket) {
-        const instance = new this({ host: '', port: 1 })
-        socket.on('error', () => instance.emit('error'))
-        socket.on('close', () => instance.emit('close'))
-        await instance.#join_stream(socket)
-        return instance
+    static async join(socket: Socket) {
+        const $this = new this()
+        socket.on('error', () => $this.emit('error'))
+        socket.on('close', () => $this.emit('close'))
+        await $this.#connect(socket)
+        return $this
     }
 
     async write(data: any) {
@@ -194,7 +198,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         server.on('connection', async socket => {
             const remote_host = socket.remoteAddress?.split(':')?.pop()
             if (remote_host) {
-                const stable_tcp = await StableTCP.update(socket)
+                const stable_tcp = await StableTCP.join(socket)
                 stable_tcp.on('data', data => this.#on_message(remote_host, data, stable_tcp))
             }
         })
@@ -230,7 +234,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 if (SEEDING_IP) {
                     const ips = SEEDING_IP.split(',').map(c => c.trim().split(':'))
                     await Promise.all(ips.map(async ([host, port]) => {
-                        const stable_tcp = await StableTCP.connect({ host, port: Number(port), keepAlive: true, timeout: 5000 })
+                        const stable_tcp = await StableTCP.init({ host, port: Number(port), keepAlive: true, timeout: 5000 })
                         if (stable_tcp) {
                             stable_tcp.on('data', data => this.#on_message(host, data, stable_tcp))
                             this.#hello(stable_tcp)
@@ -307,7 +311,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const remote_peers_included = new_node.peers.some(p => p.node_id == this.node_id)
 
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
-            const socket = await StableTCP.connect({ host, port: new_node.port, keepAlive: true, timeout: 5000 }) || tcp_socket
+            const socket = await StableTCP.init({ host, port: new_node.port, keepAlive: true, timeout: 5000 }) || tcp_socket
             if (!socket) return
 
             const on_offline = (e) => {

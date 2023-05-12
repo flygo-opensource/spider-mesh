@@ -1,18 +1,16 @@
-import { Duplex } from "stream"
-import { SpiderMesh } from "../SpiderMesh"
-
+import { PassThrough } from "stream" 
 
 export const EventSubscriberHook = Symbol.for('SubscribeEventHook')
 
 export type EventSubscriberMetadata = {
     method: string
     event: string,
-    requests: Duplex
+    requests: PassThrough
 }
 
 export const createMicroserviceEvent = <T>(event: string) => {
 
-    const requests = new Duplex()
+    const requests = new PassThrough()
 
     const subscribe_event_decorator: () => MethodDecorator = () => <T>(
         target: Object,
