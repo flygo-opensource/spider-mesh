@@ -2,7 +2,7 @@ import { RPCOptions } from "./RPCOptions";
 import { SpiderMeshNode } from "./SpiderMeshNode";
 import { ServiceNodeMonitor } from "./SpiderMesh";
 
-export type RemoteService<T> = (
+export type RemoteService<T = {}> = (
     {
         [K in keyof T as (T[K] extends (...args: any) => any ? K : '')]: T[K] extends (...args: any) => any ? ((...args: Parameters<T[K]>) => Promise<Awaited<ReturnType<T[K]>>>) : null
     } & {
@@ -12,5 +12,6 @@ export type RemoteService<T> = (
         $monitor: (cb: ServiceNodeMonitor) => {
             unsubscribe: Function
         },
+        $wait: <T>(cb: (nodes: SpiderMeshNode[], index: number) => T | Promise<T>, delay?: number) => Promise<T>
     }
-)
+) 

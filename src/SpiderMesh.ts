@@ -323,16 +323,32 @@ export class SpiderMesh {
         return new Proxy({}, {
             get: (_, method: string) => {
 
-                if (method == '$list_nodes') return () => [...this.#nodes.values()].filter(node => node.services.includes(service_name))
-                if (method == '$monitor') return (cb: ServiceNodeMonitor) => {
-                    const hid = randomUUID()
-                    const map = this.#services_status_monitor.get(service_name) || new Map<string, ServiceNodeMonitor>()
-                    map.set(hid, cb)
-                    this.#services_status_monitor.set(service_name, map)
-                    return {
-                        unsubscribe: () => map.delete(hid)
+                if (method == '$wait') return (
+                    async (cb, delay: number = 1000) => {
+                        for (let i = 0; true; i++) {
+                            const nodes = [...this.#nodes.values()].filter(node => node.services.includes(service_name))
+                            const result = await cb(nodes, i)
+                            if (result) return result
+                            await new Promise(s => setTimeout(s, delay))
+                        }
                     }
-                }
+                ) as RemoteService<T>['$wait']
+
+                if (method == '$list_nodes') return (
+                    () => [...this.#nodes.values()].filter(node => node.services.includes(service_name))
+                ) as RemoteService<T>['$list_nodes']
+
+                if (method == '$monitor') return (
+                    cb => {
+                        const hid = randomUUID()
+                        const map = this.#services_status_monitor.get(service_name) || new Map<string, ServiceNodeMonitor>()
+                        map.set(hid, cb)
+                        this.#services_status_monitor.set(service_name, map)
+                        return {
+                            unsubscribe: () => map.delete(hid)
+                        }
+                    }
+                ) as RemoteService<T>['$monitor']
 
                 if (actions.has(method) || method.startsWith('$set_')) {
                     return new DeepProxy(
