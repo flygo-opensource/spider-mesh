@@ -11,6 +11,7 @@ import os from 'os'
 import { BuiltinTransporter } from './BuiltinTransporter'
 import { listEventSubscribers } from './decorators/createMicroserviceEvent'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady'
+import { listMicroserviceFactories } from './decorators/Microservice'
 
 
 export type ServiceNodeMonitor = (online: boolean, node: SpiderMeshNode) => any
@@ -362,30 +363,22 @@ export class SpiderMesh {
         }) as RemoteService<T>
     }
 
-    async active_local_services(list: any[]) {
-
-        if (list.length == 0) return
-
-        for (const instance of list) {
-
-            const prototype = Object.getPrototypeOf(instance)
-            const name = prototype.constructor.name
-
-            this.#local_services.set(name, instance)
-
-            // Active event requester
-            for (const { event, requests } of listEventSubscribers(prototype)) {
-                requests.on('data', data => this.publish(event, data))
-            }
+    async active_local_service(instance: any) {
 
 
-            // Active event subscribers
-            const event_subscribers = listEventSubscribers(prototype)
-            for (const { event, method } of event_subscribers) {
-                this.subscribe(event, (_, data) => instance[method]?.(data))
-            }
 
+        const prototype = Object.getPrototypeOf(instance)
+        const name = prototype.constructor.name
+
+        this.#local_services.set(name, instance)
+
+
+        // Active event subscribers
+        const event_subscribers = listEventSubscribers(prototype)
+        for (const { event, method } of event_subscribers) {
+            this.subscribe(event, (_, data) => instance[method]?.(data))
         }
+
 
         // Broadcast running services
         const me = await this.$metadata()
@@ -401,11 +394,15 @@ export class SpiderMesh {
         }
 
         // Active ready hook
-        for (const instance of list) {
+        while (true) {
+            await new Promise(s => setTimeout(s, 1000))
+            if (this.#local_services.size != listMicroserviceFactories().length) continue
             for (const method of listReadyHookMethods(Object.getPrototypeOf(instance))) {
                 instance[method]?.()
             }
+            break
         }
+
 
 
     }

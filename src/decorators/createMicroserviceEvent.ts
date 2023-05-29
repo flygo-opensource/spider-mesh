@@ -1,49 +1,56 @@
-import { PassThrough } from "stream" 
+import { SpiderMesh } from "../SpiderMesh"
+
+
 
 export const EventSubscriberHook = Symbol.for('SubscribeEventHook')
 
 export type EventSubscriberMetadata = {
     method: string
     event: string,
-    requests: PassThrough
+
 }
 
-export const createMicroserviceEvent = <T>(event: string) => {
 
-    const requests = new PassThrough()
 
-    const subscribe_event_decorator: () => MethodDecorator = () => <T>(
-        target: Object,
-        method: string | symbol,
-        descriptor: TypedPropertyDescriptor<T>
-    ) => {
-        if (typeof method == 'string') {
-            const value: EventSubscriberMetadata = {
-                method,
-                event,
-                requests
-            }
-            Object.defineProperty(descriptor.value, EventSubscriberHook, { value })
-        }
-    }
+export const createMicroserviceEvent = <T>(event: string, decorator: () => ClassDecorator = () => (c) => c) => {
 
-    const publisher = (data: T) => requests.emit(event, data)
+    @decorator()
+    class C {
 
-    class EventPublisherClass {
+        static Payload = {} as T
+        constructor(public sm: SpiderMesh) { }
         publish(data: T) {
-            requests.emit(event, data)
+            this.sm.publish(event, data)
         }
+        subscribe(cb: (node: string, data: T) => any) {
+            this.sm.subscribe(event, cb)
+        }
+
+        static subscribe() {
+            return <T>(
+                target: Object,
+                method: string | symbol,
+                descriptor: TypedPropertyDescriptor<T>
+            ) => {
+                if (typeof method == 'string') {
+                    const value: EventSubscriberMetadata = {
+                        method,
+                        event,
+                    }
+                    Object.defineProperty(descriptor.value, EventSubscriberHook, { value })
+                }
+            }
+
+        }
+
     }
+    Object.defineProperty(C, 'name', { value: event })
+    return C
 
-
-
-
-    return [EventPublisherClass, subscribe_event_decorator, publisher] as [
-        typeof EventPublisherClass,
-        typeof subscribe_event_decorator,
-        typeof publisher
-    ]
 }
+
+
+
 
 
 export const listEventSubscribers = (target) => {
@@ -54,6 +61,5 @@ export const listEventSubscribers = (target) => {
             metadata && list.push(metadata)
         }
     }
-
     return list
 } 
