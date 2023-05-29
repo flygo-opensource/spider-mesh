@@ -61,14 +61,17 @@ export class SpiderMesh {
 
     #services_status_monitor = new Map<string, Map<string, ServiceNodeMonitor>>()
 
+    public static readonly spider_mesh_instances :SpiderMesh[] = []
+
     private constructor() { }
 
     static async init(...transporters: SpiderMeshTransporterFactory[]) {
         const ms = new this()
         transporters.length == 0 && transporters.push(BuiltinTransporter)
         for (const transporter of transporters) {
-            await ms.add_transporter(transporter)
+            await ms.add_transporter(transporter) 
         }
+        this.spider_mesh_instances.push(ms)
         return ms
     }
 
@@ -80,7 +83,6 @@ export class SpiderMesh {
             name,
             version,
             path: process.cwd(),
-            argv: process.argv,
             uptime: process.uptime(),
             hostname: os.hostname(),
             plaform: os.platform(),
@@ -363,10 +365,8 @@ export class SpiderMesh {
         }) as RemoteService<T>
     }
 
-    async active_local_service(instance: any) {
-
-
-
+    async active_local_service(instance: any) { 
+        
         const prototype = Object.getPrototypeOf(instance)
         const name = prototype.constructor.name
 
@@ -406,8 +406,6 @@ export class SpiderMesh {
 
 
     }
-
-
 
     async publish<T = any>(topic: string, data: T) {
         this.#transporters.forEach(t => t.publish(topic, null, data))

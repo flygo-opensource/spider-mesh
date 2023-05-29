@@ -22,6 +22,7 @@ type TcpNode = {
     port: number
     node_id: string
     listening_events: string[]
+    version: number
 }
 
 
@@ -29,7 +30,7 @@ type HelloMessage = TcpNode & {
     peers: TcpNode[]
 }
 
-const UDP_PORT = Number(process.env.UDP_PORT || 10001)
+const UDP_PORT = Number(process.env.UDP_PORT || 10000)
 const SEEDING_IP = process.env.SEEDING_IP
 
 class StableTCP extends EventEmitter {
@@ -58,17 +59,7 @@ class StableTCP extends EventEmitter {
 
                 }
             }
-        })
-
-        const code = await new Promise(s => {
-            socket.on('close', () => s('close'))
-            socket.on('error', () => s('error'))
-            socket.on('end', () => s('close'))
-        })
-
-        if (code == 'close') {
-            this.emit('close')
-        }
+        }) 
     }
 
     static async init(options: TcpNetConnectOpts) {
@@ -131,7 +122,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     #node_offline_callbacks = new Map<string, (node_id: string) => any>
     #node_online_callbacks = new Map<string, (node_id: string) => any>
     #listeners = new Map<string, Map<string, (from_node_id: string, data: any) => any>>
-
+    #version = Date.now()
     #nodes_map = new Map<string, TcpNode & {
         socket: StableTCP
     }>
@@ -150,7 +141,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         public readonly node_id: string,
         public readonly namespace: string,
     ) {
-        process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Online ${node_id}`)
+        process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Online ${node_id}:${UDP_PORT}`)
         setTimeout(async () => {
             while (true) {
                 this.#initing = this.#init()
@@ -168,15 +159,14 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const udp = dgram.createSocket({ type: 'udp4', reuseAddr: true })
         udp.bind({
             address: '0.0.0.0',
-            exclusive: false,
-            port: UDP_PORT
-        })
+            port: UDP_PORT,
+
+        }, () => udp.setBroadcast(true))
 
         udp.on('message', async (raw, rinfo) => {
             try {
                 const json = JSON.parse(raw.toString('utf-8'))
                 this.#on_message(rinfo.address, json)
-
             } catch (e) {
             }
         })
@@ -184,7 +174,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
         // Find free port
         const { tcp_port, server } = await new Promise<{ server: Server, tcp_port: number }>(async s => {
-            for (let tcp_port = 10000; true; tcp_port++) {
+            for (let tcp_port = 10001; true; tcp_port++) {
                 const server = createServer()
                 server.listen(tcp_port)
                 const success = await new Promise(s => {
@@ -212,7 +202,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             udp,
             tcp_port,
             next: async () => {
-                const broadcast_ips = ['127.0.0.1'] as string[]
+                const broadcast_ips = ['255.255.255.255'] as string[]
 
                 // Add multicast IP or scan all subnets
                 const current_ips = Object.values(networkInterfaces()).map(c => c?.map(f => f.address) || []).flat(2)
@@ -225,10 +215,10 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                     }
                 }
 
-
-
                 // Hello via UDP
-                broadcast_ips.forEach(host => this.#hello(undefined, { host, socket: udp }))
+                broadcast_ips.forEach(host => {
+                    this.#hello(undefined, { host, socket: udp })
+                })
 
                 // Scan remote node ( <= internet)
                 if (SEEDING_IP) {
@@ -271,7 +261,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 node_id: this.node_id,
                 port: tcp_port,
                 listening_events: ['#hello', ...this.#listeners.keys()],
-                peers: [... this.#nodes_map.values()].map(({ host, listening_events, node_id, port }) => ({ listening_events, node_id, port, host }))
+                peers: [... this.#nodes_map.values()].map(({ host, listening_events, node_id, port }) => ({ listening_events, node_id, port, host })),
+                version: this.#version
             } as HelloMessage,
             namespace: this.namespace,
             sender_node_id: this.node_id,
@@ -291,11 +282,12 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
 
     async #on_message(remote_address: string, msg: MeshMessage, old_socket?: StableTCP) {
+
         if (!remote_address) return
         if (!msg) return
         if (msg.sender_node_id == this.node_id) return
 
-        // New node
+        // New node 
         if (msg.topic == `#hello` && msg.namespace == this.namespace) {
             return this.#add_node(remote_address, msg.data as HelloMessage, old_socket)
         }
@@ -308,12 +300,13 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
         process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
 
-        const remote_peers_included = new_node.peers.some(p => p.node_id == this.node_id)
+        const remote_info = new_node.peers.find(p => p.node_id == this.node_id)
+        const peer_updated = remote_info && remote_info.version == this.#version
+ 
 
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
             const socket = await StableTCP.init({ host, port: new_node.port, keepAlive: true, timeout: 5000 }) || tcp_socket
             if (!socket) return
-
             const on_offline = (e) => {
                 process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node.node_id}`)
                 this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
@@ -327,8 +320,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             socket.on('error', on_offline)
             socket.on('close', on_offline)
             this.#nodes_map.set(new_node.node_id, { ...new_node, host, socket })
-
-            !remote_peers_included && await this.#hello(socket)
+            !peer_updated && await this.#hello(socket)
         }
 
 
@@ -338,7 +330,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             this.#events_map.get(event)?.add(new_node.node_id)
         }
 
-        remote_peers_included && this.#node_online_callbacks.forEach(fn => fn(new_node.node_id))
+        remote_info && this.#node_online_callbacks.forEach(fn => fn(new_node.node_id))
 
 
     }
@@ -358,7 +350,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     #broadcast_listen: NodeJS.Timer
     listen<T = any>(topic: string, cb: (node_id: string, data: T) => any) {
-
+        this.#version = Date.now()
         this.#broadcast_listen && clearTimeout(this.#broadcast_listen)
         this.#broadcast_listen = setTimeout(() => {
             // Notify about update
@@ -369,6 +361,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         this.#listeners.get(topic)?.set(id, cb)
         return {
             unsubscribe: () => {
+                this.#version = Date.now()
                 this.#listeners.get(topic)?.delete(id)
                 this.#listeners.get(topic)?.size == 0 && this.#listeners.delete(topic)
             }

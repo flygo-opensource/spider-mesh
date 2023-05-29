@@ -5,4 +5,5 @@ export { SpiderMeshTransporter, SpiderMeshTransporterFactory } from './src/Spide
 export { RemoteService } from './src/RemoteService'
 export { RPCOptions, RPCOptionsList } from './src/RPCOptions'
 export { OnMicroserviceReady } from './src/decorators/OnMicroserviceReady'
-export { createMicroserviceEvent } from './src/decorators/createMicroserviceEvent' 
+export { createMicroserviceEvent } from './src/decorators/createMicroserviceEvent'
+export { Microservice } from './src/decorators/Microservice'
