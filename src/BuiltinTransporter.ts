@@ -36,7 +36,7 @@ const SEEDING_IP = process.env.SEEDING_IP
 class StableTCP extends EventEmitter {
 
     #input = new PassThrough()
-
+    static #separator = String.fromCharCode(0x1E)
 
     private constructor() {
         super()
@@ -49,17 +49,25 @@ class StableTCP extends EventEmitter {
         this.#input.on('data', data => socket.write(data))
 
         socket.on('data', msg => {
-            buffer += msg.toString('utf8')
-            if (buffer.endsWith('\n')) {
-                try {
-                    const json = JSON.parse(buffer)
-                    buffer = ''
-                    this.emit('data', json)
-                } catch (e) {
 
+            buffer += msg.toString('utf8')
+            if (buffer.endsWith(StableTCP.#separator)) {
+                for (const part of buffer.split(StableTCP.#separator)) {
+                    if (part != '') {
+                        try {
+                            const json = JSON.parse(part)
+                            buffer = ''
+                            this.emit('data', json)
+                        } catch (e) {
+                            console.log({
+                                can_not_decode: part
+                            })
+                        }
+                    }
                 }
+                buffer = ''
             }
-        }) 
+        })
     }
 
     static async init(options: TcpNetConnectOpts) {
@@ -110,7 +118,8 @@ class StableTCP extends EventEmitter {
     }
 
     async write(data: any) {
-        const buffer = Buffer.from(JSON.stringify(data) + '\n')
+        const msg = JSON.stringify(data) + StableTCP.#separator
+        const buffer = Buffer.from(msg)
         this.#input.write(buffer)
     }
 }
@@ -302,7 +311,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
         const remote_info = new_node.peers.find(p => p.node_id == this.node_id)
         const peer_updated = remote_info && remote_info.version == this.#version
- 
+
 
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
             const socket = await StableTCP.init({ host, port: new_node.port, keepAlive: true, timeout: 5000 }) || tcp_socket
