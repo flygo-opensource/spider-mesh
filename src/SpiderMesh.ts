@@ -366,6 +366,7 @@ export class SpiderMesh {
     }
 
     async active_local_service(instance: any) { 
+
         
         const prototype = Object.getPrototypeOf(instance)
         const name = prototype.constructor.name
@@ -386,21 +387,15 @@ export class SpiderMesh {
 
         // Wait remote service ready
         while (true) {
-            await new Promise(s => setTimeout(s, 1000))
-            process.env.SPIDERMESH_DEBUG && console.log([...SpiderMesh.#LinkingServices.values()])
+            await new Promise(s => setTimeout(s, 1000)) 
             if ([...SpiderMesh.#LinkingServices.values()].every(service => service.online)) {
                 break
             }
         }
 
         // Active ready hook
-        while (true) {
-            await new Promise(s => setTimeout(s, 1000))
-            if (this.#local_services.size != listMicroserviceFactories().length) continue
-            for (const method of listReadyHookMethods(Object.getPrototypeOf(instance))) {
-                instance[method]?.()
-            }
-            break
+        for (const method of listReadyHookMethods(Object.getPrototypeOf(instance))) {
+            instance[method]?.()
         }
 
 

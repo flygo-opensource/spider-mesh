@@ -100,7 +100,7 @@ class StableTCP extends EventEmitter {
                 }
 
 
-                process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in 1 sec`)
+                process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in 1 sec`)
                 await new Promise(s => setTimeout(s, 1000))
             }
             s(false)
@@ -150,7 +150,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         public readonly node_id: string,
         public readonly namespace: string,
     ) {
-        process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Online ${node_id}:${UDP_PORT}`)
+        process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Online ${node_id}:${UDP_PORT}`)
         setTimeout(async () => {
             while (true) {
                 this.#initing = this.#init()
@@ -307,7 +307,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     async #add_node(host: string, new_node: HelloMessage, tcp_socket?: StableTCP) {
 
 
-        process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
+        process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
 
         const remote_info = new_node.peers.find(p => p.node_id == this.node_id)
         const peer_updated = remote_info && remote_info.version == this.#version
@@ -317,7 +317,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             const socket = await StableTCP.init({ host, port: new_node.port, keepAlive: true, timeout: 5000 }) || tcp_socket
             if (!socket) return
             const on_offline = (e) => {
-                process.env.SPIDERMESH_TCP_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node.node_id}`)
+                process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node.node_id}`)
                 this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
                 const node = this.#nodes_map.get(new_node.node_id)
                 node && node.listening_events.map(evt => {
