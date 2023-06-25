@@ -11,6 +11,8 @@ export type EventSubscriberMetadata = {
 }
 
 
+export const ListenEventList = new Set<string>()
+
 
 export const createMicroserviceEvent = <T>(event: string, decorator: () => ClassDecorator = () => (c) => c) => {
 
@@ -27,6 +29,7 @@ export const createMicroserviceEvent = <T>(event: string, decorator: () => Class
         }
 
         static subscribe() {
+            ListenEventList.add(event)
             return <T>(
                 target: Object,
                 method: string | symbol,

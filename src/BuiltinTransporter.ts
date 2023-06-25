@@ -1,11 +1,11 @@
 import { randomUUID } from "crypto";
 import dgram from 'dgram'
 import { createConnection, createServer, Server, Socket } from "net";
-import { networkInterfaces } from 'os'
 import { EventEmitter } from "events";
 import { SpiderMeshTransporter } from "./SpiderMeshTransporter";
 import { TcpNetConnectOpts } from "net";
 import { PassThrough } from "stream";
+import { ListenEventList } from "./decorators/createMicroserviceEvent";
 
 
 
@@ -21,7 +21,7 @@ type TcpNode = {
     host: string
     port: number
     node_id: string
-    listening_events: string[]
+    listening: string[]
     version: number
 }
 
@@ -31,7 +31,9 @@ type HelloMessage = TcpNode & {
 }
 
 const UDP_PORT = Number(process.env.UDP_PORT || 10000)
-const SEEDING_IP = process.env.SEEDING_IP
+const SEEDING_IP_RANGES = process.env.SEEDING_IP_RANGE
+const SEEDING_IPS = process.env.SEEDING_IP
+
 
 class StableTCP extends EventEmitter {
 
@@ -162,6 +164,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         })
 
     }
+
+
     async #init() {
 
         // Create UDP
@@ -169,7 +173,6 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         udp.bind({
             address: '0.0.0.0',
             port: UDP_PORT,
-
         }, () => udp.setBroadcast(true))
 
         udp.on('message', async (raw, rinfo) => {
@@ -214,32 +217,29 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 const broadcast_ips = ['255.255.255.255'] as string[]
 
                 // Add multicast IP or scan all subnets
-                const current_ips = Object.values(networkInterfaces()).map(c => c?.map(f => f.address) || []).flat(2)
-                const current_ip = current_ips.find(ip => ip.startsWith('192.168'))
-                const subnet = current_ip?.split('.').slice(0, 3).join('.')
-                if (subnet) {
-                    for (let i = 1; i <= 255; i++) {
-                        const host = `${subnet}.${i}`
-                        !current_ips.includes(host) && broadcast_ips.push(host)
+                if (SEEDING_IP_RANGES) {
+                    const list = SEEDING_IP_RANGES.split(',').map(ip => ip.trim())
+                    for (const range of list) {
+                        const subnet = range.split('.').slice(0, 3).join('.')
+                        for (let i = 1; i <= 255; i++) {
+                            const host = `${range}.${i}`
+                            broadcast_ips.push(host)
+                        }
+                    }
+                }
+
+                // Add seeding ip
+                if (SEEDING_IPS) {
+                    const list = SEEDING_IPS.split(',').map(ip => ip.trim())
+                    for (const host of list) {
+                        broadcast_ips.push(host)
                     }
                 }
 
                 // Hello via UDP
                 broadcast_ips.forEach(host => {
                     this.#hello(undefined, { host, socket: udp })
-                })
-
-                // Scan remote node ( <= internet)
-                if (SEEDING_IP) {
-                    const ips = SEEDING_IP.split(',').map(c => c.trim().split(':'))
-                    await Promise.all(ips.map(async ([host, port]) => {
-                        const stable_tcp = await StableTCP.init({ host, port: Number(port), keepAlive: true, timeout: 5000 })
-                        if (stable_tcp) {
-                            stable_tcp.on('data', data => this.#on_message(host, data, stable_tcp))
-                            this.#hello(stable_tcp)
-                        }
-                    }))
-                }
+                }) 
 
             },
             wait_error: () => new Promise<any>(async s => {
@@ -269,8 +269,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             data: {
                 node_id: this.node_id,
                 port: tcp_port,
-                listening_events: ['#hello', ...this.#listeners.keys()],
-                peers: [... this.#nodes_map.values()].map(({ host, listening_events, node_id, port }) => ({ listening_events, node_id, port, host })),
+                listening: [...new Set(['#hello', ...ListenEventList])],
+                peers: [... this.#nodes_map.values()].map(({ host, listening, node_id, port }) => ({ listening, node_id, port, host })),
                 version: this.#version
             } as HelloMessage,
             namespace: this.namespace,
@@ -320,7 +320,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node.node_id}`)
                 this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
                 const node = this.#nodes_map.get(new_node.node_id)
-                node && node.listening_events.map(evt => {
+                node && node.listening.map(evt => {
                     this.#events_map.get(evt)?.delete(node.node_id)
                 })
                 this.#nodes_map.delete(new_node.node_id)
@@ -334,7 +334,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
 
 
-        for (const event of new_node.listening_events) {
+        for (const event of new_node.listening) {
             !this.#events_map.has(event) && this.#events_map.set(event, new Set())
             this.#events_map.get(event)?.add(new_node.node_id)
         }
@@ -357,14 +357,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     }
 
 
-    #broadcast_listen: NodeJS.Timer
     listen<T = any>(topic: string, cb: (node_id: string, data: T) => any) {
         this.#version = Date.now()
-        this.#broadcast_listen && clearTimeout(this.#broadcast_listen)
-        this.#broadcast_listen = setTimeout(() => {
-            // Notify about update
-            this.#nodes_map.forEach(node => this.#hello(node.socket))
-        }, 1000)
         !this.#listeners.has(topic) && this.#listeners.set(topic, new Map())
         const id = randomUUID()
         this.#listeners.get(topic)?.set(id, cb)
