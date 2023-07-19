@@ -15,6 +15,7 @@ export class StableTCP extends EventEmitter {
     #$data = new Subject<void>()
 
     connect: () => Promise<StableTCP | null>
+    
     constructor(options?: TcpNetConnectOpts, socket?: Socket) {
         super()
         this.connect = async () => {

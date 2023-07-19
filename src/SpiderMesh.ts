@@ -16,6 +16,20 @@ import { BehaviorSubject, throwIfEmpty } from 'rxjs'
 
 export type ServiceNodeMonitor = (online: boolean, node: SpiderMeshNode) => any
 
+export type RpcPayload = {
+    id: string,
+    type: string,
+    args: any[],
+    service: string,
+    method: string,
+    response: any,
+    error: any
+    index: number
+    event: string
+    data: any
+    nervermind: boolean
+}
+
 export class SpiderMesh {
 
     static #LinkingServices = new Map<string, { online: boolean }>()
@@ -65,7 +79,6 @@ export class SpiderMesh {
 
     #services_status_monitor = new Map<string, Map<string, ServiceNodeMonitor>>()
 
-
     private constructor() { }
 
     static async init(...transporters: SpiderMeshTransporterFactory[]) {
@@ -98,6 +111,7 @@ export class SpiderMesh {
             services: [...this.#local_services.keys()],
             namespace: this.namespace,
             linked: [...this.#nodes.keys()],
+            isolated_nodes: [... this.#nodes.values()].filter(node => node.isolate).map(node => node.id),
             isolate: this.#$isolated.value
         } as SpiderMeshNodeMetadata
 
@@ -105,99 +119,88 @@ export class SpiderMesh {
         return metadata
     }
 
+    async $update_isolate_mode(active: boolean) {
+        this.#$isolated.next(active)
+        const me = await this.$metadata()
+        for (const [_, transporter] of this.#transporters) {
+            await transporter.publish('#join', null, await this.$metadata())
+        }
+        return me
+    }
+
+    async #active_node_responder(transporter: SpiderMeshTransporter, sender_node_id: string, msg: RpcPayload) {
+
+        if (msg.type == 'rpc') {
+            if (msg.service == 'SpiderMesh' && !msg.method.startsWith('$')) {
+                sender_node_id && transporter.publish(
+                    sender_node_id,
+                    sender_node_id,
+                    {
+                        id: msg.id,
+                        type: 'error',
+                        error: 'NOT_ALLOW'
+                    }
+                )
+                return
+            }
+            const instance = msg.service = 'SpiderMesh' ? this : this.#local_services.get(msg.service)
+
+            const args = msg.args.map(arg => arg != '__FUNCTION__' ? arg : (...args) => {
+                sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'callback', args })
+            })
+            try {
+                const response = await instance?.[msg.method]?.(...args)
+                sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'response', response })
+            } catch (error) {
+                const { code, message } = error as any
+                sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'error', error: code || message || error })
+            }
+            return
+        }
+
+        const request = this.#rpc_queue.get(msg.id)
+        if (!request) return
+
+        if (msg.type == 'callback') {
+            request.args?.[msg.index]?.()
+            return
+        }
+
+        if (msg.type == 'ack') {
+            request.last_ping = Date.now()
+            return
+        }
+
+        if (msg.type == 'error') {
+            request.reject(msg.error)
+            this.#rpc_queue.delete(msg.id)
+            return
+        }
+
+        if (msg.type == 'response') {
+            request.success(msg.response)
+            this.#rpc_queue.delete(msg.id)
+            return
+        }
+
+    }
+
     async add_transporter(factory: { new(...args): SpiderMeshTransporter }) {
         const transporter = new factory(this.node_id, this.namespace)
         transporter.start()
         this.#transporters.set(factory.name, transporter)
-        transporter.on_node_offline(id => {
-            const node = this.#nodes.get(id)
-            if (!node) return
-            process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
-            node.transporters?.delete(factory.name)
-            node.transporters?.size == 0 && this.#nodes.delete(id)
-            node.services.map(service => {
-                this.#services_status_monitor.get(service)?.forEach(
-                    fn => fn(false, node)
-                )
-            })
-            this.#remote_services.forEach(service => {
-                service.nodes = service.nodes?.filter(node => node.id != id)
-            });
-            [...this.#rpc_queue.entries()].forEach(([rid, { reject }]) => {
-                reject(new Error('SERVICE_OFFLINE'))
-                this.#rpc_queue.delete(rid)
-            })
-        })
-
-        transporter.listen<{
-            id: string,
-            type: string,
-            args: any[],
-            service: string,
-            method: string,
-            response: any,
-            error: any
-            index: number
-            event: string
-            data: any
-            nervermind: boolean
-        }>(this.node_id, async (sender_node_id, msg) => {
-
-
-
-            if (msg.type == 'rpc') {
-                const instance = this.#local_services.get(msg.service)
-
-                const args = msg.args.map(arg => arg != '__FUNCTION__' ? arg : (...args) => {
-                    sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'callback', args })
-                })
-                try {
-                    const response = await instance?.[msg.method]?.(...args)
-                    sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'response', response })
-                } catch (error) {
-                    const { code, message } = error as any
-                    sender_node_id && transporter.publish(sender_node_id, sender_node_id, { id: msg.id, type: 'error', error: code || message || error })
-                }
-                return
-            }
-
-            const request = this.#rpc_queue.get(msg.id)
-            if (!request) return
-
-            if (msg.type == 'callback') {
-                request.args?.[msg.index]?.()
-                return
-            }
-
-            if (msg.type == 'ack') {
-                request.last_ping = Date.now()
-                return
-            }
-
-            if (msg.type == 'error') {
-                request.reject(msg.error)
-                this.#rpc_queue.delete(msg.id)
-                return
-            }
-
-            if (msg.type == 'response') {
-                request.success(msg.response)
-                this.#rpc_queue.delete(msg.id)
-                return
-            }
-
-
-        })
-
+        transporter.on_node_offline(node_id => this.#on_node_offline(factory.name, node_id))
+        transporter.listen<RpcPayload>(
+            this.node_id,
+            (sender_node_id, msg) => this.#active_node_responder(transporter, sender_node_id, msg)
+        )
         transporter.listen('#join', (sender_node_id: string, node: SpiderMeshNode) => this.#on_node_discovered(node, transporter))
-
         transporter.on_node_online(async node_id => {
             if (!this.#nodes.has(node_id) && !this.#$isolated.value) {
                 transporter.publish('#join', node_id, await this.$metadata())
             }
-
         })
-
+        this.active_local_service(this)
     }
 
     async #on_node_discovered(node: SpiderMeshNode, transporter: SpiderMeshTransporter) {
@@ -246,6 +249,26 @@ export class SpiderMesh {
 
         !node.linked.includes(this.node_id) && await transporter.publish('#join', null, await this.$metadata())
 
+    }
+
+    async #on_node_offline(transporter_name: string, id: string) {
+        const node = this.#nodes.get(id)
+        if (!node) return
+        process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
+        node.transporters?.delete(transporter_name)
+        node.transporters?.size == 0 && this.#nodes.delete(id)
+        node.services.map(service => {
+            this.#services_status_monitor.get(service)?.forEach(
+                fn => fn(false, node)
+            )
+        })
+        this.#remote_services.forEach(service => {
+            service.nodes = service.nodes?.filter(node => node.id != id)
+        });
+        [...this.#rpc_queue.entries()].forEach(([rid, { reject }]) => {
+            reject(new Error('SERVICE_OFFLINE'))
+            this.#rpc_queue.delete(rid)
+        })
     }
 
     async #caculate_request_node_id(service: string, options: RPCOptions) {
@@ -375,8 +398,6 @@ export class SpiderMesh {
     }
 
     async active_local_service(instance: any) {
-        if (this.#$isolated.value) return
-
 
         const prototype = Object.getPrototypeOf(instance)
         const name = prototype.constructor.name
