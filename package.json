@@ -23,6 +23,7 @@
   "license": "ISC",
   "dependencies": {
     "JSONStream": "^1.3.5",
-    "event-stream": "^4.0.1"
+    "event-stream": "^4.0.1",
+    "rxjs": "^7.8.1"
   }
 }

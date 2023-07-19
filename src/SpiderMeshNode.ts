@@ -10,6 +10,7 @@ export type SpiderMeshNodeMetadata = {
     offline: boolean
     services: string[]
     linked: string[]
+    isolate: boolean
 }
 
 export type SpiderMeshNode = SpiderMeshNodeMetadata & {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { get } from 'http'
 import { readFileSync, existsSync } from 'fs'
-import { networkInterfaces, type } from 'os'
+import { networkInterfaces } from 'os'
 import { DeepProxy } from './DeepProxy'
 import { SpiderMeshNode, SpiderMeshNodeMetadata } from './SpiderMeshNode'
 import { SpiderMeshTransporter, SpiderMeshTransporterFactory } from './SpiderMeshTransporter'
@@ -11,16 +11,20 @@ import os from 'os'
 import { BuiltinTransporter } from './BuiltinTransporter'
 import { listEventSubscribers } from './decorators/createMicroserviceEvent'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady'
-import { listMicroserviceFactories } from './decorators/Microservice'
+import { BehaviorSubject, throwIfEmpty } from 'rxjs'
 
 
 export type ServiceNodeMonitor = (online: boolean, node: SpiderMeshNode) => any
 
 export class SpiderMesh {
 
+    static #LinkingServices = new Map<string, { online: boolean }>()
+    public static readonly spider_mesh_instances: SpiderMesh[] = []
+
     #package_json = existsSync(`package.json`) ? JSON.parse(readFileSync(`package.json`, 'utf8')) || {} : {}
     public readonly node_id = randomUUID()
     public readonly namespace = process.env.NAMESPACE || this.#package_json.name || 'default'
+    #$isolated = new BehaviorSubject<boolean>(false)
 
     #local_services = new Map<string, any>()
     #remote_services = new Map<string, {
@@ -43,7 +47,7 @@ export class SpiderMesh {
     }>
 
     #public_ip = new Promise<string | null>(async s => {
-        while (true) {
+        for (let i = 1; i <= 5; i++) {
             const ip = await new Promise<string | null>(s => {
                 get('http://api.ipify.org', (res) => {
                     res.setEncoding('utf8')
@@ -53,15 +57,14 @@ export class SpiderMesh {
                 }).on('error', () => s(null))
             })
             if (ip && ip != 'Bad Gateway') return s(ip)
-            await new Promise(s => setTimeout(s, 1000))
+            await new Promise(s => setTimeout(s, 100))
         }
+        return s(null)
     })
 
-    static #LinkingServices = new Map<string, { online: boolean }>()
 
     #services_status_monitor = new Map<string, Map<string, ServiceNodeMonitor>>()
 
-    public static readonly spider_mesh_instances :SpiderMesh[] = []
 
     private constructor() { }
 
@@ -69,7 +72,7 @@ export class SpiderMesh {
         const ms = new this()
         transporters.length == 0 && transporters.push(BuiltinTransporter)
         for (const transporter of transporters) {
-            await ms.add_transporter(transporter) 
+            await ms.add_transporter(transporter)
         }
         this.spider_mesh_instances.push(ms)
         return ms
@@ -95,6 +98,7 @@ export class SpiderMesh {
             services: [...this.#local_services.keys()],
             namespace: this.namespace,
             linked: [...this.#nodes.keys()],
+            isolate: this.#$isolated.value
         } as SpiderMeshNodeMetadata
 
         process.env.SPIDERMESH_DEBUG && console.log({ me: metadata })
@@ -103,6 +107,7 @@ export class SpiderMesh {
 
     async add_transporter(factory: { new(...args): SpiderMeshTransporter }) {
         const transporter = new factory(this.node_id, this.namespace)
+        transporter.start()
         this.#transporters.set(factory.name, transporter)
         transporter.on_node_offline(id => {
             const node = this.#nodes.get(id)
@@ -137,6 +142,7 @@ export class SpiderMesh {
             data: any
             nervermind: boolean
         }>(this.node_id, async (sender_node_id, msg) => {
+
 
 
             if (msg.type == 'rpc') {
@@ -179,12 +185,14 @@ export class SpiderMesh {
                 this.#rpc_queue.delete(msg.id)
                 return
             }
+
+
         })
 
         transporter.listen('#join', (sender_node_id: string, node: SpiderMeshNode) => this.#on_node_discovered(node, transporter))
 
         transporter.on_node_online(async node_id => {
-            if (!this.#nodes.has(node_id)) {
+            if (!this.#nodes.has(node_id) && !this.#$isolated.value) {
                 transporter.publish('#join', node_id, await this.$metadata())
             }
 
@@ -195,12 +203,13 @@ export class SpiderMesh {
     async #on_node_discovered(node: SpiderMeshNode, transporter: SpiderMeshTransporter) {
 
         if (node.id == this.node_id) return
+        if (this.#$isolated.value) return
 
         process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] New node `, node)
 
         const discovered = this.#nodes.get(node.id)
         const new_node: SpiderMeshNode = {
-            ...discovered,
+            ...discovered || {},
             ...node,
             transporters: discovered?.transporters || new Map(),
             offline: false
@@ -242,10 +251,10 @@ export class SpiderMesh {
     async #caculate_request_node_id(service: string, options: RPCOptions) {
         const $ = this.#remote_services.get(service)
         if (!$ || $.nodes.length == 0) return null
-        if (options.ip) return [...this.#nodes.values()].find(node => node.public_ip == options.ip || node.ip_addresses.includes(options.ip))?.id
-
-        $.last_call_index = ($.last_call_index + 1) % $.nodes.length
-        return $.nodes[$.last_call_index].id
+        const nodes = [...$.nodes.values()].filter(node => !node.isolate)
+        if (options.ip) return nodes.find(node => node.public_ip == options.ip || node.ip_addresses.includes(options.ip))?.id
+        $.last_call_index = ($.last_call_index + 1) % nodes.length
+        return nodes[$.last_call_index].id
     }
 
     async rpc(service: string, method: string, args: any, options: RPCOptions) {
@@ -329,7 +338,7 @@ export class SpiderMesh {
                 if (method == '$wait') return (
                     async (cb, delay: number = 1000) => {
                         for (let i = 0; true; i++) {
-                            const nodes = [...this.#nodes.values()].filter(node => node.services.includes(service_name))
+                            const nodes = [...this.#nodes.values()].filter(node => node.services.includes(service_name) && !node.isolate)
                             const result = await cb(nodes, i)
                             if (result) return result
                             await new Promise(s => setTimeout(s, delay))
@@ -338,7 +347,7 @@ export class SpiderMesh {
                 ) as RemoteService<T>['$wait']
 
                 if (method == '$list_nodes') return (
-                    () => [...this.#nodes.values()].filter(node => node.services.includes(service_name))
+                    () => [...this.#nodes.values()].filter(node => node.services.includes(service_name) && !node.isolate)
                 ) as RemoteService<T>['$list_nodes']
 
                 if (method == '$monitor') return (
@@ -365,9 +374,10 @@ export class SpiderMesh {
         }) as RemoteService<T>
     }
 
-    async active_local_service(instance: any) { 
+    async active_local_service(instance: any) {
+        if (this.#$isolated.value) return
 
-        
+
         const prototype = Object.getPrototypeOf(instance)
         const name = prototype.constructor.name
 
@@ -387,7 +397,7 @@ export class SpiderMesh {
 
         // Wait remote service ready
         while (true) {
-            await new Promise(s => setTimeout(s, 1000)) 
+            await new Promise(s => setTimeout(s, 1000))
             if ([...SpiderMesh.#LinkingServices.values()].every(service => service.online)) {
                 break
             }

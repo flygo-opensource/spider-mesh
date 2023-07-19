@@ -5,6 +5,7 @@ export type SpiderMeshTransporter = {
     node_id: string
     namespace: string
 
+    start: () => void
     on_node_offline: (cb: (node_id: string) => any) => void
     on_node_online: (cb: (node_id: string) => any) => void
     listen: <T = any>(topic: string, cb: (node_id: string, data: T) => any) => {
