@@ -13,7 +13,4 @@ export type SpiderMeshNodeMetadata = {
     isolate: boolean
 }
 
-export type SpiderMeshNode = SpiderMeshNodeMetadata & {
-    transporters?: Map<string, SpiderMeshTransporter>
-
-}
+export type SpiderMeshNode = SpiderMeshNodeMetadata

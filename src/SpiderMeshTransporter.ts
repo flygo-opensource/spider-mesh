@@ -1,23 +1,29 @@
+import { Observable } from "rxjs"
 
+export type PublishMetadata<T> = {
+    event: string,
+    node_id?: string,
+    data: T,
+    routing_key?: string
+}
+
+export type SpiderMeshTransporterEvent<T> = {
+    data: T,
+    sender_node_id: string
+}
 
 export type SpiderMeshTransporter = {
 
-    node_id: string
-    namespace: string
+    readonly node_id: string
+    readonly namespace: string
+    $nodes_status: Observable<{
+        node_id: string,
+        online: boolean
+    }>
 
-    start: () => void
-    on_node_offline: (cb: (node_id: string) => any) => void
-    on_node_online: (cb: (node_id: string) => any) => void
-    listen: <T = any>(topic: string, cb: (node_id: string, data: T) => any) => {
-        unsubscribe: Function
-    }
-
-    publish<T = any>(
-        event: string,
-        node_id: string | null,
-        data: T,
-        queue?: boolean
-    ): Promise<void>
+    start: () => Promise<void>
+    listen: <T = any>(topic: string) => Observable<SpiderMeshTransporterEvent<T>>
+    publish<T = any>(config: PublishMetadata<T>): Promise<void>
 }
 
 

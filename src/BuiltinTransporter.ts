@@ -1,9 +1,8 @@
 import { randomUUID } from "crypto";
 import dgram from 'dgram'
 import { createServer } from "net";
-import { SpiderMeshTransporter } from "./SpiderMeshTransporter";
-import { ListenEventList } from "./decorators/createMicroserviceEvent";
-import { firstValueFrom, fromEvent, merge } from 'rxjs'
+import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "./SpiderMeshTransporter";
+import { BehaviorSubject, Observable, firstValueFrom, fromEvent, merge } from 'rxjs'
 import { StableTCP } from "./StableTCP";
 import { waitFirstEvent } from "./helpers/waitFirstEvent";
 
@@ -35,7 +34,6 @@ const SEEDING_IPS = process.env.SEEDING_IP
 
 
 
-
 export class BuiltinTransporter implements SpiderMeshTransporter {
 
     #node_offline_callbacks = new Map<string, (node_id: string) => any>
@@ -46,29 +44,29 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     #nodes_map = new Map<string, TcpNode & {
         socket: StableTCP
     }>
-
+    public readonly $nodes_status = new Observable<{ node_id: string, online: boolean }>()
     #events_map = new Map<string, Set<string>>()
-    start: () => void
-    
+    #round_robin_indexes = new Map<string, number>()
+
+
     constructor(
         public readonly node_id: string,
-        public readonly namespace: string,
-    ) {
-        process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Online ${node_id}:${UDP_PORT}`)
-        this.start = () => {
-            
-            setTimeout(async () => {
-                while (true) {
-                    const tcp_listener = await this.#start_tcp_server()
-                    const udp_adverting = await this.#start_udp_broadcaster()
-                    await Promise.race([tcp_listener.$error, udp_adverting.$error])
-                    tcp_listener.stop()
-                    udp_adverting.stop()
-                }
-            })
+        public readonly namespace: string
+    ) { }
 
-            this.start = () => { }
-        }
+    #starting: Promise<void> | undefined
+    async start() {
+        if (!this.#starting) this.#starting = new Promise<void>(async s => {
+            while (true) {
+                const tcp_listener = await this.#start_tcp_server()
+                const udp_adverting = await this.#start_udp_broadcaster()
+                s()
+                await Promise.race([tcp_listener.$error, udp_adverting.$error])
+                tcp_listener.stop()
+                udp_adverting.stop()
+            }
+        })
+        return await this.#starting
     }
 
     async #start_tcp_server() {
@@ -153,7 +151,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             data: {
                 node_id: this.node_id,
                 port: this.#tcp_listening_port,
-                listening: [...new Set(['#hello', ...ListenEventList])],
+                listening: [...new Set(['#hello'])],
                 peers: [... this.#nodes_map.values()].map(({ host, listening, node_id, port }) => ({ listening, node_id, port, host })),
                 version: this.#version
             } as HelloMessage,
@@ -227,40 +225,29 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     }
 
-    on_node_offline(cb: (node_id: string) => any) {
-        const id = randomUUID()
-        this.#node_offline_callbacks.set(id, cb)
-        return { unsubscribe: () => this.#node_offline_callbacks.delete(id) }
-    }
-
-    on_node_online(cb: (node_id: string) => any) {
-        const id = randomUUID()
-        this.#node_online_callbacks.set(id, cb)
-        return { unsubscribe: () => this.#node_online_callbacks.delete(id) }
-    }
-
-
-    listen<T = any>(topic: string, cb: (node_id: string, data: T) => any) {
-        this.#version = Date.now()
-        !this.#listeners.has(topic) && this.#listeners.set(topic, new Map())
-        const id = randomUUID()
-        this.#listeners.get(topic)?.set(id, cb)
-        return {
-            unsubscribe: () => {
+    listen<T = any>(topic: string) {
+        return new Observable<SpiderMeshTransporterEvent<T>>(o => {
+            this.#version = Date.now()
+            !this.#listeners.has(topic) && this.#listeners.set(topic, new Map())
+            const id = randomUUID()
+            this.#listeners.get(topic)?.set(
+                id,
+                (sender_node_id, data) => o.next({
+                    sender_node_id,
+                    data
+                })
+            )
+            return () => {
                 this.#version = Date.now()
                 this.#listeners.get(topic)?.delete(id)
                 this.#listeners.get(topic)?.size == 0 && this.#listeners.delete(topic)
             }
-        }
+        })
+
     }
 
 
-    async publish<T = any>(
-        event: string,
-        node_id: string | null,
-        data: T,
-        queue?: boolean
-    ) {
+    async publish<T = any>({ data, event, node_id, routing_key }: PublishMetadata<T>) {
 
         const msg: MeshMessage = {
             data,
@@ -269,18 +256,27 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             topic: event || node_id || '#'
         }
 
-        if (node_id) {
-            const node = this.#nodes_map.get(node_id)
-            node?.socket?.write(msg)
+        if (node_id == 'all' || !node_id) {
+            for (const node_id of this.#events_map.get(event) || []) {
+                const node = this.#nodes_map.get(node_id)
+                await node?.socket?.write(msg)
+            }
+            return
+        }
+
+        if (node_id == 'rr') {
+            const key = `${event}.${routing_key}`
+            const nodes = [... this.#events_map.get(event) || []]
+            const current_index = (this.#round_robin_indexes.get(key) || 0) + 1
+            this.#round_robin_indexes.set(key, current_index)
+            const node_id = nodes[current_index % nodes.length]
+            await this.#nodes_map.get(node_id)?.socket?.write(msg)
             return
         }
 
 
+        node_id && await this.#nodes_map.get(node_id)?.socket?.write(msg)
 
-        for (const node_id of this.#events_map.get(event) || []) {
-            const node = this.#nodes_map.get(node_id)
-            node?.socket?.write(msg)
-        }
 
 
     }
