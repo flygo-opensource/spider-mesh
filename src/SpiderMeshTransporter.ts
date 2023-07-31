@@ -5,7 +5,7 @@ export type PublishMetadata<T> = {
     node_id?: string,
     data: T,
     routing_key?: string
-}
+} 
 
 export type SpiderMeshTransporterEvent<T> = {
     data: T,

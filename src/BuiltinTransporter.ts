@@ -1,11 +1,10 @@
 import { randomUUID } from "crypto";
-import dgram from 'dgram'
-import { createServer } from "net";
 import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "./SpiderMeshTransporter";
-import { BehaviorSubject, Observable, firstValueFrom, fromEvent, merge } from 'rxjs'
-import { StableTCP } from "./StableTCP";
-import { waitFirstEvent } from "./helpers/waitFirstEvent";
-
+import { BehaviorSubject, Observable, Subject, debounceTime, filter, first, firstValueFrom, fromEvent, map, merge, mergeAll, mergeMap, switchMap, take, takeUntil, tap } from 'rxjs'
+import { RxjsTcpSocket } from "./RxjsTcpSocket";
+import { RxjsTcpServer } from "./RxjsTcpServer";
+import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster";
+import { sleep } from "./helpers/sleep";
 
 type MeshMessage<T = any> = {
     topic: string
@@ -40,164 +39,102 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     #node_online_callbacks = new Map<string, (node_id: string) => any>
     #listeners = new Map<string, Map<string, (from_node_id: string, data: any) => any>>
     #version = Date.now()
-    #tcp_listening_port: number
     #nodes_map = new Map<string, TcpNode & {
-        socket: StableTCP
+        socket: RxjsTcpSocket
     }>
     public readonly $nodes_status = new Observable<{ node_id: string, online: boolean }>()
     #events_map = new Map<string, Set<string>>()
     #round_robin_indexes = new Map<string, number>()
-
+    #$rebroadcast = new Subject<void>()
 
     constructor(
         public readonly node_id: string,
         public readonly namespace: string
     ) { }
 
-    #starting: Promise<void> | undefined
+    #started = false
     async start() {
-        if (!this.#starting) this.#starting = new Promise<void>(async s => {
-            while (true) {
-                const tcp_listener = await this.#start_tcp_server()
-                const udp_adverting = await this.#start_udp_broadcaster()
-                s()
-                await Promise.race([tcp_listener.$error, udp_adverting.$error])
-                tcp_listener.stop()
-                udp_adverting.stop()
-            }
-        })
-        return await this.#starting
-    }
-
-    async #start_tcp_server() {
-        for (let port = 10001; true; port++) {
-            const server = createServer()
-            server.listen(port)
-            const success = await new Promise(s => {
-                server.on('listening', () => s(true))
-                server.on('error', () => s(false))
-            })
-            if (!success) continue
-            server.on('connection', async socket => {
-                const remote_host = socket.remoteAddress?.split(':')?.pop()
-                if (remote_host) {
-                    const stable_tcp = new StableTCP(undefined, socket)
-                    stable_tcp.on('data', data => this.#on_message(remote_host, data, stable_tcp))
-                }
-            })
-            this.#tcp_listening_port = port
-            return {
-                port,
-                server,
-                stop: () => server.close(),
-                $error: waitFirstEvent(server, 'close', 'drop', 'error')
-            }
-        }
-    }
-
-    async #start_udp_broadcaster() {
-        const udp = dgram.createSocket({ type: 'udp4', reuseAddr: true })
-        udp.bind({
-            address: '0.0.0.0',
-            port: UDP_PORT,
-        }, () => udp.setBroadcast(true))
-
-        udp.on('message', async (raw, rinfo) => {
-            try {
-                const json = JSON.parse(raw.toString('utf-8'))
-                this.#on_message(rinfo.address, json)
-            } catch (e) {
-            }
-        })
-
-
-        const broadcast_ips = ['255.255.255.255'] as string[]
-
-        // Add multicast IP or scan all subnets
-        if (SEEDING_IP_RANGES) {
-            const list = SEEDING_IP_RANGES.split(',').map(ip => ip.trim())
-            for (const range of list) {
-                const subnet = range.split('.').slice(0, 3).join('.')
-                for (let i = 1; i <= 255; i++) {
-                    const host = `${range}.${i}`
-                    broadcast_ips.push(host)
-                }
-            }
-        }
-
-        // Add seeding ip
-        if (SEEDING_IPS) {
-            const list = SEEDING_IPS.split(',').map(ip => ip.trim())
-            for (const host of list) {
-                broadcast_ips.push(host)
-            }
-        }
-
-        // Hello via UDP
-        broadcast_ips.forEach(host => {
-            this.#hello(undefined, { host, socket: udp })
-        })
-
-        return {
-            socket: udp,
-            stop: () => udp.close(),
-            $error: waitFirstEvent(udp, 'close', 'error')
-        }
-    }
-
-    async #hello(socket?: StableTCP, udp_socket?: { socket: dgram.Socket, host: string }) {
-
-        const msg: MeshMessage = {
-            data: {
-                node_id: this.node_id,
-                port: this.#tcp_listening_port,
-                listening: [...new Set(['#hello'])],
-                peers: [... this.#nodes_map.values()].map(({ host, listening, node_id, port }) => ({ listening, node_id, port, host })),
-                version: this.#version
-            } as HelloMessage,
+        if (this.#started) return
+        this.#started = true
+        const $tcp_server = await RxjsTcpServer.start<MeshMessage>()
+        const udp_broadcaster = await RxjsUdpBroadcaster.start({
             namespace: this.namespace,
-            sender_node_id: this.node_id,
-            topic: '#hello'
-        }
-        if (socket) {
-            socket?.write(msg)
-        }
+            node_id: this.node_id,
+            SEEDING_IP_RANGES,
+            SEEDING_IPS,
+            UDP_PORT
+        })
+        $tcp_server.subscribe(({ port, $connection, $error }) => {
 
-        if (udp_socket) {
-            const buffer = Buffer.from(JSON.stringify(msg), 'utf8')
-            udp_socket?.socket.send(buffer, UDP_PORT, udp_socket.host)
-        }
+            merge(
+                $connection,
+                udp_broadcaster.$new_node_discovered.pipe(
+                    mergeMap(node => RxjsTcpSocket.connect<MeshMessage>({
+                        ...node,
+                        keepAlive: true
+                    })),
+                    filter(Boolean),
+                    map(socket => Object.assign(socket, { udp: true }))
+                )
+            ).pipe(
+                takeUntil($error),
+                map(socket => {
+                    socket.$incoming_data
+                        .pipe(
+                            filter(msg => !!msg),
+                            filter(msg => msg.sender_node_id != this.node_id),
+                            filter(msg => msg.namespace == this.namespace),
+                        )
+                        .subscribe(
+                            async msg => {
+                                if (msg.topic == `#hello`) {
+                                    const status = await this.#add_node(socket, msg.data)
+                                    await sleep(1000)
+                                    status && !status.peer_updated && this.#tcp_hello(status.socket, port)
+                                    return
+                                }
+                                this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
+                            }
+                        )
+
+                    'udp' in socket && this.#tcp_hello(socket, port)
+                })
+            ).subscribe()
+
+            udp_broadcaster.broadcast(port)
+            this.#$rebroadcast.pipe(
+                debounceTime(1000),
+                takeUntil($error),
+                map(() => [... this.#nodes_map.values()]),
+                mergeAll(),
+                mergeMap(node => this.#tcp_hello(node.socket, port))
+            ).subscribe()
+        })
 
 
     }
 
-    async #on_message(remote_address: string, msg: MeshMessage, old_socket?: StableTCP) {
 
-        if (!remote_address) return
-        if (!msg) return
-        if (msg.sender_node_id == this.node_id) return
-
-        // New node 
-        if (msg.topic == `#hello` && msg.namespace == this.namespace) {
-            return this.#add_node(remote_address, msg.data as HelloMessage, old_socket)
-        }
-
-        this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
-    }
-
-    async #add_node(host: string, new_node: HelloMessage, tcp_socket?: StableTCP) {
-
+    async #add_node(node_socket: RxjsTcpSocket<any>, new_node: HelloMessage) {
+        const host = node_socket.rawSocket.remoteAddress
+        if (!host) return
 
         process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
 
-        const remote_info = new_node.peers.find(p => p.node_id == this.node_id)
-        const peer_updated = remote_info && remote_info.version == this.#version
-
-
         if (!this.#nodes_map.get(new_node.node_id)?.socket) {
-            const socket = await new StableTCP({ host, port: new_node.port, keepAlive: true, timeout: 5000 }).connect() || tcp_socket
-            if (!socket) return
-            const on_offline = (e) => {
+
+
+            const socket = node_socket.opened_by_remote_side ? (await RxjsTcpSocket.connect({
+                host,
+                port: new_node.port,
+                keepAlive: true
+            }) || node_socket) : node_socket
+
+            // When ofline 
+            socket.$status.pipe(
+                filter(status => status == 'closed' || status == 'error'),
+                first()
+            ).subscribe(() => {
                 process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node.node_id}`)
                 this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
                 const node = this.#nodes_map.get(new_node.node_id)
@@ -205,22 +142,47 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                     this.#events_map.get(evt)?.delete(node.node_id)
                 })
                 this.#nodes_map.delete(new_node.node_id)
+            })
 
-            }
-            socket.on('error', on_offline)
-            socket.on('close', on_offline)
+            // Add to map
             this.#nodes_map.set(new_node.node_id, { ...new_node, host, socket })
-            !peer_updated && await this.#hello(socket)
+
         }
 
-
+        const remote_info = new_node.peers.find(p => p.node_id == this.node_id)
+        const peer_updated = remote_info && remote_info.version == this.#version
 
         for (const event of new_node.listening) {
             !this.#events_map.has(event) && this.#events_map.set(event, new Set())
             this.#events_map.get(event)?.add(new_node.node_id)
         }
 
-        remote_info && this.#node_online_callbacks.forEach(fn => fn(new_node.node_id))
+        peer_updated && this.#node_online_callbacks.forEach(fn => fn(new_node.node_id))
+
+
+        return {
+            peer_updated,
+            socket: this.#nodes_map.get(new_node.node_id)!.socket
+        }
+
+    }
+
+
+    async #tcp_hello(tcp_socket: RxjsTcpSocket, self_tcp_port: number) {
+
+        const msg: MeshMessage = {
+            data: {
+                node_id: this.node_id,
+                port: self_tcp_port,
+                listening: ['#hello', ... this.#listeners.keys()],
+                peers: [... this.#nodes_map.values()].map(({ socket, ...node }) => node),
+                version: this.#version
+            } as HelloMessage,
+            namespace: this.namespace,
+            sender_node_id: this.node_id,
+            topic: '#hello'
+        }
+        tcp_socket.write(msg)
 
 
     }
@@ -237,6 +199,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                     data
                 })
             )
+            this.#$rebroadcast.next()
             return () => {
                 this.#version = Date.now()
                 this.#listeners.get(topic)?.delete(id)
@@ -265,11 +228,12 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         }
 
         if (node_id == 'rr') {
-            const key = `${event}.${routing_key}`
+            const key = `${event}.${routing_key || 'default'}`
+
             const nodes = [... this.#events_map.get(event) || []]
-            const current_index = (this.#round_robin_indexes.get(key) || 0) + 1
-            this.#round_robin_indexes.set(key, current_index)
-            const node_id = nodes[current_index % nodes.length]
+            const current_index = (this.#round_robin_indexes.get(key) || 0) % nodes.length
+            this.#round_robin_indexes.set(key, current_index + 1)
+            const node_id = nodes[current_index]
             await this.#nodes_map.get(node_id)?.socket?.write(msg)
             return
         }
