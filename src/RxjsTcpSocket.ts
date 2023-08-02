@@ -74,10 +74,10 @@ export class RxjsTcpSocket<T = any> {
                 for (const part of parts) {
                     if (part != '') {
                         try {
-                            const json = JSON.parse(part)
+                            const json = JSON.parse(part)  
                             this.$incoming_data.next(json)
                         } catch (e) {
-                         
+
                         }
                     }
                 }

@@ -14,6 +14,8 @@ export type RemoteService<T = { [key: string]: any }> = (
         [key in keyof T as (key extends string ? `$batch_${key}` : string)]: T[key] extends ((...args: any) => any) ? (
             (...args: Parameters<T[key]>) => Observable<{ node: SpiderMeshNode, data: Awaited<ReturnType<T[key]>> }>
         ) : T[key]
+    } & {
+        $wait_service_online: () => Promise<void>
     }
 
 )

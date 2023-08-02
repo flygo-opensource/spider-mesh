@@ -19,43 +19,39 @@ type TcpNode = {
     port: number
     node_id: string
     listening: string[]
-    version: number
-}
-
-
-type HelloMessage = TcpNode & {
+    version: number,
     peers: TcpNode[]
 }
+
+
+type HelloMessage = TcpNode 
 
 const UDP_PORT = Number(process.env.UDP_PORT || 10000)
 const SEEDING_IP_RANGES = process.env.SEEDING_IP_RANGE
 const SEEDING_IPS = process.env.SEEDING_IP
 
-
+type NodeID = string
+type ListenderID = string
+type ListenderCallback = (from_node_id: string, data: any) => any
+type EventID = string
+type NodeWithSocket = TcpNode & { socket: RxjsTcpSocket }
 
 export class BuiltinTransporter implements SpiderMeshTransporter {
 
-    #node_offline_callbacks = new Map<string, (node_id: string) => any>
-    #node_online_callbacks = new Map<string, (node_id: string) => any>
-    #listeners = new Map<string, Map<string, (from_node_id: string, data: any) => any>>
+    public readonly $nodes_status = new Subject<{ node_id: string, online: boolean }>()
+
     #version = Date.now()
-    #nodes_map = new Map<string, TcpNode & {
-        socket: RxjsTcpSocket
-    }>
-    public readonly $nodes_status = new Observable<{ node_id: string, online: boolean }>()
-    #events_map = new Map<string, Set<string>>()
-    #round_robin_indexes = new Map<string, number>()
+    #listeners = new Map<EventID, Map<ListenderID, ListenderCallback>>
+    #nodes_map = new Map<NodeID, NodeWithSocket>
+    #events_map = new Map<EventID, Set<NodeID>>()
     #$rebroadcast = new Subject<void>()
 
     constructor(
         public readonly node_id: string,
-        public readonly namespace: string
+        public readonly namespace: string = 'default'
     ) { }
 
-    #started = false
     async start() {
-        if (this.#started) return
-        this.#started = true
         const $tcp_server = await RxjsTcpServer.start<MeshMessage>()
         const udp_broadcaster = await RxjsUdpBroadcaster.start({
             namespace: this.namespace,
@@ -80,7 +76,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 takeUntil($error),
                 map(socket => {
                     socket.$incoming_data
-                        .pipe(
+                        .pipe( 
                             filter(msg => !!msg),
                             filter(msg => msg.sender_node_id != this.node_id),
                             filter(msg => msg.namespace == this.namespace),
@@ -89,7 +85,6 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                             async msg => {
                                 if (msg.topic == `#hello`) {
                                     const status = await this.#add_node(socket, msg.data)
-                                    await sleep(1000)
                                     status && !status.peer_updated && this.#tcp_hello(status.socket, port)
                                     return
                                 }
@@ -119,9 +114,9 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const host = node_socket.rawSocket.remoteAddress
         if (!host) return
 
-        process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
-
-        if (!this.#nodes_map.get(new_node.node_id)?.socket) {
+        // process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
+        const new_node_id = new_node.node_id
+        if (!this.#nodes_map.has(new_node_id)) {
 
 
             const socket = node_socket.opened_by_remote_side ? (await RxjsTcpSocket.connect({
@@ -135,17 +130,17 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 filter(status => status == 'closed' || status == 'error'),
                 first()
             ).subscribe(() => {
-                process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node.node_id}`)
-                this.#node_offline_callbacks?.forEach(cb => cb(new_node.node_id))
-                const node = this.#nodes_map.get(new_node.node_id)
+                // process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node_id}`)
+                const node = this.#nodes_map.get(new_node_id)
                 node && node.listening.map(evt => {
                     this.#events_map.get(evt)?.delete(node.node_id)
                 })
-                this.#nodes_map.delete(new_node.node_id)
+                this.#nodes_map.delete(new_node_id)
+                this.$nodes_status.next({ node_id: new_node_id, online: false })
             })
 
             // Add to map
-            this.#nodes_map.set(new_node.node_id, { ...new_node, host, socket })
+            this.#nodes_map.set(new_node_id, { ...new_node, host, socket })
 
         }
 
@@ -154,15 +149,16 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
         for (const event of new_node.listening) {
             !this.#events_map.has(event) && this.#events_map.set(event, new Set())
-            this.#events_map.get(event)?.add(new_node.node_id)
+            this.#events_map.get(event)?.add(new_node_id)
         }
 
-        peer_updated && this.#node_online_callbacks.forEach(fn => fn(new_node.node_id))
+        peer_updated && this.$nodes_status.next({ node_id: new_node_id, online: true })
+
 
 
         return {
             peer_updated,
-            socket: this.#nodes_map.get(new_node.node_id)!.socket
+            socket: this.#nodes_map.get(new_node_id)!.socket
         }
 
     }
@@ -222,7 +218,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         if (node_id == 'all' || !node_id) {
             for (const node_id of this.#events_map.get(event) || []) {
                 const node = this.#nodes_map.get(node_id)
-                await node?.socket?.write(msg)
+                await node?.peers.find(p => p.node_id == this.node_id) && node?.socket?.write(msg)
+
             }
             return
         }
@@ -238,7 +235,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         //     return
         // }
 
-
+        // p2p 
         node_id && await this.#nodes_map.get(node_id)?.socket?.write(msg)
 
 

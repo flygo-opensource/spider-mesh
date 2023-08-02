@@ -1,9 +1,9 @@
 import { SpiderMeshTransporter } from "./SpiderMeshTransporter"
 
 export type SpiderMeshNodeMetadata = {
-    id: string
+    id: string 
     namespace: string
-    public_ip: string,
+    public_ip: string | null,
     ip_addresses: string[]
     last_online: number
     active: boolean
@@ -11,6 +11,7 @@ export type SpiderMeshNodeMetadata = {
     services: string[]
     linked: string[]
     isolate: boolean
+    revalidate_on_join?: boolean
 }
 
 export type SpiderMeshNode = SpiderMeshNodeMetadata
