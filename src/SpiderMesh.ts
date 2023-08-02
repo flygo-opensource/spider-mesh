@@ -9,12 +9,12 @@ import { RemoteService } from './RemoteService'
 import os from 'os'
 import { listEventSubscribers } from './decorators/SubscribeEvent'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady'
-import { BehaviorSubject } from 'rxjs'
+import { BehaviorSubject, Observable, Subject, from, mergeMap } from 'rxjs'
 import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice'
+import { sleep } from './helpers/sleep'
 
 
-export type ServiceNodeMonitor = (online: boolean, node: SpiderMeshNode) => any
 
 export type RpcPayload = {
     id: string,
@@ -41,16 +41,17 @@ const PACKAGE_JSON = JSON.parse(readFileSync(`package.json`, 'utf8')) || {}
 
 export class SpiderMesh {
 
-
-    #LinkingServices = new Map<string, { online: boolean }>()
     #$isolated = new BehaviorSubject<boolean>(false)
-    #local_services = new Map<string, any>()
-    #remote_services = new Map<string, {
+
+    #local_rpc_services = new Map<string, any>()
+
+    #remote_nodes = new Map<string, SpiderMeshNode>
+
+    #remote_rpc_services = new Map<string, {
         last_call_index: number
         nodes: SpiderMeshNode[]
     }>
 
-    #nodes = new Map<string, SpiderMeshNode>
 
 
     #rpc_queue = new Map<string, {
@@ -79,8 +80,7 @@ export class SpiderMesh {
         return s(null)
     })
 
-
-    #services_status_monitor = new Map<string, Map<string, ServiceNodeMonitor>>()
+    $nodes_monitor = new Subject<{ online: boolean, node: SpiderMeshNode }>()
 
     constructor(private transporter: SpiderMeshTransporter) {
     }
@@ -101,13 +101,12 @@ export class SpiderMesh {
             last_online: Date.now(),
             active: true,
             offline: false,
-            services: [...this.#local_services.keys()],
+            services: [...this.#local_rpc_services.keys()],
             namespace: this.transporter.namespace,
-            linked: [...this.#nodes.keys()],
-            isolated_nodes: [... this.#nodes.values()].filter(node => node.isolate).map(node => node.id),
+            linked: [...this.#remote_nodes.keys()],
+            isolated_nodes: [... this.#remote_nodes.values()].filter(node => node.isolate).map(node => node.id),
             isolate: this.#$isolated.value
         } as SpiderMeshNodeMetadata
-
         process.env.SPIDERMESH_DEBUG && console.log({ me: metadata })
         return metadata
     }
@@ -123,6 +122,7 @@ export class SpiderMesh {
     }
 
     async #active_node_responder({ data: msg, sender_node_id }: SpiderMeshTransporterEvent<RpcPayload>) {
+ 
 
         if (msg.type == 'rpc') {
             if (msg.service == 'SpiderMesh' && !msg.method.startsWith('$')) {
@@ -137,7 +137,7 @@ export class SpiderMesh {
                 })
                 return
             }
-            const instance = msg.service = 'SpiderMesh' ? this : this.#local_services.get(msg.service)
+            const instance = msg.service = 'SpiderMesh' ? this : this.#local_rpc_services.get(msg.service)
 
             const args = msg.args.map(arg => arg != '__FUNCTION__' ? arg : (...args) => {
                 sender_node_id && this.transporter.publish({
@@ -188,7 +188,6 @@ export class SpiderMesh {
             this.#rpc_queue.delete(msg.id)
             return
         }
-
     }
 
     async start() {
@@ -197,12 +196,12 @@ export class SpiderMesh {
         await this.transporter.start()
 
         // Listen RPC
-        this.transporter.listen<RpcPayload>(this.transporter.node_id).subscribe(
+        this.listen<RpcPayload>(this.transporter.node_id).subscribe(
             evt => this.#active_node_responder(evt)
         )
 
         // Listen new node
-        this.transporter.listen<SpiderMeshNode>('#join').subscribe(({ data, sender_node_id }) => {
+        this.listen<SpiderMeshNode>('#join').subscribe(({ data }) => {
             this.#on_node_discovered(data)
         })
 
@@ -233,24 +232,21 @@ export class SpiderMesh {
 
         process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] New node `, node)
 
-        const discovered = this.#nodes.get(node.id)
+        const discovered = this.#remote_nodes.get(node.id)
         const new_node: SpiderMeshNode = {
             ...discovered || {},
             ...node,
             offline: false
         }
-        this.#nodes.set(node.id, new_node)
+        this.#remote_nodes.set(node.id, new_node)
+        this.$nodes_monitor.next({ node, online: true })
 
         node.services.forEach(service => {
-            this.#LinkingServices.set(service, { online: true })
-            this.#services_status_monitor.get(service)?.forEach(
-                fn => fn(true, new_node)
-            )
 
-            const $service = this.#remote_services.get(service)
+            const $service = this.#remote_rpc_services.get(service)
 
             if (!$service) {
-                this.#remote_services.set(service, {
+                this.#remote_rpc_services.set(service, {
                     last_call_index: -1,
                     nodes: [node]
                 })
@@ -275,15 +271,12 @@ export class SpiderMesh {
     }
 
     async #on_node_offline(id: string) {
-        const node = this.#nodes.get(id)
+        const node = this.#remote_nodes.get(id)
         if (!node) return
         process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
-        node.services.map(service => {
-            this.#services_status_monitor.get(service)?.forEach(
-                fn => fn(false, node)
-            )
-        })
-        this.#remote_services.forEach(service => {
+        this.$nodes_monitor.next({ node, online: false })
+
+        this.#remote_rpc_services.forEach(service => {
             service.nodes = service.nodes?.filter(node => node.id != id)
         });
         [...this.#rpc_queue.entries()].forEach(([rid, { reject }]) => {
@@ -314,20 +307,22 @@ export class SpiderMesh {
                 timeout: options.timeout,
                 target_node_id: options.node_id
             })
+
             const retry_count = options.retry || 1
             for (let i = retry_count; i > 0; i--) {
+
                 try {
                     await this.transporter.publish({
                         event: service,
                         node_id: options.node_id,
-                        routing_key: method,
                         data: { type: 'rpc', id: rid, args, method, service }
                     })
                     return
-                } catch (e) {
+                } catch (e) { }
 
-                }
-                i > 1 && await new Promise(s => setTimeout(s, options.retry_delay || 1000))
+                i > 1 && await new Promise(
+                    s => setTimeout(s, options.retry_delay || 1000)
+                )
             }
             if (options.fallback) return success(options.fallback)
         })
@@ -361,43 +356,40 @@ export class SpiderMesh {
                 typeof f[method] == 'function' && actions.add(method)
             }
         }
-
-        this.#LinkingServices.set(service_name, { online: false })
+        if (!this.#remote_rpc_services.has(service_name)) {
+            this.#remote_rpc_services.set(service_name, { last_call_index: -1, nodes: [] })
+        }
 
         return new Proxy({}, {
             get: (_, method: string) => {
 
-                if (method == '$wait') return (
-                    async (cb, delay: number = 1000) => {
-                        for (let i = 0; true; i++) {
-                            const nodes = [...this.#nodes.values()].filter(node => node.services.includes(service_name) && !node.isolate)
-                            const result = await cb(nodes, i)
-                            if (result) return result
-                            await new Promise(s => setTimeout(s, delay))
-                        }
-                    }
-                ) as RemoteService<T>['$wait']
-
                 if (method == '$list_nodes') return (
-                    () => [...this.#nodes.values()].filter(node => node.services.includes(service_name) && !node.isolate)
+                    () => [...this.#remote_nodes.values()].filter(node => node.services.includes(service_name) && !node.isolate)
                 ) as RemoteService<T>['$list_nodes']
 
-                if (method == '$monitor') return (
-                    cb => {
-                        const hid = randomUUID()
-                        const map = this.#services_status_monitor.get(service_name) || new Map<string, ServiceNodeMonitor>()
-                        map.set(hid, cb)
-                        this.#services_status_monitor.set(service_name, map)
-                        return {
-                            unsubscribe: () => map.delete(hid)
-                        }
-                    }
-                ) as RemoteService<T>['$monitor']
+                if (method.startsWith('$batch_')) {
+                    const real_method = method.split('$batch_')?.[1]
+                    if (!real_method || !actions.has(real_method)) return null
+                    const nodes = [...this.#remote_nodes.values()].filter(node => node.services.includes(service_name) && !node.isolate)
+                    return (...args) => from(nodes).pipe(
+                        mergeMap(async node => {
+                            const data = await this.rpc(
+                                service_name,
+                                real_method,
+                                args,
+                                { node_id: node.id } as RPCOptions
+                            )
+                            return { data, node }
+                        })
+                    )
+                }
 
-                if (actions.has(method) || method.startsWith('$set_')) {
+                if (actions.has(method) || method.startsWith('$set_') || method.startsWith('$batch_')) {
                     return new DeepProxy(
                         RPCOptionsList,
-                        (method: string, options) => (...args) => this.rpc(service_name, method, args, options)
+                        (method: string, options) => actions.has(method) && (
+                            (...args) => this.rpc(service_name, method, args, options)
+                        )
                     ).nest()[method]
                 }
 
@@ -411,25 +403,25 @@ export class SpiderMesh {
         const prototype = Object.getPrototypeOf(instance)
         const name = prototype.constructor.name
 
-        this.#local_services.set(name, instance)
+        this.#local_rpc_services.set(name, instance)
 
 
         // Active event subscribers
         const event_subscribers = listEventSubscribers(prototype)
         for (const { event, method } of event_subscribers) {
-            this.transporter.listen(event).subscribe(evt => instance[method]?.(evt.data, evt.sender_node_id))
+            this.listen(event).subscribe(evt => instance[method]?.(evt.data, evt.sender_node_id))
         }
 
 
     }
 
     async #active_ready_hooks(instance: any) {
+
         // Wait remote service ready
         while (true) {
-            await new Promise(s => setTimeout(s, 1000))
-            if ([...this.#LinkingServices.values()].every(service => service.online)) {
-                break
-            }
+            await sleep(1000)
+            const services = [...this.#remote_rpc_services.values()]
+            if (services.every(service => service.nodes.length > 0)) break
         }
 
         // Active ready hook
@@ -442,8 +434,9 @@ export class SpiderMesh {
         this.transporter.publish({ event, data })
     }
 
-    async subscribe<T = any>(topic: string) {
+    listen<T = any>(topic: string) {
         return this.transporter.listen<T>(topic)
     }
 
 }
+ 

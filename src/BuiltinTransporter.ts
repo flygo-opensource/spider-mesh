@@ -210,7 +210,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     }
 
 
-    async publish<T = any>({ data, event, node_id, routing_key }: PublishMetadata<T>) {
+    async publish<T = any>({ data, event, node_id }: PublishMetadata<T>) {
 
         const msg: MeshMessage = {
             data,
@@ -227,16 +227,16 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             return
         }
 
-        if (node_id == 'rr') {
-            const key = `${event}.${routing_key || 'default'}`
+        // if (node_id == 'rr') {
+        //     const key = `${event}.${routing_key || 'default'}`
 
-            const nodes = [... this.#events_map.get(event) || []]
-            const current_index = (this.#round_robin_indexes.get(key) || 0) % nodes.length
-            this.#round_robin_indexes.set(key, current_index + 1)
-            const node_id = nodes[current_index]
-            await this.#nodes_map.get(node_id)?.socket?.write(msg)
-            return
-        }
+        //     const nodes = [... this.#events_map.get(event) || []]
+        //     const current_index = (this.#round_robin_indexes.get(key) || 0) % nodes.length
+        //     this.#round_robin_indexes.set(key, current_index + 1)
+        //     const node_id = nodes[current_index]
+        //     await this.#nodes_map.get(node_id)?.socket?.write(msg)
+        //     return
+        // }
 
 
         node_id && await this.#nodes_map.get(node_id)?.socket?.write(msg)
