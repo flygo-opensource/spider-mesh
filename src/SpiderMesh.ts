@@ -9,7 +9,7 @@ import { RemoteService } from './RemoteService'
 import os from 'os'
 import { listEventSubscribers } from './decorators/SubscribeEvent'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady'
-import { BehaviorSubject, Observable, Subject, filter, from, mergeMap, tap } from 'rxjs'
+import { BehaviorSubject, Observable, Subject, filter, from, map, mergeMap, tap } from 'rxjs'
 import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice'
 import { sleep } from './helpers/sleep'
@@ -201,7 +201,11 @@ export class SpiderMesh {
         }
     }
 
+    #started = false
     async start() {
+
+        if (this.#started) return
+        this.#started = true
 
         // Init transporter
         await this.transporter.start()
@@ -226,14 +230,13 @@ export class SpiderMesh {
             })
         })
 
-
-        // Active local services
-        const instances = serviceInstanceList.filter(i => i.namespaces.includes(this.transporter.namespace || 'default'))
-        for (const { instance } of instances) await this.#active_local_service(instance)
-
-
-        // Active ready hooks
-        for (const instance of instances) await this.#active_ready_hooks(instance)
+        serviceInstanceList.pipe(
+            filter(service => service.namespaces.includes(this.transporter.namespace || 'default')),
+            mergeMap(async ({ instance }) => {
+                await this.#active_local_service(instance)
+                await this.#active_ready_hooks(instance)
+            })
+        ).subscribe()
     }
 
     async #on_node_discovered(node: SpiderMeshNode) {

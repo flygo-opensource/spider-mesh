@@ -1,5 +1,6 @@
+import { ReplaySubject } from "rxjs"
 
-export const serviceInstanceList = [] as Array<{ instance: any, namespaces: string[] }>
+export const serviceInstanceList = new ReplaySubject<{ instance: any, namespaces: string[] }>()
 
 
 export const Microservice = (namespaces: string[] = ['default']) => {
@@ -8,7 +9,7 @@ export const Microservice = (namespaces: string[] = ['default']) => {
             class C extends target {
                 constructor(...args: any[]) {
                     super(...args)
-                    serviceInstanceList.push({ instance: this, namespaces })
+                    serviceInstanceList.next({ instance: this, namespaces })
                 }
             }
             Object.defineProperty(C, 'name', { value: target.name })
@@ -16,5 +17,5 @@ export const Microservice = (namespaces: string[] = ['default']) => {
         }
 
 
-    ) as any 
+    ) as any
 }
