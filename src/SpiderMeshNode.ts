@@ -1,4 +1,3 @@
-import { SpiderMeshTransporter } from "./SpiderMeshTransporter"
 
 export type SpiderMeshNodeMetadata = {
     id: string 

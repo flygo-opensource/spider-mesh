@@ -1,18 +1,20 @@
 import { randomUUID } from 'crypto'
 import { get } from 'http'
 import { networkInterfaces } from 'os'
-import { DeepProxy } from './DeepProxy'
-import { SpiderMeshNode, SpiderMeshNodeMetadata } from './SpiderMeshNode'
-import { SpiderMeshTransporter, SpiderMeshTransporterEvent } from './SpiderMeshTransporter'
-import { RPCOptions, RPCOptionsList } from './RPCOptions'
-import { RemoteService } from './RemoteService'
+import { DeepProxy } from './DeepProxy.js'
+import { SpiderMeshNode, SpiderMeshNodeMetadata } from './SpiderMeshNode.js'
+import { SpiderMeshTransporter, SpiderMeshTransporterEvent } from './SpiderMeshTransporter.js'
+import { RPCOptions, RPCOptionsList } from './RPCOptions.js'
+import { RemoteService } from './RemoteService.js'
 import os from 'os'
-import { listEventSubscribers } from './decorators/SubscribeEvent'
-import { listReadyHookMethods } from './decorators/OnMicroserviceReady'
+import { listEventSubscribers } from './decorators/ListenEvent.js'
+import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
 import { BehaviorSubject, Observable, Subject, filter, from, map, mergeMap, tap } from 'rxjs'
 import { readFileSync } from 'fs'
-import { serviceInstanceList } from './decorators/Microservice'
-import { sleep } from './helpers/sleep'
+import { serviceInstanceList } from './decorators/Microservice.js'
+import { sleep } from './helpers/sleep.js'
+import { BuiltinTransporter } from './BuiltinTransporter.js'
+import { DEBUG, DEFAULT_NAMEPSACE, NODE_ID } from './const.js'
 
 
 
@@ -39,7 +41,10 @@ export class SpiderMeshConfig {
 
 const PACKAGE_JSON = JSON.parse(readFileSync(`package.json`, 'utf8')) || {}
 
+export type SpiderMeshNamespace = string
+
 export class SpiderMesh {
+
 
     #$isolated = new BehaviorSubject<boolean>(false)
 
@@ -82,7 +87,14 @@ export class SpiderMesh {
 
     $nodes_monitor = new Subject<{ online: boolean, node: SpiderMeshNode }>()
 
-    constructor(private transporter: SpiderMeshTransporter) {
+    #initing: Promise<any>
+
+    constructor(private transporter: SpiderMeshTransporter = new BuiltinTransporter(NODE_ID, DEFAULT_NAMEPSACE)) {
+        this.#initing = this.#init()
+    }
+
+    static add_transporter(transporter: SpiderMeshTransporter) {
+        new this(transporter)
     }
 
     async $metadata(revalidate_on_join?: boolean) {
@@ -201,11 +213,7 @@ export class SpiderMesh {
         }
     }
 
-    #started = false
-    async start() {
-
-        if (this.#started) return
-        this.#started = true
+    async #init() {
 
         // Init transporter
         await this.transporter.start()
@@ -231,7 +239,7 @@ export class SpiderMesh {
         })
 
         serviceInstanceList.pipe(
-            filter(service => service.namespaces.includes(this.transporter.namespace || 'default')),
+            filter(i => i.namespace == this.transporter.namespace),
             mergeMap(async ({ instance }) => {
                 await this.#active_local_service(instance)
                 await this.#active_ready_hooks(instance)
@@ -245,7 +253,7 @@ export class SpiderMesh {
         if (this.#$isolated.value) return
 
         const peer_updated = node.linked.includes(this.transporter.node_id)
-        process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] New node `, node, { peer_updated })
+        DEBUG && console.log(`[${new Date().toLocaleString()}:${new Date().getMilliseconds()}] New node `, node, { peer_updated })
 
         const discovered = this.#remote_nodes.get(node.id)
         const new_node: SpiderMeshNode = {
@@ -292,7 +300,7 @@ export class SpiderMesh {
     async #on_node_offline(id: string) {
         const node = this.#remote_nodes.get(id)
         if (!node) return
-        process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
+        DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
         this.$nodes_monitor.next({ node, online: false })
 
         this.#remote_rpc_services.forEach(service => {
@@ -312,9 +320,9 @@ export class SpiderMesh {
 
     }
 
-    async rpc(service: string, method: string, args: any, options: RPCOptions) {
-
-        return await new Promise<any>(async (success, r) => {
+    async rpc<T = any>(service: string, method: string, args: any, options: RPCOptions) {
+        await this.#initing
+        return await new Promise<T>(async (success, r) => {
 
             const reject = (err) => (options.fallback !== undefined) ? success(options.fallback) : r(err);
 
@@ -357,7 +365,7 @@ export class SpiderMesh {
         })
     }
 
-    link_remote_service<T>(factory: { new(...args: any[]): T }) {
+    async link_remote_service<T>(factory: { new(...args: any[]): T }, wait_service_online: boolean = true) {
 
         const service_name = factory.name
 
@@ -388,6 +396,8 @@ export class SpiderMesh {
         if (!this.#remote_rpc_services.has(service_name)) {
             this.#remote_rpc_services.set(service_name, { last_call_index: -1, nodes: [] })
         }
+
+        wait_service_online && await this.#wait_service_online(service_name)
 
         return new Proxy({}, {
             get: (_, method: string) => {
@@ -432,6 +442,14 @@ export class SpiderMesh {
                 return null
             }
         }) as RemoteService<T>
+
+    }
+
+    async link_event<T>(event_factory: { new(...args: any[]): T }) {
+        return {
+            publish: (data: T) => this.publish(event_factory.name, data),
+            listen: () => this.listen(event_factory.name)
+        }
     }
 
     async #active_local_service(instance: any) {
@@ -479,12 +497,13 @@ export class SpiderMesh {
         await this.#wait_service_online()
 
         // Active ready hook
-        for (const method of listReadyHookMethods(Object.getPrototypeOf(instance))) {
+        for (const { method } of listReadyHookMethods(Object.getPrototypeOf(instance))) {
             instance[method]?.()
         }
     }
 
     async publish<T = any>(event: string, data: T) {
+        await this.#initing
         this.transporter.publish({ event, data })
     }
 

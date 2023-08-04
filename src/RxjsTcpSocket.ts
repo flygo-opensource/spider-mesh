@@ -1,6 +1,7 @@
 import { TcpNetConnectOpts, createConnection, Socket } from "net"
 import { BehaviorSubject, Observable, Subject, filter, firstValueFrom, fromEvent, mergeMap, takeUntil } from "rxjs"
-import { sleep } from "./helpers/sleep"
+import { sleep } from "./helpers/sleep.js"
+import { DEBUG } from "./const.js"
 
 
 
@@ -32,7 +33,7 @@ export class RxjsTcpSocket<T = any> {
                 const status = await firstValueFrom($this.$status.pipe(filter(s => s == 'error' || s == 'closed')))
                 socket.removeAllListeners()
                 if (status == 'closed') return
-                process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in 1 sec`)
+                DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in 1 sec`)
                 await sleep(5000)
             }
             s(null)
@@ -74,8 +75,12 @@ export class RxjsTcpSocket<T = any> {
                 for (const part of parts) {
                     if (part != '') {
                         try {
-                            const json = JSON.parse(part)  
-                            this.$incoming_data.next(json)
+                            const json = JSON.parse(part)
+                            this.$incoming_data.next(json) 
+                            DEBUG && console.log({
+                                time: `${new Date().getMinutes()}:${new Date().getSeconds()}:${new Date().getMilliseconds()}`,
+                                received: json
+                            })
                         } catch (e) {
 
                         }
@@ -90,7 +95,11 @@ export class RxjsTcpSocket<T = any> {
 
     async write(data: T) {
         const msg = JSON.stringify(data) + RxjsTcpSocket.#separator
-        const buffer = Buffer.from(msg)
+        const buffer = Buffer.from(msg) 
+        DEBUG && console.log({
+            time: `${new Date().getMinutes()}:${new Date().getSeconds()}:${new Date().getMilliseconds()}`,
+            send: data
+        })
         this.#$outgoing_data.next(buffer)
     }
 }

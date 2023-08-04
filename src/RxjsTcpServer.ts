@@ -1,6 +1,6 @@
 import { createServer } from "net"
 import { Subject } from "rxjs"
-import { RxjsTcpSocket } from "./RxjsTcpSocket"
+import { RxjsTcpSocket } from "./RxjsTcpSocket.js"
 
 
 export class RxjsTcpServer {

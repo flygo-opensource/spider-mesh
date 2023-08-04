@@ -1,17 +1,15 @@
 import { randomUUID } from "crypto";
-import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "./SpiderMeshTransporter";
-import { BehaviorSubject, Observable, Subject, debounceTime, filter, first, firstValueFrom, fromEvent, map, merge, mergeAll, mergeMap, switchMap, take, takeUntil, tap } from 'rxjs'
-import { RxjsTcpSocket } from "./RxjsTcpSocket";
-import { RxjsTcpServer } from "./RxjsTcpServer";
-import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster";
-import { sleep } from "./helpers/sleep";
+import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "./SpiderMeshTransporter.js";
+import { Observable, Subject, debounceTime, filter, first, map, merge, mergeAll, mergeMap, takeUntil, tap } from 'rxjs'
+import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
+import { RxjsTcpServer } from "./RxjsTcpServer.js";
+import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
 
 type MeshMessage<T = any> = {
     topic: string
     namespace: string
     data: T,
     sender_node_id: string
-    broadcastable?: boolean
 }
 
 type TcpNode = {
@@ -24,7 +22,7 @@ type TcpNode = {
 }
 
 
-type HelloMessage = TcpNode 
+type HelloMessage = TcpNode
 
 const UDP_PORT = Number(process.env.UDP_PORT || 10000)
 const SEEDING_IP_RANGES = process.env.SEEDING_IP_RANGE
@@ -51,6 +49,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         public readonly namespace: string = 'default'
     ) { }
 
+
     async start() {
         const $tcp_server = await RxjsTcpServer.start<MeshMessage>()
         const udp_broadcaster = await RxjsUdpBroadcaster.start({
@@ -76,7 +75,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 takeUntil($error),
                 map(socket => {
                     socket.$incoming_data
-                        .pipe( 
+                        .pipe(
                             filter(msg => !!msg),
                             filter(msg => msg.sender_node_id != this.node_id),
                             filter(msg => msg.namespace == this.namespace),
@@ -114,8 +113,17 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const host = node_socket.rawSocket.remoteAddress
         if (!host) return
 
-        // process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
+        // DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
         const new_node_id = new_node.node_id
+        const remote_info = new_node.peers.find(p => p.node_id == this.node_id)
+        const peer_updated = remote_info ? remote_info.version == this.#version : false
+
+        for (const event of new_node.listening) {
+            !this.#events_map.has(event) && this.#events_map.set(event, new Set())
+            this.#events_map.get(event)?.add(new_node_id)
+        }
+
+
         if (!this.#nodes_map.has(new_node_id)) {
 
 
@@ -130,7 +138,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 filter(status => status == 'closed' || status == 'error'),
                 first()
             ).subscribe(() => {
-                // process.env.SPIDERMESH_DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node_id}`)
+                // DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node_id}`)
                 const node = this.#nodes_map.get(new_node_id)
                 node && node.listening.map(evt => {
                     this.#events_map.get(evt)?.delete(node.node_id)
@@ -140,19 +148,10 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             })
 
             // Add to map
-            this.#nodes_map.set(new_node_id, { ...new_node, host, socket })
+            this.#nodes_map.set(new_node_id, { ...new_node, host, socket, peers: new_node.peers.map(p => ({ ...p, peers: [] })) })
 
+            peer_updated && this.$nodes_status.next({ node_id: new_node_id, online: true })
         }
-
-        const remote_info = new_node.peers.find(p => p.node_id == this.node_id)
-        const peer_updated = remote_info && remote_info.version == this.#version
-
-        for (const event of new_node.listening) {
-            !this.#events_map.has(event) && this.#events_map.set(event, new Set())
-            this.#events_map.get(event)?.add(new_node_id)
-        }
-
-        peer_updated && this.$nodes_status.next({ node_id: new_node_id, online: true })
 
 
 
@@ -200,6 +199,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 this.#version = Date.now()
                 this.#listeners.get(topic)?.delete(id)
                 this.#listeners.get(topic)?.size == 0 && this.#listeners.delete(topic)
+                this.#$rebroadcast.next()
             }
         })
 
@@ -218,24 +218,12 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         if (node_id == 'all' || !node_id) {
             for (const node_id of this.#events_map.get(event) || []) {
                 const node = this.#nodes_map.get(node_id)
-                await node?.peers.find(p => p.node_id == this.node_id) && node?.socket?.write(msg)
-
+                await node?.socket?.write(msg)
             }
             return
         }
 
-        // if (node_id == 'rr') {
-        //     const key = `${event}.${routing_key || 'default'}`
 
-        //     const nodes = [... this.#events_map.get(event) || []]
-        //     const current_index = (this.#round_robin_indexes.get(key) || 0) % nodes.length
-        //     this.#round_robin_indexes.set(key, current_index + 1)
-        //     const node_id = nodes[current_index]
-        //     await this.#nodes_map.get(node_id)?.socket?.write(msg)
-        //     return
-        // }
-
-        // p2p 
         node_id && await this.#nodes_map.get(node_id)?.socket?.write(msg)
 
 

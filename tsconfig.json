@@ -8,10 +8,10 @@
       "DOM",
       "ES2021"
     ],
-    "module": "esnext",
+    "module": "NodeNext",
     "strict": true,
     "sourceMap": true,
-    "moduleResolution": "node",
+    "moduleResolution": "NodeNext",
     "allowSyntheticDefaultImports": true,
     "declaration": true,
     "emitDecoratorMetadata": true,
@@ -19,7 +19,7 @@
     "strictPropertyInitialization": false,
     "noImplicitAny": false,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true 
   },
   "exclude": [
     "bin/*",

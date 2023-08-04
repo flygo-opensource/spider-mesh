@@ -1,6 +1,6 @@
 import { Observable, Subject, lastValueFrom, takeUntil, timer, toArray } from "rxjs";
-import { RPCOptions } from "./RPCOptions";
-import { SpiderMeshNode } from "./SpiderMeshNode";
+import { RPCOptions } from "./RPCOptions.js";
+import { SpiderMeshNode } from "./SpiderMeshNode.js";
 
 
 export type RemoteService<T = { [key: string]: any }> = (
