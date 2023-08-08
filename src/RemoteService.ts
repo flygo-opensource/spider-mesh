@@ -9,7 +9,7 @@ export type RemoteService<T = { [key: string]: any }> = (
         $safe_mode: () => {
             [K in keyof T as (T[K] extends (...args: any) => any ? K : '')]: T[K] extends (...args: any) => any ? ((...args: Parameters<T[K]>) => [
                 Error | null,
-                Promise<Awaited<ReturnType<T[K]>>> | null
+                Awaited<ReturnType<T[K]>> | null
             ]) : null
         }
     } & {
