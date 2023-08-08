@@ -6,7 +6,7 @@ export class DeepProxy {
     #options: { [key: string]: any } = {}
 
     constructor(
-        private options_list: string[],
+        private option_parser: (method: string) => boolean,
         private handler: (method: string, options) => any
     ) { }
 
@@ -17,14 +17,9 @@ export class DeepProxy {
 
                 if (method == 'then') return null
 
-                if (method.startsWith('$set_')) {
-                    const m = method.split('$set_')[1]
-                    if (this.options_list.includes(m)) {
-                        return value => {
-                            this.#options[m] = value
-                            return this.nest()
-                        }
-                    }
+                if (this.option_parser(method)) return (value = true) => {
+                    this.#options[method] = value
+                    return this.nest()
                 }
                 return this.handler(method, this.#options)
             }

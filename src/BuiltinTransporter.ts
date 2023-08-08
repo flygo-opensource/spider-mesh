@@ -4,6 +4,7 @@ import { Observable, Subject, debounceTime, filter, first, map, merge, mergeAll,
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
+import { SEEDING_IPS, SEEDING_IP_RANGES, UDP_PORT } from './const.js'
 
 type MeshMessage<T = any> = {
     topic: string
@@ -24,9 +25,7 @@ type TcpNode = {
 
 type HelloMessage = TcpNode
 
-const UDP_PORT = Number(process.env.UDP_PORT || 10000)
-const SEEDING_IP_RANGES = process.env.SEEDING_IP_RANGE
-const SEEDING_IPS = process.env.SEEDING_IP
+
 
 type NodeID = string
 type ListenderID = string

@@ -324,26 +324,26 @@ export class SpiderMesh {
         await this.#initing
         return await new Promise<T>(async (success, r) => {
 
-            const reject = (err) => (options.fallback !== undefined) ? success(options.fallback) : r(err);
+            const reject = (err) => (options.$fallback !== undefined) ? success(options.$fallback) : r(err);
 
             const rid = randomUUID();
 
-            options.timeout && setTimeout(() => {
+            options.$timeout && setTimeout(() => {
                 reject(new Error('TIMEOUT'))
                 this.#rpc_queue.delete(rid)
-            }, options.timeout)
+            }, options.$timeout)
 
-            !options.nevermind && this.#rpc_queue.set(rid, {
+            !options.$nevermind && this.#rpc_queue.set(rid, {
                 args,
                 last_ping: 0,
                 reject,
                 request_time: Date.now(),
                 success,
-                timeout: options.timeout,
-                target_node_id: options.node_id
+                timeout: options.$timeout,
+                target_node_id: options.$node_id
             })
 
-            const retry_count = options.retry || 1
+            const retry_count = options.$retry || 1
             for (let i = retry_count; i > 0; i--) {
 
                 try {
@@ -358,10 +358,10 @@ export class SpiderMesh {
                 } catch (e) { }
 
                 i > 1 && await new Promise(
-                    s => setTimeout(s, options.retry_delay || 1000)
+                    s => setTimeout(s, options.$retry_delay || 1000)
                 )
             }
-            if (options.fallback) return success(options.fallback)
+            if (options.$fallback) return success(options.$fallback)
         })
     }
 
@@ -423,18 +423,27 @@ export class SpiderMesh {
                                 service_name,
                                 real_method,
                                 args,
-                                { node_id: node.id } as RPCOptions
+                                { $node_id: node.id } as RPCOptions
                             )
                             return { data, node }
                         })
                     )
                 }
 
-                if (actions.has(method) || method.startsWith('$set_')) {
+                if (actions.has(method) || method.startsWith('$')) {
                     return new DeepProxy(
-                        RPCOptionsList,
+                        method => RPCOptionsList.has(method),
                         (method: string, options) => (
-                            (...args) => this.rpc(service_name, method, args, options)
+                            async (...args) => {
+                                const safe = options.$safe_mode
+                                try {
+                                    const data = await this.rpc(service_name, method, args, options)
+                                    return safe ? [null, data] : data
+                                } catch (e) {
+                                    if (safe) return [e, null]
+                                    throw e
+                                }
+                            }
                         )
                     ).nest()[method]
                 }
