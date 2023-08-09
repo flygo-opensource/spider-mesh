@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
-import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "./SpiderMeshTransporter.js";
+import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "../interfaces/SpiderMeshTransporter.js";
 import { Observable, Subject, debounceTime, filter, first, map, merge, mergeAll, mergeMap, takeUntil, tap } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
-import { SEEDING_IPS, SEEDING_IP_RANGES, UDP_PORT } from './const.js'
+import { SEEDING_IPS, SEEDING_IP_RANGES, UDP_PORT } from '../const.js'
 
 type MeshMessage<T = any> = {
     topic: string

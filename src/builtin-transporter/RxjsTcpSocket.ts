@@ -1,7 +1,7 @@
 import { TcpNetConnectOpts, createConnection, Socket } from "net"
 import { BehaviorSubject, Observable, Subject, filter, firstValueFrom, fromEvent, mergeMap, takeUntil } from "rxjs"
-import { sleep } from "./helpers/sleep.js"
-import { DEBUG } from "./const.js"
+import { sleep } from "../helpers/sleep.js"
+import { DEBUG } from "../const.js"
 
 
 

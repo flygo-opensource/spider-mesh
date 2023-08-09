@@ -1,5 +1,5 @@
 import { Observable } from "rxjs"
-import { SpiderMeshTransporterEvent } from "./SpiderMeshTransporter.js"
+import { SpiderMeshTransporterEvent } from "./interfaces/SpiderMeshTransporter.js"
 
 export type EventHub<T> = {
     publish: (data: T) => Promise<void>,

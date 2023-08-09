@@ -1,4 +1,6 @@
-import { Observable, map, mergeMap, pipe, tap } from 'rxjs'
+import { Observable } from 'rxjs'
+import { SpiderMeshTransporterEvent } from 'src/index.js'
+
 
 export const key = Symbol.for('SubscribeEvent')
 
@@ -12,7 +14,7 @@ export type EventMetadata<T = {}> = {
 export const ListenEvent = <R = any, T = {}>(factory: { new(): T }, limit?: number) => (
     target: Object,
     method,
-    descriptor: TypedPropertyDescriptor<(event: T) => R>
+    descriptor: TypedPropertyDescriptor<(event: SpiderMeshTransporterEvent<T>) => R>
 ) => {
     const event = factory.name
     Object.defineProperty(descriptor.value, key, { value: { method, event, limit } as EventMetadata<T> })

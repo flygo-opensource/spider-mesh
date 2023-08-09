@@ -1,5 +1,5 @@
 import { Observable, Subject, lastValueFrom, takeUntil, timer, toArray } from "rxjs";
-import { RPCOptions } from "./RPCOptions.js";
+import { RPCOptions } from "../RPCOptions.js";
 import { SpiderMeshNode } from "./SpiderMeshNode.js";
 
 
