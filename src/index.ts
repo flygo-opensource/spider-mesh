@@ -7,7 +7,6 @@ export { RemoteService } from './interfaces/RemoteService.js'
 export { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 export { OnMicroserviceReady } from './decorators/OnMicroserviceReady.js'
 export { Microservice } from './decorators/Microservice.js'
-export { ListenEvent } from './decorators/ListenEvent.js'
-export { EventDataType, EventHub, createSpiderMeshEvent } from './SpiderMeshEvent.js'
+export { ListenEvent, EventDataType, EventHub, createSpiderMeshEvent } from './decorators/ListenEvent.js'
 export * from './interfaces/SpiderMeshTransporter.js'
 

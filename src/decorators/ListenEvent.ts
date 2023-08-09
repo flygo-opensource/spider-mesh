@@ -2,7 +2,7 @@ import { Observable } from 'rxjs'
 import { SpiderMeshTransporterEvent } from 'src/index.js'
 
 
-export const key = Symbol.for('SubscribeEvent')
+const key = Symbol.for('SubscribeEvent')
 
 
 export type EventMetadata<T = {}> = {
@@ -11,7 +11,12 @@ export type EventMetadata<T = {}> = {
     limit?: number
 }
 
-export const ListenEvent = <R = any, T = {}>(factory: { new(): T }, limit?: number) => (
+export type EventHub<T> = {
+    publish: (data: T) => Promise<void>,
+    listen: () => Observable<SpiderMeshTransporterEvent<T>>
+}
+
+export const ListenEvent = <R = any, T = {}>(factory: { new(): EventHub<T> }, limit?: number) => (
     target: Object,
     method,
     descriptor: TypedPropertyDescriptor<(event: SpiderMeshTransporterEvent<T>) => R>
@@ -28,13 +33,16 @@ export const listEventSubscribers = (target) => {
         }
     }
     return methods
-} 
+}
+
+
+
 
 export function createSpiderMeshEvent<T = {}>() {
     return class { } as {
-        new():   {
-            publish: (data: T) => Promise<void>,
-            listen: () => Observable<T>
-        }
+        new(): EventHub<T>
     }
 }
+
+
+export type EventDataType<T extends EventHub<any>> = Parameters<T['publish']>[0] 

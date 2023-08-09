@@ -7,7 +7,7 @@ import { SpiderMeshTransporter, SpiderMeshTransporterEvent } from './interfaces/
 import { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 import { RemoteService } from './interfaces/RemoteService.js'
 import os from 'os'
-import { listEventSubscribers } from './decorators/ListenEvent.js'
+import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
 import { BehaviorSubject, Observable, Subject, filter, from, map, mergeMap, tap } from 'rxjs'
 import { readFileSync } from 'fs'
@@ -15,7 +15,6 @@ import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
 import { BuiltinTransporter } from './builtin-transporter/BuiltinTransporter.js'
 import { DEBUG, DEFAULT_NAMEPSACE, NODE_ID } from './const.js'
-import { EventHub } from './SpiderMeshEvent.js'
 
 
 
@@ -515,13 +514,15 @@ export class SpiderMesh {
         }
     }
 
-    async publish<T = any>(event: string, data: T) {
+    async publish<T = any>(topic: string | { new(): EventHub<T> }, data: T) {
         await this.#initing
+        const event = typeof topic == 'string' ? topic : topic.name
         this.transporter.publish({ event, data })
     }
 
-    listen<T = any>(topic: string) {
-        return this.transporter.listen<T>(topic)
+    listen<T = any>(topic: string | { new(): EventHub<T> }) {
+        const topic_name = typeof topic == 'string' ? topic : topic.name
+        return this.transporter.listen<T>(topic_name)
     }
 
 }
