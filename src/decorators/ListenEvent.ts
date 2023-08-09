@@ -27,3 +27,12 @@ export const listEventSubscribers = (target) => {
     }
     return methods
 } 
+
+export function createSpiderMeshEvent<T = {}>() {
+    return class { } as {
+        new():   {
+            publish: (data: T) => Promise<void>,
+            listen: () => Observable<T>
+        }
+    }
+}

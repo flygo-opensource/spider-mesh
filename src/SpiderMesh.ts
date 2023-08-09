@@ -15,6 +15,7 @@ import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
 import { BuiltinTransporter } from './BuiltinTransporter.js'
 import { DEBUG, DEFAULT_NAMEPSACE, NODE_ID } from './const.js'
+import { EventHub } from './SpiderMeshEvent.js'
 
 
 
@@ -43,10 +44,6 @@ const PACKAGE_JSON = JSON.parse(readFileSync(`package.json`, 'utf8')) || {}
 
 export type SpiderMeshNamespace = string
 
-export type SpiderMeshEvent<T> = {
-    publish: (data: T) => Promise<void>,
-    listen: () => Observable<T>
-}
 
 export class SpiderMesh {
 
@@ -460,10 +457,11 @@ export class SpiderMesh {
     }
 
     async link_event<T>(event_factory: { new(...args: any[]): T }) {
-        return {
+        const event_hub: EventHub<T> = {
             publish: (data: T) => this.publish(event_factory.name, data),
-            listen: () => this.listen(event_factory.name)
+            listen: () => this.listen<T>(event_factory.name)
         }
+        return event_hub
     }
 
     async #active_local_service(instance: any) {
