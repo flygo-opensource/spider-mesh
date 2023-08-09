@@ -45,4 +45,5 @@ export function createSpiderMeshEvent<T = {}>() {
 }
 
 
-export type EventDataType<T extends EventHub<any>> = Parameters<T['publish']>[0] 
+export type EventDataType<T extends EventHub<any>> = Parameters<T['publish']>[0]
+export type E<T extends EventHub<any>> = SpiderMeshTransporterEvent<EventDataType<T>>
