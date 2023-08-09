@@ -1,15 +1,21 @@
+import { Observable, map, mergeMap, pipe, tap } from 'rxjs'
 
 export const key = Symbol.for('SubscribeEvent')
 
-export type EventMetadata = { method: string, event: string }
 
-export const ListenEvent = <T>(factory: { new(): T }) => (
+export type EventMetadata<T = {}> = {
+    method: string,
+    event: string,
+    limit?: number
+}
+
+export const ListenEvent = <R = any, T = {}>(factory: { new(): T }, limit?: number) => (
     target: Object,
     method,
-    descriptor: TypedPropertyDescriptor<(event: T) => void>
+    descriptor: TypedPropertyDescriptor<(event: T) => R>
 ) => {
     const event = factory.name
-    Object.defineProperty(descriptor.value, key, { value: { method, event } as EventMetadata })
+    Object.defineProperty(descriptor.value, key, { value: { method, event, limit } as EventMetadata<T> })
 }
 
 export const listEventSubscribers = (target) => {
@@ -20,4 +26,4 @@ export const listEventSubscribers = (target) => {
         }
     }
     return methods
-}  
+} 

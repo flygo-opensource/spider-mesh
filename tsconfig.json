@@ -1,31 +1,34 @@
 {
   "compilerOptions": {
-    "rootDir": ".",
-    "outDir": "build",
-    "target": "ESNext",
-    "lib": [
-      "es2020",
-      "DOM",
-      "ES2021"
-    ],
     "module": "NodeNext",
-    "strict": true,
-    "sourceMap": true,
-    "moduleResolution": "NodeNext",
-    "allowSyntheticDefaultImports": true,
     "declaration": true,
+    "removeComments": true,
+    "allowSyntheticDefaultImports": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "strictPropertyInitialization": false,
-    "noImplicitAny": false,
+    "target": "ESNext",
+    "sourceMap": true,
+    "baseUrl": ".",
+    "moduleResolution": "NodeNext",
+    "outDir": "./build",
+    "incremental": false,
+    "useDefineForClassFields": true,
+    "rootDir": ".",
+    "lib": [
+      "esnext.asynciterable",
+      "dom",
+      "ESNext.Array",
+      "ESNext.String",
+      "ESNext"
+    ],
     "esModuleInterop": true,
-    "skipLibCheck": true 
+    "importHelpers": true
   },
   "exclude": [
-    "bin/*",
-    "setup.ts",
-    "dist/*",
-    "*.d.ts",
-    "build"
+    "node_modules",
+    "out",
+    "src/schema.ts",
+    "bin",
+    "./build/**/*"
   ]
 }

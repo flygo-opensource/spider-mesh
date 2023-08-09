@@ -43,6 +43,11 @@ const PACKAGE_JSON = JSON.parse(readFileSync(`package.json`, 'utf8')) || {}
 
 export type SpiderMeshNamespace = string
 
+export type SpiderMeshEvent<T> = {
+    publish: (data: T) => Promise<void>,
+    listen: () => Observable<T>
+}
+
 export class SpiderMesh {
 
 
@@ -365,7 +370,7 @@ export class SpiderMesh {
         })
     }
 
-    async link_remote_service<T>(factory: { new(...args: any[]): T }, wait_service_online: boolean = true) {
+    async link_remote_service<T>(factory: { new(...args: any[]): T }, wait_service_online: boolean = false) {
 
         const service_name = factory.name
 
@@ -472,15 +477,16 @@ export class SpiderMesh {
 
         // Active event subscribers
         const event_subscribers = listEventSubscribers(prototype)
-        for (const { event, method } of event_subscribers) {
+        for (const { event, method, limit } of event_subscribers) {
             this
                 .listen(event)
                 .pipe(
-                    filter(event => !this.#$isolated.value)
+                    filter(event => !this.#$isolated.value),
+                    mergeMap(async evt => {
+                        await instance[method]?.(evt.data, evt.sender_node_id)
+                    }, limit)
                 )
-                .subscribe(
-                    evt => instance[method]?.(evt.data, evt.sender_node_id)
-                )
+                .subscribe()
         }
 
 

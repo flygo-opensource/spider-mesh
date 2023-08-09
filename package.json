@@ -1,10 +1,13 @@
 {
   "name": "@spider-mesh/core",
   "type": "module",
-  "version": "1.0.27",
+  "version": "1.0.28",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
-  "main": "build/index.js",
-  "types": "build/index.d.ts",
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "repository": {
+    "url": "https://github.com/spider-mesh/core"
+  },
   "files": [
     "build/**/*",
     "tsconfig.json",
@@ -14,6 +17,14 @@
     "@types/node": "^18.16.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.4"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./build/src/index.d.ts",
+        "default": "./build/src/index.js"
+      }
+    }
   },
   "scripts": {
     "dev": "clear; node --no-warnings --es-module-specifier-resolution=node --experimental-specifier-resolution=node --loader ts-node/esm ",
