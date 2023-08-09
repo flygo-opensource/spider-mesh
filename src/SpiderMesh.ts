@@ -58,8 +58,6 @@ export class SpiderMesh {
         nodes: SpiderMeshNode[]
     }>
 
-
-
     #rpc_queue = new Map<string, {
         success: Function,
         reject: Function,
@@ -405,6 +403,10 @@ export class SpiderMesh {
                 if (method == '$wait_service_online') {
                     return () => this.#wait_service_online(service_name)
                 }
+
+                if(method == '$watch') return () => this.$nodes_monitor.pipe(
+                    filter(({node}) => node.services.includes(service_name))
+                )
 
                 if (method == '$list_nodes') {
                     return (
