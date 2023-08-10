@@ -84,7 +84,7 @@ export class SpiderMesh {
         return s(null)
     })
 
-    $nodes_monitor = new Subject<{ online: boolean, node: SpiderMeshNode }>()
+    $nodes_monitor = new Subject<SpiderMeshNode>()
 
     #initing: Promise<any>
 
@@ -261,7 +261,7 @@ export class SpiderMesh {
             offline: false
         }
         this.#remote_nodes.set(node.id, new_node)
-        this.$nodes_monitor.next({ node, online: true });
+        this.$nodes_monitor.next(node);
 
         (!peer_updated || node.revalidate_on_join) && await this.transporter.publish({
             event: '#join',
@@ -299,8 +299,9 @@ export class SpiderMesh {
     async #on_node_offline(id: string) {
         const node = this.#remote_nodes.get(id)
         if (!node) return
+        node.offline = true
         DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
-        this.$nodes_monitor.next({ node, online: false })
+        this.$nodes_monitor.next(node)
 
         this.#remote_rpc_services.forEach(service => {
             service.nodes = service.nodes?.filter(node => node.id != id)
@@ -404,8 +405,8 @@ export class SpiderMesh {
                     return () => this.#wait_service_online(service_name)
                 }
 
-                if(method == '$watch') return () => this.$nodes_monitor.pipe(
-                    filter(({node}) => node.services.includes(service_name))
+                if (method == '$watch') return () => this.$nodes_monitor.pipe(
+                    filter(node => node.services.includes(service_name))
                 )
 
                 if (method == '$list_nodes') {
