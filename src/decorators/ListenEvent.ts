@@ -1,5 +1,5 @@
 import { Observable } from 'rxjs'
-import { SpiderMeshTransporterEvent } from 'src/index.js'
+import { SpiderMeshTransporterEvent } from '../interfaces/SpiderMeshTransporter.js'
 
 
 const key = Symbol.for('SubscribeEvent')
