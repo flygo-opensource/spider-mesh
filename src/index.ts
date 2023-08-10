@@ -9,4 +9,4 @@ export { OnMicroserviceReady } from './decorators/OnMicroserviceReady.js'
 export { Microservice } from './decorators/Microservice.js'
 export { ListenEvent, EventDataType, EventHub, createSpiderMeshEvent, E } from './decorators/ListenEvent.js'
 export * from './interfaces/SpiderMeshTransporter.js'
-
+export { LimitConcurrentRunning } from './decorators/LimitConcurrentRunning.js'

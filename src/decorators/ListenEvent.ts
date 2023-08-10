@@ -8,22 +8,35 @@ const key = Symbol.for('SubscribeEvent')
 export type EventMetadata<T = {}> = {
     method: string,
     event: string,
-    limit?: number
+    buffer_ms?: number
 }
 
 export type EventHub<T> = {
-    publish: (data: T) => Promise<void>,
+    publish: (data: T) => void,
     listen: () => Observable<SpiderMeshTransporterEvent<T>>
 }
 
-export const ListenEvent = <R = any, T = {}>(factory: { new(): EventHub<T> }, limit?: number) => (
+export const ListenEvent = <R = any, T = {}>(factory: { new(): EventHub<T> }) => (
     target: Object,
     method,
     descriptor: TypedPropertyDescriptor<(event: SpiderMeshTransporterEvent<T>) => R>
 ) => {
     const event = factory.name
-    Object.defineProperty(descriptor.value, key, { value: { method, event, limit } as EventMetadata<T> })
+    Object.defineProperty(descriptor.value, key, { value: { method, event } as EventMetadata<T> })
 }
+
+export const ListenEventBatch = <R = any, T = {}>(factory: { new(): EventHub<T> }, buffer_ms: number) => (
+    target: Object,
+    method,
+    descriptor: TypedPropertyDescriptor<(event: Array<SpiderMeshTransporterEvent<T>>) => R>
+) => {
+    const event = factory.name
+    Object.defineProperty(descriptor.value, key, { value: { method, event, buffer_ms } as EventMetadata<T> })
+}
+
+
+
+
 
 export const listEventSubscribers = (target) => {
     const methods = [] as EventMetadata[]

@@ -9,7 +9,7 @@ import { RemoteService } from './interfaces/RemoteService.js'
 import os from 'os'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, Observable, Subject, filter, from, map, mergeMap, tap } from 'rxjs'
+import { BehaviorSubject, Observable, Subject, bufferTime, filter, from, map, mergeAll, mergeMap, tap } from 'rxjs'
 import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
@@ -458,9 +458,13 @@ export class SpiderMesh {
 
     }
 
-    async link_event<T>(event_factory: { new(...args: any[]): T }) {
+    async link_event<T>(event_factory: { new(...args: any[]): T }, publish_buffer_ms?: number) {
+        const $ = new Subject<T>()
+        const $$: Observable<T | T[]> = publish_buffer_ms ? $.pipe(bufferTime(publish_buffer_ms)) : $
+        $$.subscribe(data => this.publish(event_factory.name, data))
+
         const event_hub: EventHub<T> = {
-            publish: (data: T) => this.publish(event_factory.name, data),
+            publish: async (data: T) => $.next(data),
             listen: () => this.listen<T>(event_factory.name)
         }
         return event_hub
@@ -477,16 +481,10 @@ export class SpiderMesh {
 
         // Active event subscribers
         const event_subscribers = listEventSubscribers(prototype)
-        for (const { event, method, limit } of event_subscribers) {
-            this
-                .listen(event)
-                .pipe(
-                    filter(event => !this.#$isolated.value),
-                    mergeMap(async evt => {
-                        await instance[method]?.(evt.data, evt.sender_node_id)
-                    }, limit)
-                )
-                .subscribe()
+        for (const { event, method, buffer_ms } of event_subscribers) {
+            const $ = this.listen(event).pipe(filter(() => !this.#$isolated.value))
+            const $$: Observable<any> = buffer_ms ? $.pipe(bufferTime(buffer_ms)) : $;
+            $$.subscribe(e => instance[method]?.(e))
         }
 
 
@@ -517,15 +515,29 @@ export class SpiderMesh {
         }
     }
 
-    async publish<T = any>(topic: string | { new(): EventHub<T> }, data: T) {
+    async publish<T = any>(topic: string | { new(): EventHub<T> }, payload: T) {
         await this.#initing
         const event = typeof topic == 'string' ? topic : topic.name
+        const data = Array.isArray(payload) ? payload : [payload]
         this.transporter.publish({ event, data })
     }
 
     listen<T = any>(topic: string | { new(): EventHub<T> }) {
         const topic_name = typeof topic == 'string' ? topic : topic.name
-        return this.transporter.listen<T>(topic_name)
+        return this.transporter.listen<T[]>(topic_name).pipe(
+            map(e => {
+                if (!Array.isArray(e.data)) return []
+                return e.data.map(
+                    data => (
+                        {
+                            data,
+                            sender_node_id: e.sender_node_id
+                        } as SpiderMeshTransporterEvent<T>
+                    )
+                )
+            }),
+            mergeAll()
+        )
     }
 
 }
