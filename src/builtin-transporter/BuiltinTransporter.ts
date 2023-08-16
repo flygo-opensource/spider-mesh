@@ -4,7 +4,7 @@ import { Observable, Subject, debounceTime, filter, first, map, merge, mergeAll,
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
-import { SEEDING_IPS, SEEDING_IP_RANGES, UDP_PORT } from "../const.js"
+import { DEFAULT_NAMEPSACE, NODE_ID, SEEDING_IPS, SEEDING_IP_RANGES, UDP_PORT } from "../const.js"
 
 type MeshMessage<T = any> = {
     topic: string
@@ -45,7 +45,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     constructor(
         public readonly node_id: string,
-        public readonly namespace: string = 'default'
+        public readonly namespace: string
     ) { }
 
 
