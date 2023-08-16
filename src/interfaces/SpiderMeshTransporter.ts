@@ -3,8 +3,8 @@ import { Observable } from "rxjs"
 export type PublishMetadata<T> = {
     event: string,
     node_id?: string,
-    data: T 
-} 
+    data: T
+}
 
 export type SpiderMeshTransporterEvent<T> = {
     data: T,
@@ -22,7 +22,7 @@ export type SpiderMeshTransporter = {
 
     start: () => Promise<void>
     listen: <T = any>(topic: string) => Observable<SpiderMeshTransporterEvent<T>>
-    publish<T = any>(config: PublishMetadata<T>): Promise<void>
+    publish<T = any[]>(config: PublishMetadata<T>): Promise<void>
 }
 
 

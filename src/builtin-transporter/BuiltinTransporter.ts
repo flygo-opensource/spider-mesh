@@ -85,7 +85,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                                     const status = await this.#add_node(socket, msg.data)
                                     status && !status.peer_updated && this.#tcp_hello(status.socket, port)
                                     return
-                                }
+                                } 
                                 this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
                             }
                         )

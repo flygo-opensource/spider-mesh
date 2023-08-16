@@ -125,10 +125,7 @@ export class SpiderMesh {
     async $update_isolate_mode(active: boolean) {
         this.#$isolated.next(active)
         const me = await this.$metadata()
-        await this.transporter.publish({
-            event: '#join',
-            data: me
-        })
+        await this.publish('#join', me)
         return me
     }
 
@@ -139,11 +136,11 @@ export class SpiderMesh {
         if (msg.type == 'rpc') {
             if (msg.service == 'SpiderMesh' && !msg.method.startsWith('$')) {
                 sender_node_id && this.transporter.publish({
-                    data: {
+                    data: [{
                         id: msg.id,
                         type: 'error',
                         error: 'NOT_ALLOW'
-                    },
+                    }],
                     event: sender_node_id,
                     node_id: sender_node_id
                 })
@@ -152,11 +149,11 @@ export class SpiderMesh {
             const instance = msg.service == 'SpiderMesh' ? this : this.#local_rpc_services.get(msg.service)
 
             if (!instance) return this.transporter.publish({
-                data: {
+                data: [{
                     id: msg.id,
                     type: 'error',
                     error: 'SERVICE_NOT_FOUND'
-                },
+                }],
                 event: sender_node_id,
                 node_id: sender_node_id
             })
@@ -165,7 +162,7 @@ export class SpiderMesh {
                 sender_node_id && this.transporter.publish({
                     event: sender_node_id,
                     node_id: sender_node_id,
-                    data: { id: msg.id, type: 'callback', args }
+                    data: [{ id: msg.id, type: 'callback', args }]
                 })
             })
             try {
@@ -173,14 +170,14 @@ export class SpiderMesh {
                 sender_node_id && this.transporter.publish({
                     event: sender_node_id,
                     node_id: sender_node_id,
-                    data: { id: msg.id, type: 'response', response }
+                    data: [{ id: msg.id, type: 'response', response }]
                 })
             } catch (error) {
                 const { code, message } = error as any
                 sender_node_id && this.transporter.publish({
                     event: sender_node_id,
                     node_id: sender_node_id,
-                    data: { id: msg.id, type: 'error', error: code || message || error }
+                    data: [{ id: msg.id, type: 'error', error: code || message || error }]
                 })
             }
             return
@@ -223,7 +220,7 @@ export class SpiderMesh {
         )
 
         // Listen new node
-        this.listen<SpiderMeshNode>('#join').subscribe(({ data }) => {
+        this.listen<SpiderMeshNode>('#join').subscribe(({ data }) => {  
             this.#on_node_discovered(data)
         })
 
@@ -232,7 +229,7 @@ export class SpiderMesh {
             !online && this.#on_node_offline(node_id)
             online && this.transporter.publish({
                 event: '#join',
-                data: await this.$metadata(),
+                data: [await this.$metadata()],
                 node_id
             })
         })
@@ -265,7 +262,7 @@ export class SpiderMesh {
 
         (!peer_updated || node.revalidate_on_join) && await this.transporter.publish({
             event: '#join',
-            data: await this.$metadata(!peer_updated),
+            data: [await this.$metadata(!peer_updated)],
             node_id: node.id
         })
 
@@ -352,7 +349,7 @@ export class SpiderMesh {
                     await this.transporter.publish({
                         event: service,
                         node_id,
-                        data: { type: 'rpc', id: rid, args, method, service }
+                        data: [{ type: 'rpc', id: rid, args, method, service }]
                     })
                     return
                 } catch (e) { }
@@ -460,7 +457,7 @@ export class SpiderMesh {
 
     async link_event<T>(event_factory: { new(...args: any[]): T }, publish_buffer_ms?: number) {
         const $ = new Subject<T>()
-        const $$: Observable<T | T[]> = publish_buffer_ms ? $.pipe(bufferTime(publish_buffer_ms)) : $
+        const $$: Observable<T | T[]> = publish_buffer_ms ? $.pipe(bufferTime(publish_buffer_ms), filter(l => l.length > 0)) : $
         $$.subscribe(data => this.publish(event_factory.name, data))
 
         const event_hub: EventHub<T> = {
@@ -483,7 +480,7 @@ export class SpiderMesh {
         const event_subscribers = listEventSubscribers(prototype)
         for (const { event, method, buffer_ms } of event_subscribers) {
             const $ = this.listen(event).pipe(filter(() => !this.#$isolated.value))
-            const $$: Observable<any> = buffer_ms ? $.pipe(bufferTime(buffer_ms)) : $;
+            const $$: Observable<any> = buffer_ms ? $.pipe(bufferTime(buffer_ms), filter(l => l.length > 0)) : $;
             $$.subscribe(e => instance[method]?.(e))
         }
 
