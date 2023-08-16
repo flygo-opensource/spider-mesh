@@ -4,7 +4,7 @@ import { Observable, Subject, debounceTime, filter, first, map, merge, mergeAll,
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
-import { DEFAULT_NAMEPSACE, NODE_ID, SEEDING_IPS, SEEDING_IP_RANGES, UDP_PORT } from "../const.js"
+import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS } from "../const.js"
 
 type MeshMessage<T = any> = {
     topic: string
@@ -54,9 +54,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const udp_broadcaster = await RxjsUdpBroadcaster.start({
             namespace: this.namespace,
             node_id: this.node_id,
-            SEEDING_IP_RANGES,
-            SEEDING_IPS,
-            UDP_PORT
+            udp_port: UDP_BROADCAST_PORT,
+            udp_address: UDP_BROADCAST_ADDRESS
         })
         $tcp_server.subscribe(({ port, $connection, $error }) => {
 
@@ -85,7 +84,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                                     const status = await this.#add_node(socket, msg.data)
                                     status && !status.peer_updated && this.#tcp_hello(status.socket, port)
                                     return
-                                } 
+                                }
                                 this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
                             }
                         )

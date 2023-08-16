@@ -14,7 +14,7 @@ import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
 import { BuiltinTransporter } from './builtin-transporter/BuiltinTransporter.js'
-import { DEBUG, DEFAULT_NAMEPSACE, NODE_ID } from './const.js'
+import { DEBUG, NAMEPSACE, NODE_ID } from './const.js'
 
 
 
@@ -88,7 +88,7 @@ export class SpiderMesh {
 
     #initing: Promise<any>
 
-    constructor(private transporter: SpiderMeshTransporter = new BuiltinTransporter(NODE_ID, DEFAULT_NAMEPSACE)) {
+    constructor(private transporter: SpiderMeshTransporter = new BuiltinTransporter(NODE_ID, NAMEPSACE)) {
         this.#initing = this.#init()
     }
 

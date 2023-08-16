@@ -1,10 +1,10 @@
 import { ReplaySubject } from "rxjs"
-import { DEFAULT_NAMEPSACE } from "../const.js"
+import { NAMEPSACE } from "../const.js"
 
 export const serviceInstanceList = new ReplaySubject<{ instance: any, namespace: string }>()
 
 
-export const Microservice = (namespace: string = DEFAULT_NAMEPSACE) => {
+export const Microservice = (namespace: string = NAMEPSACE) => {
     return (
         (target: { new(...args: any[]): {} }) => {
             class C extends target {

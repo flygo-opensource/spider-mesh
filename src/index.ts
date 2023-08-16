@@ -1,4 +1,4 @@
-export { DEFAULT_NAMEPSACE, NODE_ID } from './const.js'
+export * from './const.js'
 export { BuiltinTransporter } from './builtin-transporter/BuiltinTransporter.js'
 export { SpiderMesh } from './SpiderMesh.js'
 export { SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'

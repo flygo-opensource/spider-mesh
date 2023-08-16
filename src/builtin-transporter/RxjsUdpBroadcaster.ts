@@ -4,16 +4,15 @@ import { Observable } from "rxjs"
 export type RxjsUdpBroadcasterConfig = {
     node_id: string,
     namespace: string,
-    UDP_PORT?: number,
-    SEEDING_IP_RANGES?: string,
-    SEEDING_IPS?: string
+    udp_address?: string,
+    udp_port
 }
 
 export class RxjsUdpBroadcaster {
 
 
 
-    static async start({ UDP_PORT = 10000, namespace, node_id, SEEDING_IPS, SEEDING_IP_RANGES }: RxjsUdpBroadcasterConfig) {
+    static async start({ namespace, node_id, udp_port, udp_address }: RxjsUdpBroadcasterConfig) {
         type BroadcastMessage = {
             port: number
             node_id: string
@@ -27,12 +26,12 @@ export class RxjsUdpBroadcaster {
 
         udp.bind({
             address: '0.0.0.0',
-            port: UDP_PORT,
+            port: udp_port,
         }, () => udp.setBroadcast(true))
 
         const $new_node_discovered = new Observable<BroadcastMessage & { host: string }>(o => {
             udp.on('message', async (raw, rinfo) => {
-                try { 
+                try {
                     const info = JSON.parse(raw.toString('utf-8')) as BroadcastMessage
                     if (info.namespace == namespace && info.node_id != node_id) {
                         o.next({ ...info, host: rinfo.address })
@@ -44,24 +43,10 @@ export class RxjsUdpBroadcaster {
         })
 
         const broadcast_ips = ['255.255.255.255']
-
-        // Add multicast IP or scan all subnets
-        if (SEEDING_IP_RANGES) {
-            const list = SEEDING_IP_RANGES.split(',').map(ip => ip.trim())
-            for (const range of list) {
-                for (let i = 1; i <= 255; i++) {
-                    const host = `${range}.${i}`
-                    broadcast_ips.push(host)
-                }
-            }
-        }
-
-        // Add seeding ip
-        if (SEEDING_IPS) {
-            const list = SEEDING_IPS.split(',').map(ip => ip.trim())
-            for (const host of list) {
-                broadcast_ips.push(host)
-            }
+        for (const address of udp_address.split(',').map(a => a.trim())) {
+            const splited = address.split('.')
+            splited.length == 4 && broadcast_ips.push(address)
+            splited.length == 3 && new Array(256).fill(0).map((_, i) => broadcast_ips.push(`${address}.${i}`))
         }
 
         const broadcast = async (port: number) => {
@@ -74,7 +59,7 @@ export class RxjsUdpBroadcaster {
             for (const host of broadcast_ips) {
                 await udp.send(
                     Buffer.from(json),
-                    UDP_PORT,
+                    udp_port,
                     host
                 )
             }
