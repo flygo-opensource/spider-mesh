@@ -1,12 +1,12 @@
 
 export type SpiderMeshNodeMetadata = {
-    id: string 
+    id: string
     namespace: string
     public_ip: string | null,
     ip_addresses: string[]
     last_online: number
     active: boolean
-    offline: boolean
+    online: boolean
     services: string[]
     linked: string[]
     isolate: boolean

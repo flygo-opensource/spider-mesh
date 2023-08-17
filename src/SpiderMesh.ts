@@ -9,7 +9,7 @@ import { RemoteService } from './interfaces/RemoteService.js'
 import os from 'os'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, Observable, Subject, bufferTime, filter, from, map, mergeAll, mergeMap, tap } from 'rxjs'
+import { BehaviorSubject, Observable, Subject, bufferTime, filter, from, map, mergeAll, mergeMap, tap, throttleTime } from 'rxjs'
 import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
@@ -111,7 +111,7 @@ export class SpiderMesh {
             ip_addresses: ips,
             last_online: Date.now(),
             active: true,
-            offline: false,
+            online: true,
             services: [...this.#local_rpc_services.keys()],
             namespace: this.transporter.namespace,
             linked: [...this.#remote_nodes.keys()],
@@ -220,7 +220,7 @@ export class SpiderMesh {
         )
 
         // Listen new node
-        this.listen<SpiderMeshNode>('#join').subscribe(({ data }) => {  
+        this.listen<SpiderMeshNode>('#join').subscribe(({ data }) => {
             this.#on_node_discovered(data)
         })
 
@@ -239,6 +239,11 @@ export class SpiderMesh {
             mergeMap(async ({ instance }) => {
                 await this.#active_local_service(instance)
                 await this.#active_ready_hooks(instance)
+            }),
+            throttleTime(1000),
+            mergeMap(async () => {
+                const me = await this.$metadata()
+                await this.publish('#join', me)
             })
         ).subscribe()
     }
@@ -255,7 +260,7 @@ export class SpiderMesh {
         const new_node: SpiderMeshNode = {
             ...discovered || {},
             ...node,
-            offline: false
+            online: true
         }
         this.#remote_nodes.set(node.id, new_node)
         this.$nodes_monitor.next(node);
@@ -296,7 +301,7 @@ export class SpiderMesh {
     async #on_node_offline(id: string) {
         const node = this.#remote_nodes.get(id)
         if (!node) return
-        node.offline = true
+        node.online = false
         DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
         this.$nodes_monitor.next(node)
 
@@ -512,11 +517,11 @@ export class SpiderMesh {
         }
     }
 
-    async publish<T = any>(topic: string | { new(): EventHub<T> }, payload: T) {
+    async publish<T = any>(topic: string | { new(): EventHub<T> }, payload: T, node_id?: string) {
         await this.#initing
         const event = typeof topic == 'string' ? topic : topic.name
         const data = Array.isArray(payload) ? payload : [payload]
-        this.transporter.publish({ event, data })
+        this.transporter.publish({ event, data, node_id })
     }
 
     listen<T = any>(topic: string | { new(): EventHub<T> }) {
