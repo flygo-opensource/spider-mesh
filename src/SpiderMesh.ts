@@ -314,9 +314,10 @@ export class SpiderMesh {
         })
     }
 
-    #caculate_rpc_node_id(service_name: string) {
+    #caculate_rpc_node_id(service_name: string, fixed_node_id?: string) {
         const current = this.#remote_rpc_services.get(service_name)
         if (!current) return
+        if (fixed_node_id && current.nodes.every(node => node.id != fixed_node_id)) return
         const index = ++current.last_call_index % current.nodes.length
         return current.nodes[index].id
 
@@ -349,13 +350,9 @@ export class SpiderMesh {
             for (let i = retry_count; i > 0; i--) {
 
                 try {
-                    const node_id = this.#caculate_rpc_node_id(service)
-                    if (!node_id) throw new Error(`CAN_NOT_SELECT_SERVICE_NODE`)
-                    await this.transporter.publish({
-                        event: service,
-                        node_id,
-                        data: [{ type: 'rpc', id: rid, args, method, service }]
-                    })
+                    const node_id = this.#caculate_rpc_node_id(service, options.$node_id)
+                    if (!node_id) throw new Error(`SERVICE_NODE_ID_NOT_FOUND`)
+                    await this.publish(service, { type: 'rpc', id: rid, args, method, service }, node_id)
                     return
                 } catch (e) { }
 
