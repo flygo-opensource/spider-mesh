@@ -1,15 +1,14 @@
 import { TcpNetConnectOpts, createConnection, Socket } from "net"
-import { BehaviorSubject, Observable, Subject, filter, firstValueFrom, fromEvent, mergeMap, takeUntil } from "rxjs"
+import { BehaviorSubject, Observable, Subject, filter, firstValueFrom, fromEvent, map, mergeMap, takeUntil } from "rxjs"
 import { sleep } from "../helpers/sleep.js"
 import { DEBUG } from "../const.js"
-
+import frame from 'frame-stream'
 
 
 export class RxjsTcpSocket<T = any> {
 
-    static readonly #separator = String.fromCharCode(0x1E)
     #$outgoing_data = new Subject<Buffer>()
-    $incoming_data = new Subject<T>()
+    $incoming_data = new Subject<Buffer>()
     $status = new BehaviorSubject<'connecting' | 'ready' | 'closed' | 'error'>('connecting')
     rawSocket: Socket
 
@@ -57,50 +56,29 @@ export class RxjsTcpSocket<T = any> {
 
         this.rawSocket = socket
 
+        const encoder = frame.encode()
+        const decoder = frame.decode()
+
+        encoder.pipe(socket)
+
+
         this.#$outgoing_data.pipe(
             takeUntil(this.$status.pipe(filter(s => s == 'error' || s == 'closed'))),
-            mergeMap(async buffer => {
-                const wrote = socket.write(buffer)
-                !wrote && await firstValueFrom(fromEvent(socket, 'drain'))
-            }, 1)
+            map(data => encoder.write(data), 1)
         ).subscribe()
 
-        let buffer = ''
-        socket.on('data', msg => {
 
-            buffer += msg.toString('utf8')
-
-            if (buffer.includes(RxjsTcpSocket.#separator)) {
-                const parts = buffer.split(RxjsTcpSocket.#separator)
-                for (const part of parts) {
-                    if (part != '') {
-                        try {
-                            const json = JSON.parse(part)
-                            this.$incoming_data.next(json) 
-                            DEBUG && console.log({
-                                time: `${new Date().getMinutes()}:${new Date().getSeconds()}:${new Date().getMilliseconds()}`,
-                                received: json
-                            })
-                        } catch (e) {
-
-                        }
-                    }
-                }
-                buffer = parts.pop() || ''
-            }
-        })
+        socket.pipe(decoder).on('data', (msg: Buffer) => this.$incoming_data.next(msg))
 
     }
 
 
-    async write(data: T) {
-        const msg = JSON.stringify(data) + RxjsTcpSocket.#separator
-        const buffer = Buffer.from(msg) 
+    async write(data: Buffer) {
         DEBUG && console.log({
             time: `${new Date().getMinutes()}:${new Date().getSeconds()}:${new Date().getMilliseconds()}`,
             send: data
         })
-        this.#$outgoing_data.next(buffer)
+        this.#$outgoing_data.next(data)
     }
 }
 

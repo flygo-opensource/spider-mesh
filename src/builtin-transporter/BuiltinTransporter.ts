@@ -5,6 +5,7 @@ import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
 import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS } from "../const.js"
+import { Encoder } from "../Encoder.js";
 
 type MeshMessage<T = any> = {
     topic: string
@@ -74,7 +75,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 map(socket => {
                     socket.$incoming_data
                         .pipe(
-                            filter(msg => !!msg),
+                            map(buf => Encoder.decode<MeshMessage>(buf)),
                             filter(msg => msg.sender_node_id != this.node_id),
                             filter(msg => msg.namespace == this.namespace),
                         )
@@ -175,7 +176,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             sender_node_id: this.node_id,
             topic: '#hello'
         }
-        tcp_socket.write(msg)
+        tcp_socket.write(Encoder.encode(msg))
 
 
     }
@@ -213,16 +214,18 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             topic: event || node_id || '#'
         }
 
+        const buf = Encoder.encode(msg)
+
         if (node_id == 'all' || !node_id) {
             for (const node_id of this.#events_map.get(event) || []) {
                 const node = this.#nodes_map.get(node_id)
-                await node?.socket?.write(msg)
+                await node?.socket?.write(buf)
             }
             return
         }
 
 
-        node_id && await this.#nodes_map.get(node_id)?.socket?.write(msg)
+        node_id && await this.#nodes_map.get(node_id)?.socket?.write(buf)
 
 
 
