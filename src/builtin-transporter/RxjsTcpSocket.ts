@@ -59,16 +59,15 @@ export class RxjsTcpSocket<T = any> {
         const encoder = frame.encode()
         const decoder = frame.decode()
 
-        encoder.pipe(socket)
 
 
+        socket.on('data', data => decoder.write(data))
+        decoder.on('data', (msg: Buffer) => this.$incoming_data.next(msg))
+        encoder.on('data', buffer => socket.writable && socket.write(buffer))
         this.#$outgoing_data.pipe(
             takeUntil(this.$status.pipe(filter(s => s == 'error' || s == 'closed'))),
             map(data => encoder.write(data), 1)
         ).subscribe()
-
-
-        socket.pipe(decoder).on('data', (msg: Buffer) => this.$incoming_data.next(msg))
 
     }
 

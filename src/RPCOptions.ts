@@ -1,12 +1,11 @@
 export type RPCOptions<T = any> = {
     $node_id: string
-    $ip: string
-    $load_balance_mode: 'round-robin' | 'least-connections' | 'weight'
     $timeout: number
     $nevermind: boolean
     $fallback: T
     $retry: number
-    $retry_delay: number
+    $retry_delay: number,
+    $safe_mode: boolean
 }
 
 export const RPCOptionsList = new Set([

@@ -353,7 +353,7 @@ export class SpiderMesh {
             for (let i = retry_count; i > 0; i--) {
                 try {
                     const node_id = this.#caculate_rpc_node_id(service, options.$node_id)
-                    if (!node_id) return reject(new Error(`SERVICE_INSTANCE_NOT_FOUND`))
+                    if (!node_id) return reject(Object.assign(new Error(`SERVICE_INSTANCE_NOT_FOUND`), { service }))
                     await this.publish(service, { type: 'rpc', id: rid, args, method, service }, node_id)
                     return
                 } catch (e) { }
@@ -424,13 +424,17 @@ export class SpiderMesh {
                     const nodes = [...this.#remote_nodes.values()].filter(node => node.services.includes(service_name) && !node.isolate)
                     return (...args) => from(nodes).pipe(
                         mergeMap(async node => {
-                            const data = await this.rpc(
-                                service_name,
-                                real_method,
-                                args,
-                                { $node_id: node.id } as RPCOptions
-                            )
-                            return { data, node }
+                            try {
+                                const data = await this.rpc(
+                                    service_name,
+                                    real_method,
+                                    args,
+                                    { $node_id: node.id } as RPCOptions
+                                )
+                                return { data, node, error: null }
+                            } catch (error) {
+                                return { node, data: null, error }
+                            }
                         })
                     )
                 }
