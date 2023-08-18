@@ -317,7 +317,10 @@ export class SpiderMesh {
     #caculate_rpc_node_id(service_name: string, fixed_node_id?: string) {
         const current = this.#remote_rpc_services.get(service_name)
         if (!current) return
-        if (fixed_node_id && current.nodes.every(node => node.id != fixed_node_id)) return
+        if (fixed_node_id) {
+            if (current.nodes.every(node => node.id != fixed_node_id)) return
+            return fixed_node_id
+        }
         const index = ++current.last_call_index % current.nodes.length
         return current.nodes[index].id
 
