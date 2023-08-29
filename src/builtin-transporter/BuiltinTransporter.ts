@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
 import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "../interfaces/SpiderMeshTransporter.js";
-import { Observable, Subject, debounceTime, filter, first, map, merge, mergeAll, mergeMap, takeUntil, tap } from 'rxjs'
+import { Observable, Subject, debounceTime, filter, first, from, map, merge, mergeAll, mergeMap, takeUntil, tap } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
-import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS } from "../const.js"
+import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS, PEERS } from "../const.js"
 import { Encoder } from "../Encoder.js";
 
 type MeshMessage<T = any> = {
@@ -69,6 +69,15 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                     })),
                     filter(Boolean),
                     map(socket => Object.assign(socket, { udp: true }))
+                ),
+                from(PEERS?.split('') || []).pipe(
+                    mergeAll(),
+                    map(l => {
+                        const [host, port] = l.trim()
+                        if (host && port) return { host, port: Number(port) }
+                    }),
+                    filter(Boolean),
+                    mergeMap(({ host, port }) => RxjsTcpSocket.connect({ host, port }))
                 )
             ).pipe(
                 takeUntil($error),
