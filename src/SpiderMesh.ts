@@ -312,6 +312,7 @@ export class SpiderMesh {
             reject(new Error('SERVICE_OFFLINE'))
             this.#rpc_queue.delete(rid)
         })
+        this.#remote_nodes.delete(node.id)
     }
 
     #caculate_rpc_node_id(service_name: string, fixed_node_id?: string) {
@@ -413,7 +414,7 @@ export class SpiderMesh {
                 if (method == '$list_nodes') {
                     return (
                         () => [...this.#remote_nodes.values()].filter(
-                            node => node.services.includes(service_name) && !node.isolate
+                            node => node.services.includes(service_name) && !node.isolate && node.online
                         )
                     ) as RemoteService<T>['$list_nodes']
                 }
