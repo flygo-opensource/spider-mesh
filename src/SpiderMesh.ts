@@ -261,8 +261,9 @@ export class SpiderMesh {
             ...node,
             online: true
         }
-        this.#linked_nodes.set(node.id, new_node)
-        this.$nodes_monitor.next(node);
+
+        this.#linked_nodes.set(node.id, new_node);
+
 
         (!peer_updated || node.revalidate_on_join) && await this.transporter.publish({
             event: '#join',
@@ -293,7 +294,7 @@ export class SpiderMesh {
 
 
 
-
+        this.$nodes_monitor.next(node);
 
     }
 
@@ -423,7 +424,7 @@ export class SpiderMesh {
 
                 if (method == '$list_nodes') {
                     return (
-                        () => this.#remote_rpc_services.get(service_name)?.nodes.filter(node => !node.isolate) || []
+                        () => this.#remote_rpc_services.get(service_name)?.nodes.filter(node => !node.isolate).filter(node => node.online) || []
                     ) as RemoteService<T>['$list_nodes']
                 }
 
