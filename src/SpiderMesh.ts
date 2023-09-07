@@ -56,6 +56,8 @@ export class SpiderMesh {
         nodes: SpiderMeshNode[]
     }>
 
+    #linked_nodes = new Map<string, SpiderMeshNode>()
+
     #rpc_queue = new Map<string, {
         success: Function,
         reject: Function,
@@ -113,8 +115,8 @@ export class SpiderMesh {
             online: true,
             services: [...this.#local_rpc_services.keys()],
             namespace: this.transporter.namespace,
-            linked: [...new Set(remote_nodes.map(node => node.id))],
-            isolated_nodes: [...new Set(remote_nodes.filter(node => node.isolate).map(node => node.id))],
+            linked: [...this.#linked_nodes.keys()],
+            isolated_nodes: [...new Set([...this.#linked_nodes.values()].filter(node => node.isolate).map(node => node.id))],
             isolate: this.#$isolated.value,
             revalidate_on_join
         } as SpiderMeshNodeMetadata
@@ -259,6 +261,7 @@ export class SpiderMesh {
             ...node,
             online: true
         }
+        this.#linked_nodes.set(node.id, new_node)
         this.$nodes_monitor.next(node);
 
         (!peer_updated || node.revalidate_on_join) && await this.transporter.publish({
@@ -296,14 +299,12 @@ export class SpiderMesh {
 
     async #on_node_offline(id: string) {
 
-        let node: SpiderMeshNode
         DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
 
 
         for (const service of this.#remote_rpc_services.values()) {
             service.nodes = service.nodes.filter(node => node.id != id)
-            !node && (node = service.nodes.find(n => n.id == id))
-        } 
+        }
 
         for (const [rid, { target_node_id, reject }] of this.#rpc_queue) {
             if (target_node_id == id) {
@@ -312,15 +313,24 @@ export class SpiderMesh {
             }
         }
 
+        const node = this.#linked_nodes.get(id)
         node && this.$nodes_monitor.next({ ...node, online: false })
+
     }
 
-    #caculate_rpc_node_id(service_name: string, fixed_node_id?: string) {
+    #caculate_rpc_node_id(service_name: string, options: Partial<RPCOptions> = {}) {
         const current = this.#remote_rpc_services.get(service_name)
         if (!current || current.nodes.length == 0) return
-        if (fixed_node_id) {
-            if (current.nodes.some(node => node.id == fixed_node_id)) return fixed_node_id
+        if (options.$node_id) {
+            if (current.nodes.some(node => node.id == options.$node_id)) return options.$node_id
             return
+        }
+        if (options.$ip) {
+            const node = current
+                .nodes
+                .filter(node => node.public_ip == options.$ip || node.ip_addresses.includes(options.$ip))
+                .sort((a, b) => b.last_online - a.last_online)[0]
+            return node ? node.id : null
         }
         const index = ++current.last_call_index % current.nodes.length
         return current.nodes[index].id
@@ -353,7 +363,7 @@ export class SpiderMesh {
             const retry_count = options.$retry || 1
             for (let i = retry_count; i > 0; i--) {
                 try {
-                    const node_id = this.#caculate_rpc_node_id(service, options.$node_id)
+                    const node_id = this.#caculate_rpc_node_id(service, options)
                     if (!node_id) return reject(Object.assign(new Error(`SERVICE_INSTANCE_NOT_FOUND`), { service }))
                     await this.publish(service, { type: 'rpc', id: rid, args, method, service }, node_id)
                     return

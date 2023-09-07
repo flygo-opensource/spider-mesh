@@ -5,7 +5,8 @@ export type RPCOptions<T = any> = {
     $fallback: T
     $retry: number
     $retry_delay: number,
-    $safe_mode: boolean
+    $safe_mode: boolean,
+    $ip: string
 }
 
 export const RPCOptionsList = new Set([
@@ -17,5 +18,6 @@ export const RPCOptionsList = new Set([
     '$fallback',
     '$retry',
     '$retry_delay',
-    '$safe_mode'
+    '$safe_mode',
+    '$ip'
 ])
