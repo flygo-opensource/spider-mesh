@@ -51,8 +51,6 @@ export class SpiderMesh {
 
     #local_rpc_services = new Map<string, any>()
 
-    #remote_nodes = new Map<string, SpiderMeshNode>
-
     #remote_rpc_services = new Map<string, {
         last_call_index: number
         nodes: SpiderMeshNode[]
@@ -98,6 +96,7 @@ export class SpiderMesh {
 
     async $metadata(revalidate_on_join?: boolean) {
         const ips = Object.values(networkInterfaces()).map(itf => itf?.map(ip => ip.address) || []).flat(2)
+        const remote_nodes = [...this.#remote_rpc_services.values()].map(s => s.nodes).flat(2)
         const metadata = {
             id: this.transporter.node_id,
             name: PACKAGE_JSON?.name || 'UNKNOWN',
@@ -114,8 +113,8 @@ export class SpiderMesh {
             online: true,
             services: [...this.#local_rpc_services.keys()],
             namespace: this.transporter.namespace,
-            linked: [...this.#remote_nodes.keys()],
-            isolated_nodes: [... this.#remote_nodes.values()].filter(node => node.isolate).map(node => node.id),
+            linked: [...new Set(remote_nodes.map(node => node.id))],
+            isolated_nodes: [...new Set(remote_nodes.filter(node => node.isolate).map(node => node.id))],
             isolate: this.#$isolated.value,
             revalidate_on_join
         } as SpiderMeshNodeMetadata
@@ -256,13 +255,10 @@ export class SpiderMesh {
         const peer_updated = node.linked.includes(this.transporter.node_id)
         DEBUG && console.log(`[${new Date().toLocaleString()}:${new Date().getMilliseconds()}] New node `, node, { peer_updated })
 
-        const discovered = this.#remote_nodes.get(node.id)
         const new_node: SpiderMeshNode = {
-            ...discovered || {},
             ...node,
             online: true
         }
-        this.#remote_nodes.set(node.id, new_node)
         this.$nodes_monitor.next(node);
 
         (!peer_updated || node.revalidate_on_join) && await this.transporter.publish({
@@ -299,20 +295,24 @@ export class SpiderMesh {
     }
 
     async #on_node_offline(id: string) {
-        const node = this.#remote_nodes.get(id)
-        if (!node) return
-        node.online = false
-        DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
-        this.$nodes_monitor.next(node)
 
-        this.#remote_rpc_services.forEach(service => {
-            service.nodes = service.nodes?.filter(node => node.id != id)
-        });
-        [...this.#rpc_queue.entries()].forEach(([rid, { reject }]) => {
-            reject(new Error('SERVICE_OFFLINE'))
-            this.#rpc_queue.delete(rid)
-        })
-        this.#remote_nodes.delete(node.id)
+        let node: SpiderMeshNode
+        DEBUG && console.log(`[${new Date().toLocaleString()}] Node ${id} offline`)
+
+
+        for (const service of this.#remote_rpc_services.values()) {
+            service.nodes = service.nodes.filter(node => node.id != id)
+            !node && (node = service.nodes.find(n => n.id == id))
+        } 
+
+        for (const [rid, { target_node_id, reject }] of this.#rpc_queue) {
+            if (target_node_id == id) {
+                reject(new Error('SERVICE_OFFLINE'))
+                this.#rpc_queue.delete(rid)
+            }
+        }
+
+        node && this.$nodes_monitor.next({ ...node, online: false })
     }
 
     #caculate_rpc_node_id(service_name: string, fixed_node_id?: string) {
@@ -413,16 +413,14 @@ export class SpiderMesh {
 
                 if (method == '$list_nodes') {
                     return (
-                        () => [...this.#remote_nodes.values()].filter(
-                            node => node.services.includes(service_name) && !node.isolate && node.online
-                        )
+                        () => this.#remote_rpc_services.get(service_name)?.nodes.filter(node => !node.isolate) || []
                     ) as RemoteService<T>['$list_nodes']
                 }
 
                 if (method.startsWith('$batch_')) {
                     const real_method = method.split('$batch_')?.[1]
                     if (!real_method || !actions.has(real_method)) return null
-                    const nodes = [...this.#remote_nodes.values()].filter(node => node.services.includes(service_name) && !node.isolate)
+                    const nodes = this.#remote_rpc_services.get(service_name)?.nodes.filter(node => !node.isolate) || []
                     return (...args) => from(nodes).pipe(
                         mergeMap(async node => {
                             try {
