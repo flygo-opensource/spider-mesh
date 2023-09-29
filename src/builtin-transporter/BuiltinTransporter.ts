@@ -85,6 +85,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                     socket.$incoming_data
                         .pipe(
                             map(buf => Encoder.decode<MeshMessage>(buf)),
+                            filter(Boolean),
                             filter(msg => msg.sender_node_id != this.node_id),
                             filter(msg => msg.namespace == this.namespace),
                         )

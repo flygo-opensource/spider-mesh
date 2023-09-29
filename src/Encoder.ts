@@ -37,5 +37,11 @@ function receiver(key, value) {
 
 export const Encoder = {
     encode: <T = any>(data: T) => Buffer.from(JSON.stringify(data, replacer)),
-    decode: <T = any>(data: Buffer | string) => JSON.parse(typeof data == 'string' ? data : data.toString('utf8'), receiver) as T
+    decode: <T = any>(data: Buffer | string) => {
+        try {
+            return JSON.parse(typeof data == 'string' ? data : data.toString('utf8'), receiver) as T
+        } catch (e) {
+
+        }
+    }
 }
