@@ -439,21 +439,25 @@ export class SpiderMesh {
                     if (!real_method || !actions.has(real_method)) return null
                     const nodes = this.#remote_rpc_services.get(service_name)?.nodes.filter(node => !node.isolate) || []
               
-                    return (...args) => from(nodes).pipe(
-                        mergeMap(async node => {
-                            try {
-                                const data = await this.rpc(
-                                    service_name,
-                                    real_method,
-                                    args,
-                                    { $node_id: node.id } as RPCOptions
-                                )
-                                return { data, node, error: null }
-                            } catch (error) {
-                                return { node, data: null, error }
-                            }
-                        })
-                    )
+                    return (...args) =>{
+                        const o = new Subject()
+                        from(nodes).pipe(
+                            mergeMap(async node => {
+                                try {
+                                    const data = await this.rpc(
+                                        service_name,
+                                        real_method,
+                                        args,
+                                        { $node_id: node.id } as RPCOptions
+                                    )
+                                    return { data, node, error: null }
+                                } catch (error) {
+                                    return { node, data: null, error }
+                                }
+                            })
+                        ).subscribe(o)
+                        return o 
+                    }
                 }
 
                 if (actions.has(method) || method.startsWith('$')) {
