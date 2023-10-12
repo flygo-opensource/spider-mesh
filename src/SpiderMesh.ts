@@ -397,7 +397,12 @@ export class SpiderMesh {
             'toString',
             'valueOf',
             'toLocaleString',
-            '__proto__'
+            '__proto__',
+            'OnModuleInit',
+            'OnApplicationBootstrap',
+            'OnModuleDestroy',
+            'BeforeApplicationShutdown',
+            'OnApplicationShutdown'
         ])
 
         const actions = new Set<string>()
@@ -430,8 +435,10 @@ export class SpiderMesh {
 
                 if (method.startsWith('$batch_')) {
                     const real_method = method.split('$batch_')?.[1]
+
                     if (!real_method || !actions.has(real_method)) return null
                     const nodes = this.#remote_rpc_services.get(service_name)?.nodes.filter(node => !node.isolate) || []
+              
                     return (...args) => from(nodes).pipe(
                         mergeMap(async node => {
                             try {
