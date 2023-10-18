@@ -398,11 +398,11 @@ export class SpiderMesh {
             'valueOf',
             'toLocaleString',
             '__proto__',
-            'OnModuleInit',
-            'OnApplicationBootstrap',
-            'OnModuleDestroy',
-            'BeforeApplicationShutdown',
-            'OnApplicationShutdown'
+            'onModuleInit',
+            'onApplicationBootstrap',
+            'onModuleDestroy',
+            'beforeApplicationShutdown',
+            'onApplicationShutdown'
         ])
 
         const actions = new Set<string>()
