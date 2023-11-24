@@ -34,7 +34,7 @@ export class RxjsTcpServer {
                 server.removeAllListeners()
             }
         })
-        return $online
+        return { $online }
     }
 
 }

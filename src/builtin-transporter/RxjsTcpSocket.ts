@@ -14,11 +14,11 @@ export class RxjsTcpSocket<T = any> {
 
     constructor(public readonly opened_by_remote_side: boolean) { }
 
-    static connect<T = any>(options: TcpNetConnectOpts) {
+    static connect<T = any>(options: TcpNetConnectOpts, retry_times: number = 5, retry_ms: number = 5000) {
 
         const $this = new this<T>(false)
         return new Promise<RxjsTcpSocket<T> | null>(async s => {
-            for (let i = 0; i <= 5; i++) {
+            for (let i = 1; i <= retry_times; i++) {
                 const socket = createConnection(options)
                 const connect_status = await new Promise<boolean>(s => {
                     socket.once('connect', () => s(true))
@@ -31,9 +31,12 @@ export class RxjsTcpSocket<T = any> {
                 i = 0
                 const status = await firstValueFrom($this.$status.pipe(filter(s => s == 'error' || s == 'closed')))
                 socket.removeAllListeners()
-                if (status == 'closed') return
-                DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in 1 sec`)
-                await sleep(5000)
+                if (status == 'closed') {
+                    $this.$status.next('closed')
+                    return
+                }
+                DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in ${retry_ms} ms`)
+                await sleep(retry_ms)
             }
             s(null)
             $this.$status.next('error')

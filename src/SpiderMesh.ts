@@ -98,7 +98,6 @@ export class SpiderMesh {
 
     async $metadata(revalidate_on_join?: boolean) {
         const ips = Object.values(networkInterfaces()).map(itf => itf?.map(ip => ip.address) || []).flat(2)
-        const remote_nodes = [...this.#remote_rpc_services.values()].map(s => s.nodes).flat(2)
         const metadata = {
             id: this.transporter.node_id,
             name: PACKAGE_JSON?.name || 'UNKNOWN',
@@ -132,8 +131,6 @@ export class SpiderMesh {
 
     async #node_event_handler({ data: msg, sender_node_id }: SpiderMeshTransporterEvent<RpcPayload>) {
 
-
-
         if (msg.type == 'rpc') {
             if (msg.service == 'SpiderMesh' && !msg.method.startsWith('$')) {
                 sender_node_id && this.transporter.publish({
@@ -159,6 +156,18 @@ export class SpiderMesh {
                 node_id: sender_node_id
             })
 
+            
+            if (typeof instance?.[msg.method] != 'function') return this.transporter.publish({
+                data: [{
+                    id: msg.id,
+                    type: 'error',
+                    error: 'SERVICE_METHOD_NOT_FOUND'
+                }],
+                event: sender_node_id,
+                node_id: sender_node_id
+            })
+
+
             const args = msg.args.map(arg => arg != '__FUNCTION__' ? arg : (...args) => {
                 sender_node_id && this.transporter.publish({
                     event: sender_node_id,
@@ -166,6 +175,8 @@ export class SpiderMesh {
                     data: [{ id: msg.id, type: 'callback', args }]
                 })
             })
+
+
             try {
                 const response = await instance?.[msg.method]?.(...args)
                 sender_node_id && this.transporter.publish({
@@ -174,11 +185,10 @@ export class SpiderMesh {
                     data: [{ id: msg.id, type: 'response', response }]
                 })
             } catch (error) {
-                const { code, message } = error as any
                 sender_node_id && this.transporter.publish({
                     event: sender_node_id,
                     node_id: sender_node_id,
-                    data: [{ id: msg.id, type: 'error', error: code || message || error }]
+                    data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
                 })
             }
             return
@@ -365,7 +375,7 @@ export class SpiderMesh {
             for (let i = retry_count; i > 0; i--) {
                 try {
                     const node_id = this.#caculate_rpc_node_id(service, options)
-                    if (!node_id) return reject(Object.assign(new Error(`SERVICE_INSTANCE_NOT_FOUND`), { service }))
+                    if (!node_id) return reject(Object.assign(new Error(`SERVICE_NOT_RUNNING:${service}`), { service }))
                     await this.publish(service, { type: 'rpc', id: rid, args, method, service }, node_id)
                     return
                 } catch (e) { }
@@ -438,8 +448,8 @@ export class SpiderMesh {
 
                     if (!real_method || !actions.has(real_method)) return null
                     const nodes = this.#remote_rpc_services.get(service_name)?.nodes.filter(node => !node.isolate) || []
-              
-                    return (...args) =>{
+
+                    return (...args) => {
                         const o = new Subject()
                         from(nodes).pipe(
                             mergeMap(async node => {
@@ -456,7 +466,7 @@ export class SpiderMesh {
                                 }
                             })
                         ).subscribe(o)
-                        return o 
+                        return o
                     }
                 }
 
