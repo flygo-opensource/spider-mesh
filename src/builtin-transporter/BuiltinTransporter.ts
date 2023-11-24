@@ -62,15 +62,10 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             )
             .subscribe(
                 async msg => {
-                    if (msg.topic == `#hello`) {
-                        const status = await this.#add_node(socket, msg.data)
-                        status && !status.peer_updated && this.#tcp_hello(status.socket)
-                        return
-                    }
+                    if (msg.topic == `#hello`) return await this.#add_node(socket, msg.data)
                     this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
                 }
             )
-        !socket.opened_by_remote_side && this.#tcp_hello(socket)
     }
 
     async start() {
@@ -98,7 +93,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 if (host && port) return { host, port: Number(port) }
             }),
             filter(Boolean),
-            mergeMap(({ host, port }) => RxjsTcpSocket.connect({ host, port }, 10000, 60000)),
+            mergeMap(({ host, port }) => RxjsTcpSocket.connect({ host, port, timeout: 60000, retry_times: 10000 })),
             filter(Boolean)
         )
 
@@ -146,7 +141,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             const socket = node_socket.opened_by_remote_side ? (await RxjsTcpSocket.connect({
                 host,
                 port: new_node.port,
-                keepAlive: true
+                keepAlive: true,
+                timeout: 1000
             }) || node_socket) : node_socket
 
             // When ofline 
@@ -166,15 +162,10 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             // Add to map
             this.#nodes_map.set(new_node_id, { ...new_node, host, socket, peers: new_node.peers.map(p => ({ ...p, peers: [] })) })
 
-            peer_updated && this.$nodes_status.next({ node_id: new_node_id, online: true })
+            this.$nodes_status.next({ node_id: new_node_id, online: true })
         }
 
-
-
-        return {
-            peer_updated,
-            socket: this.#nodes_map.get(new_node_id)!.socket
-        }
+        !peer_updated && this.#tcp_hello(this.#nodes_map.get(new_node_id)!.socket)
 
     }
 

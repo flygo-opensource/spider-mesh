@@ -14,8 +14,8 @@ export class RxjsTcpSocket<T = any> {
 
     constructor(public readonly opened_by_remote_side: boolean) { }
 
-    static connect<T = any>(options: TcpNetConnectOpts, retry_times: number = 5, retry_ms: number = 5000) {
-
+    static connect<T = any>(options: TcpNetConnectOpts & { retry_times?: number }) {
+        const retry_times = options.retry_times || 5
         const $this = new this<T>(false)
         return new Promise<RxjsTcpSocket<T> | null>(async s => {
             for (let i = 1; i <= retry_times; i++) {
@@ -35,8 +35,6 @@ export class RxjsTcpSocket<T = any> {
                     $this.$status.next('closed')
                     return
                 }
-                DEBUG && console.log(`[${new Date().toLocaleTimeString()}] Socket error, retrying in ${retry_ms} ms`)
-                await sleep(retry_ms)
             }
             s(null)
             $this.$status.next('error')
