@@ -1,8 +1,9 @@
 import { TcpNetConnectOpts, createConnection, Socket } from "net"
-import { BehaviorSubject, Observable, Subject, filter, firstValueFrom, fromEvent, map, mergeMap, takeUntil } from "rxjs"
+import { BehaviorSubject, Observable, Subject, filter, finalize, firstValueFrom, fromEvent, map, merge, mergeMap, takeUntil, tap, timer } from "rxjs"
 import { sleep } from "../helpers/sleep.js"
 import { DEBUG } from "../const.js"
 import frame from 'frame-stream'
+import { decode } from "punycode"
 
 
 export class RxjsTcpSocket<T = any> {
@@ -19,22 +20,18 @@ export class RxjsTcpSocket<T = any> {
         const $this = new this<T>(false)
         return new Promise<RxjsTcpSocket<T> | null>(async s => {
             for (let i = 1; i <= retry_times; i++) {
-                const socket = createConnection(options)
-                const connect_status = await new Promise<boolean>(s => {
-                    socket.once('connect', () => s(true))
-                    socket.once('error', () => s(false))
-                    socket.once('timeout', () => s(false))
-                })
-                if (!connect_status) continue
-                await $this.#join(socket)
+                const socket = createConnection({ ...options, autoSelectFamily: true })
+                const connected = await firstValueFrom(merge(
+                    fromEvent(socket, 'connect').pipe(map(() => true)),
+                    fromEvent(socket, 'error').pipe(map(() => true)),
+                    timer(1000).pipe(map(() => false))
+                ))
+                if (!connected) continue
+                const $error = $this.#join_util_error(socket)
                 s($this)
                 i = 0
-                const status = await firstValueFrom($this.$status.pipe(filter(s => s == 'error' || s == 'closed')))
-                socket.removeAllListeners()
-                if (status == 'closed') {
-                    $this.$status.next('closed')
-                    return
-                }
+                const status = await $error
+                if (status == 'closed') return
             }
             s(null)
             $this.$status.next('error')
@@ -43,33 +40,41 @@ export class RxjsTcpSocket<T = any> {
 
     static async join<T = any>(socket: Socket) {
         const $this = new this<T>(true)
-        await $this.#join(socket)
+        await $this.#join_util_error(socket)
         return $this
     }
 
-    async #join(socket: Socket) {
-        socket.once('error', () => this.$status.next('error'))
-        socket.once('close', () => this.$status.next('closed'))
-        socket.on('drain', () => this.$status.next('ready'))
-        socket.on('ready', () => this.$status.next('ready'))
-        socket.once('timeout', () => this.$status.next('error'))
-        socket.once('end', () => this.$status.next('closed'))
+    async #join_util_error(socket: Socket) {
+        const $error = merge(
+            fromEvent(socket, 'error').pipe(map(() => 'error' as 'error')),
+            fromEvent(socket, 'close').pipe(map(() => 'closed' as 'closed')),
+            fromEvent(socket, 'timeout').pipe(map(() => 'error' as 'error')),
+            fromEvent(socket, 'end').pipe(map(() => 'closed' as 'closed')),
+        ).pipe(
+            tap(status => this.$status.next(status))
+        )
+
 
         this.rawSocket = socket
 
         const encoder = frame.encode()
         const decoder = frame.decode()
 
-
-
         socket.on('data', data => decoder.write(data))
         decoder.on('data', (msg: Buffer) => this.$incoming_data.next(msg))
         encoder.on('data', buffer => socket.writable && socket.write(buffer))
+
         this.#$outgoing_data.pipe(
-            takeUntil(this.$status.pipe(filter(s => s == 'error' || s == 'closed'))),
+            takeUntil($error),
+            finalize(() => {
+                socket.removeAllListeners()
+                decoder.removeAllListeners()
+                encoder.removeAllListeners()
+            }),
             map(data => encoder.write(data), 1)
         ).subscribe()
 
+        return firstValueFrom($error)
     }
 
 

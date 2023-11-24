@@ -142,8 +142,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             const socket = node_socket.opened_by_remote_side ? (await RxjsTcpSocket.connect({
                 host,
                 port: new_node.port,
-                keepAlive: true,
-                timeout: 1000
+                keepAlive: true
             }) || node_socket) : node_socket
 
             // When ofline 
@@ -162,7 +161,6 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
             // Add to map
             this.#nodes_map.set(new_node_id, { ...new_node, host, socket, peers: new_node.peers.map(p => ({ ...p, peers: [] })) })
-
             this.$nodes_status.next({ node_id: new_node_id, online: true })
         }
 
