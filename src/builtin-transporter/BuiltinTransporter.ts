@@ -98,7 +98,8 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 if (host && port) return { host, port: Number(port) }
             }),
             filter(Boolean),
-            mergeMap(({ host, port }) => RxjsTcpSocket.connect({ host, port }, 10000, 60000))
+            mergeMap(({ host, port }) => RxjsTcpSocket.connect({ host, port }, 10000, 60000)),
+            filter(Boolean)
         )
 
         tcp_server.$online.subscribe(({ port, $connection: $tcp_connections, $error }) => {
