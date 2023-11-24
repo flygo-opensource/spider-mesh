@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "../interfaces/SpiderMeshTransporter.js";
-import { Observable, Subject, debounceTime, filter, first, from, map, merge, mergeAll, mergeMap, take, takeUntil, tap } from 'rxjs'
+import { Observable, Subject, debounceTime, filter, finalize, first, from, map, merge, mergeAll, mergeMap, take, takeUntil, tap } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
@@ -142,6 +142,14 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             keepAlive: true
         }) || node_socket) : node_socket
 
+        const cleaner = () => {
+            const node = this.#nodes_map.get(new_node_id)
+                    node && node.listening.map(evt => {
+                        this.#events_map.get(evt)?.delete(node.node_id)
+                    })
+                    this.#nodes_map.delete(new_node_id)
+                    this.$nodes_status.next({ node_id: new_node_id, online: false })
+        }
 
         socket.$status.pipe(
             takeUntil(socket.$status.pipe(filter(s => s == 'closed'))),
@@ -157,14 +165,10 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                     DEBUG && console.log({TCP_NEW_NODE: nn})
                     this.$nodes_status.next({ node_id: new_node_id, online: true })
                 } else {
-                    const node = this.#nodes_map.get(new_node_id)
-                    node && node.listening.map(evt => {
-                        this.#events_map.get(evt)?.delete(node.node_id)
-                    })
-                    this.#nodes_map.delete(new_node_id)
-                    this.$nodes_status.next({ node_id: new_node_id, online: false })
+                    cleaner()
                 }
-            })
+            }),
+            finalize(cleaner)
         ).subscribe()
 
         !peer_updated && this.#tcp_hello(node_socket)
