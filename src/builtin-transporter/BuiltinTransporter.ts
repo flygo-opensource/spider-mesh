@@ -66,6 +66,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                     this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
                 }
             )
+        !socket.opened_by_remote_side && this.#tcp_hello(socket)
     }
 
     async start() {
