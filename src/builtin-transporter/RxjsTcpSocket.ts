@@ -24,7 +24,7 @@ export class RxjsTcpSocket<T = any> {
                 const socket = createConnection({ ...options, autoSelectFamily: true })
                 const connected = await firstValueFrom(merge(
                     fromEvent(socket, 'connect').pipe(map(() => true)),
-                    fromEvent(socket, 'error').pipe(map(() => true)),
+                    fromEvent(socket, 'error').pipe(map(() => false)),
                     timer(1000).pipe(map(() => false))
                 ))
                 if (!connected) continue
