@@ -1,5 +1,5 @@
 import { createServer } from "net"
-import { Subject } from "rxjs"
+import { Observable, Subject, firstValueFrom, fromEvent, tap } from "rxjs"
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js"
 
 
@@ -10,7 +10,7 @@ export class RxjsTcpServer {
         const $online = new Subject<{
             port: number,
             $connection: Subject<RxjsTcpSocket<T>>,
-            $error: Promise<Error>
+            $error: Observable<Error>
         }>()
 
 
@@ -28,9 +28,9 @@ export class RxjsTcpServer {
                     const stable_socket = await RxjsTcpSocket.join<T>(socket)
                     $connection.next(stable_socket)
                 })
-                const $error = new Promise<Error>(s => server.once('error', s))
+                const $error = fromEvent(server, 'error') as Observable<Error>
                 $online.next({ port, $connection, $error })
-                await $error
+                await firstValueFrom($error)
                 server.removeAllListeners()
             }
         })

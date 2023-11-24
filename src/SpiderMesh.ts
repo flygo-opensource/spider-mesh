@@ -89,6 +89,7 @@ export class SpiderMesh {
     #initing: Promise<any>
 
     constructor(private transporter: SpiderMeshTransporter = new BuiltinTransporter(NODE_ID, NAMEPSACE)) {
+        DEBUG && console.log(`Node online : ${NODE_ID}`)
         this.#initing = this.#init()
     }
 

@@ -1,9 +1,8 @@
 import { TcpNetConnectOpts, createConnection, Socket } from "net"
 import { BehaviorSubject, Observable, Subject, filter, finalize, firstValueFrom, fromEvent, map, merge, mergeMap, takeUntil, tap, timer } from "rxjs"
-import { sleep } from "../helpers/sleep.js"
 import { DEBUG } from "../const.js"
 import frame from 'frame-stream'
-import { decode } from "punycode"
+import { Encoder } from "../Encoder.js"
 
 
 export class RxjsTcpSocket<T = any> {
@@ -13,7 +12,9 @@ export class RxjsTcpSocket<T = any> {
     $status = new BehaviorSubject<'connecting' | 'ready' | 'closed' | 'error'>('connecting')
     rawSocket: Socket
 
-    constructor(public readonly opened_by_remote_side: boolean) { }
+    constructor(public readonly opened_by_remote_side: boolean) {
+        opened_by_remote_side && this.$status.next('ready')
+    }
 
     static connect<T = any>(options: TcpNetConnectOpts & { retry_times?: number }) {
         const retry_times = options.retry_times || 5
@@ -27,6 +28,7 @@ export class RxjsTcpSocket<T = any> {
                     timer(1000).pipe(map(() => false))
                 ))
                 if (!connected) continue
+                $this.$status.next('ready')
                 const $error = $this.#join_util_error(socket)
                 s($this)
                 i = 0
@@ -40,7 +42,7 @@ export class RxjsTcpSocket<T = any> {
 
     static async join<T = any>(socket: Socket) {
         const $this = new this<T>(true)
-        await $this.#join_util_error(socket)
+        $this.#join_util_error(socket)
         return $this
     }
 
@@ -60,8 +62,10 @@ export class RxjsTcpSocket<T = any> {
         const encoder = frame.encode()
         const decoder = frame.decode()
 
+        decoder.on('data', (msg: Buffer) => {
+            this.$incoming_data.next(msg)
+        })
         socket.on('data', data => decoder.write(data))
-        decoder.on('data', (msg: Buffer) => this.$incoming_data.next(msg))
         encoder.on('data', buffer => socket.writable && socket.write(buffer))
 
         this.#$outgoing_data.pipe(
@@ -79,10 +83,6 @@ export class RxjsTcpSocket<T = any> {
 
 
     async write(data: Buffer) {
-        DEBUG && console.log({
-            time: `${new Date().getMinutes()}:${new Date().getSeconds()}:${new Date().getMilliseconds()}`,
-            send: data
-        })
         this.#$outgoing_data.next(data)
     }
 }

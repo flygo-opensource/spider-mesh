@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
 import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "../interfaces/SpiderMeshTransporter.js";
-import { Observable, Subject, debounceTime, filter, first, from, map, merge, mergeAll, mergeMap, takeUntil, tap } from 'rxjs'
+import { Observable, Subject, debounceTime, filter, first, from, map, merge, mergeAll, mergeMap, take, takeUntil, tap } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
-import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS, PEERS } from "../const.js"
+import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS, PEERS, DEBUG } from "../const.js"
 import { Encoder } from "../Encoder.js";
 
 type MeshMessage<T = any> = {
@@ -54,15 +54,15 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     #on_new_connection(socket: RxjsTcpSocket) {
         socket.$incoming_data
             .pipe(
-                takeUntil(socket.$status.pipe(filter(s => s == 'closed' || s == 'error'))),
+                takeUntil(socket.$status.pipe(filter(s => s == 'closed'))),
                 map(buf => Encoder.decode<MeshMessage>(buf)),
                 filter(Boolean),
                 filter(msg => msg.sender_node_id != this.node_id),
-                filter(msg => msg.namespace == this.namespace),
+                filter(msg => msg.namespace == this.namespace)
             )
             .subscribe(
                 async msg => {
-                    if (msg.topic == `#hello`) return await this.#add_node(socket, msg.data)
+                    if (msg.topic == `#hello`) return await this.#sync_node(socket, msg.data)
                     this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
                 }
             )
@@ -121,11 +121,10 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     }
 
 
-    async #add_node(node_socket: RxjsTcpSocket<any>, new_node: HelloMessage) {
+    async #sync_node(node_socket: RxjsTcpSocket<any>, new_node: HelloMessage) {
         const host = node_socket.rawSocket.remoteAddress
         if (!host) return
 
-        // DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node online [${host}]`, new_node)
         const new_node_id = new_node.node_id
         const remote_info = new_node.peers.find(p => p.node_id == this.node_id)
         const peer_updated = remote_info ? remote_info.version == this.#version : false
@@ -135,36 +134,40 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             this.#events_map.get(event)?.add(new_node_id)
         }
 
+        if (this.#nodes_map.has(new_node_id)) return
 
-        if (!this.#nodes_map.has(new_node_id)) {
+        const socket = node_socket.opened_by_remote_side ? (await RxjsTcpSocket.connect({
+            host,
+            port: new_node.port,
+            keepAlive: true
+        }) || node_socket) : node_socket
 
 
-            const socket = node_socket.opened_by_remote_side ? (await RxjsTcpSocket.connect({
-                host,
-                port: new_node.port,
-                keepAlive: true
-            }) || node_socket) : node_socket
-
-            // When ofline 
-            socket.$status.pipe(
-                filter(status => status == 'closed' || status == 'error'),
-                first()
-            ).subscribe(() => {
-                // DEBUG && console.log(`[${new Date().toLocaleTimeString()}] [TCP] Node offline ${new_node_id}`)
-                const node = this.#nodes_map.get(new_node_id)
-                node && node.listening.map(evt => {
-                    this.#events_map.get(evt)?.delete(node.node_id)
-                })
-                this.#nodes_map.delete(new_node_id)
-                this.$nodes_status.next({ node_id: new_node_id, online: false })
+        socket.$status.pipe(
+            takeUntil(socket.$status.pipe(filter(s => s == 'closed'))),
+            tap(status => {
+                if (status == 'ready') {
+                    const nn = {
+                        ...new_node,
+                        host,
+                        socket,
+                        peers: new_node.peers.map(p => ({ ...p, peers: [] }))
+                    }
+                    this.#nodes_map.set(new_node_id, nn)
+                    DEBUG && console.log({TCP_NEW_NODE: nn})
+                    this.$nodes_status.next({ node_id: new_node_id, online: true })
+                } else {
+                    const node = this.#nodes_map.get(new_node_id)
+                    node && node.listening.map(evt => {
+                        this.#events_map.get(evt)?.delete(node.node_id)
+                    })
+                    this.#nodes_map.delete(new_node_id)
+                    this.$nodes_status.next({ node_id: new_node_id, online: false })
+                }
             })
+        ).subscribe()
 
-            // Add to map
-            this.#nodes_map.set(new_node_id, { ...new_node, host, socket, peers: new_node.peers.map(p => ({ ...p, peers: [] })) })
-            this.$nodes_status.next({ node_id: new_node_id, online: true })
-        }
-
-        !peer_updated && this.#tcp_hello(this.#nodes_map.get(new_node_id)!.socket)
+        !peer_updated && this.#tcp_hello(node_socket)
 
     }
 
