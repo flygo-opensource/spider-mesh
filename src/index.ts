@@ -10,7 +10,7 @@ export {
     Microservice,
     NestJSExposeMicroservice,
     exposeMicroservice,
-    serviceInstanceList
+    NestJSLinkMicroservice
 } from './decorators/Microservice.js'
 export {
     ListenEvent,
