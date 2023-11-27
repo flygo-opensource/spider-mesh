@@ -1,10 +1,11 @@
 import { ReplaySubject } from "rxjs"
 import { NAMEPSACE } from "../const.js"
+import { ServiceMetadata } from "src/interfaces/SpiderMeshNode.js"
 
-export const serviceInstanceList = new ReplaySubject<{ instance: any, namespace: string }>()
+export const serviceInstanceList = new ReplaySubject<{ instance: any, namespace: string, metadata: ServiceMetadata }>()
 
 
-export const Microservice = (namespace: string = NAMEPSACE) => {
+export const Microservice = (namespace: string = NAMEPSACE, metadata: ServiceMetadata = {}) => {
     return (
         (target: { new(...args: any[]): {} }) => {
             class C extends target {
@@ -12,7 +13,8 @@ export const Microservice = (namespace: string = NAMEPSACE) => {
                     super(...args)
                     serviceInstanceList.next({
                         instance: this,
-                        namespace
+                        namespace,
+                        metadata
                     })
                 }
             }

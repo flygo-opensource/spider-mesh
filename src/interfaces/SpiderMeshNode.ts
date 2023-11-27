@@ -1,3 +1,6 @@
+export type ServiceMetadata = {
+    [key: string]: string | number | boolean
+}
 
 export type SpiderMeshNodeMetadata = {
     id: string
@@ -7,10 +10,11 @@ export type SpiderMeshNodeMetadata = {
     last_online: number
     active: boolean
     online: boolean
-    services: string[]
+    services: { [service_id: string]: { instance: any, metadata: ServiceMetadata } }
     linked: string[]
     isolate: boolean
     revalidate_on_join?: boolean
+
 }
 
 export type SpiderMeshNode = SpiderMeshNodeMetadata

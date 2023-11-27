@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { get } from 'http'
 import { networkInterfaces } from 'os'
 import { DeepProxy } from './decorators/DeepProxy.js'
-import { SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'
+import { ServiceMetadata, SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'
 import { SpiderMeshTransporter, SpiderMeshTransporterEvent } from './interfaces/SpiderMeshTransporter.js'
 import { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 import { RemoteService } from './interfaces/RemoteService.js'
@@ -49,7 +49,7 @@ export class SpiderMesh {
 
     #$isolated = new BehaviorSubject<boolean>(false)
 
-    #local_rpc_services = new Map<string, any>()
+    #local_rpc_services = new Map<string, { instance: any, metadata: any }>()
 
     #remote_rpc_services = new Map<string, {
         last_call_index: number
@@ -99,6 +99,9 @@ export class SpiderMesh {
 
     async $metadata(revalidate_on_join?: boolean) {
         const ips = Object.values(networkInterfaces()).map(itf => itf?.map(ip => ip.address) || []).flat(2)
+        const services = [...this.#local_rpc_services.entries()].reduce(
+            (p, [service_id, { metadata }]) => ({ ...p, [service_id]: metadata }), {}
+        )
         const metadata = {
             id: this.transporter.node_id,
             name: PACKAGE_JSON?.name || 'UNKNOWN',
@@ -113,7 +116,7 @@ export class SpiderMesh {
             last_online: Date.now(),
             active: true,
             online: true,
-            services: [...this.#local_rpc_services.keys()],
+            services,
             namespace: this.transporter.namespace,
             linked: [...this.#linked_nodes.keys()],
             isolated_nodes: [...new Set([...this.#linked_nodes.values()].filter(node => node.isolate).map(node => node.id))],
@@ -145,7 +148,7 @@ export class SpiderMesh {
                 })
                 return
             }
-            const instance = msg.service == 'SpiderMesh' ? this : this.#local_rpc_services.get(msg.service)
+            const instance = msg.service == 'SpiderMesh' ? this : this.#local_rpc_services.get(msg.service)?.instance
 
             if (!instance) return this.transporter.publish({
                 data: [{
@@ -157,7 +160,7 @@ export class SpiderMesh {
                 node_id: sender_node_id
             })
 
-            
+
             if (typeof instance?.[msg.method] != 'function') return this.transporter.publish({
                 data: [{
                     id: msg.id,
@@ -248,8 +251,8 @@ export class SpiderMesh {
 
         serviceInstanceList.pipe(
             filter(i => i.namespace == this.transporter.namespace),
-            mergeMap(async ({ instance }) => {
-                await this.#active_local_service(instance)
+            mergeMap(async ({ instance, metadata }) => {
+                await this.#active_local_service(instance, metadata)
                 await this.#active_ready_hooks(instance)
             }),
             throttleTime(1000),
@@ -282,7 +285,7 @@ export class SpiderMesh {
             node_id: node.id
         })
 
-        peer_updated && node.services.forEach(service => {
+        peer_updated && Object.values(node.services).forEach(({ instance: service }) => {
 
             const $service = this.#remote_rpc_services.get(service)
 
@@ -435,7 +438,7 @@ export class SpiderMesh {
                 }
 
                 if (method == '$watch') return () => this.$nodes_monitor.pipe(
-                    filter(node => node.services.includes(service_name))
+                    filter(node => !!node.services[service_name])
                 )
 
                 if (method == '$list_nodes') {
@@ -507,12 +510,12 @@ export class SpiderMesh {
         return event_hub
     }
 
-    async #active_local_service(instance: any) {
+    async #active_local_service(instance: any, metadata: ServiceMetadata) {
 
         const prototype = Object.getPrototypeOf(instance)
         const name = prototype.constructor.name
 
-        this.#local_rpc_services.set(name, instance)
+        this.#local_rpc_services.set(name, { instance, metadata })
         this.listen(name).subscribe(evt => this.#node_event_handler(evt))
 
 
