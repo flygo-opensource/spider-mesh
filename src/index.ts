@@ -6,7 +6,12 @@ export { SpiderMeshTransporter, SpiderMeshTransporterFactory } from './interface
 export { RemoteService } from './interfaces/RemoteService.js'
 export { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 export { OnMicroserviceReady } from './decorators/OnMicroserviceReady.js'
-export { Microservice } from './decorators/Microservice.js'
+export {
+    Microservice,
+    NestJSExposeMicroservice,
+    exposeMicroservice,
+    serviceInstanceList
+} from './decorators/Microservice.js'
 export {
     ListenEvent,
     EventDataType,
