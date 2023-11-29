@@ -20,13 +20,11 @@ export class RxjsTcpSocket<T = any> {
         return new Promise<RxjsTcpSocket<T> | null>(async s => {
             for (let i = 1; i <= retry_times; i++) {
                 const socket = createConnection({ ...options, autoSelectFamily: true })
-                console.log(`Connect to ${options.host}:${options.port}`)
                 const connected = await firstValueFrom(merge(
                     fromEvent(socket, 'connect').pipe(map(() => true)),
                     fromEvent(socket, 'error').pipe(map(() => false)),
                     timer(1000).pipe(map(() => false))
                 ))
-                console.log({connected})
                 if (!connected) {
                     await sleep(retry_delay_ms)
                     continue
