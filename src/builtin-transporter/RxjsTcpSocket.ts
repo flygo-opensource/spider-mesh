@@ -23,9 +23,10 @@ export class RxjsTcpSocket<T = any> {
                 const connected = await firstValueFrom(merge(
                     fromEvent(socket, 'connect').pipe(map(() => true)),
                     fromEvent(socket, 'error').pipe(map(() => false)),
-                    timer(1000).pipe(map(() => false))
+                    timer(1000).pipe( map(() => false))
                 ))
-                if (!connected) {
+                if (!connected) { 
+                    socket.destroy()
                     await sleep(retry_delay_ms)
                     continue
                 }
