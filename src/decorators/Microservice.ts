@@ -1,7 +1,7 @@
 import { ReplaySubject } from "rxjs"
 import { NAMEPSACE } from "../const.js"
-import { ServiceMetadata } from "src/interfaces/SpiderMeshNode.js"
-import { SpiderMesh } from "src/SpiderMesh.js"
+import { ServiceMetadata } from "../../src/interfaces/SpiderMeshNode.js"
+import { SpiderMesh } from "../../src/SpiderMesh.js"
 
 export const serviceInstanceList = new ReplaySubject<{ instance: any, namespace: string, metadata: ServiceMetadata }>()
 
