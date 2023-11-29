@@ -83,7 +83,9 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const $udp_connections = udp_broadcaster.$new_node_discovered.pipe(
             mergeMap(node => RxjsTcpSocket.connect<MeshMessage>({
                 ...node,
-                keepAlive: true
+                keepAlive: true,
+                retry_delay_ms: 5000,
+                retry_times: 5
             })),
             filter(Boolean)
         )
@@ -94,7 +96,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                 if (host && port) return { host, port: Number(port) }
             }),
             filter(Boolean),
-            mergeMap(({ host, port }) => RxjsTcpSocket.connect({ host, port, timeout: 60000, retry_times: 10000 })),
+            mergeMap(({ host, port }) => RxjsTcpSocket.connect({ host, port, retry_delay_ms: 30000, retry_times: 10000 })),
             filter(Boolean)
         )
 
@@ -139,16 +141,18 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         const socket = node_socket.opened_by_remote_side ? (await RxjsTcpSocket.connect({
             host,
             port: new_node.port,
-            keepAlive: true
+            keepAlive: true,
+            retry_delay_ms: 200,
+            retry_times: 5
         }) || node_socket) : node_socket
 
         const cleaner = () => {
             const node = this.#nodes_map.get(new_node_id)
-                    node && node.listening.map(evt => {
-                        this.#events_map.get(evt)?.delete(node.node_id)
-                    })
-                    this.#nodes_map.delete(new_node_id)
-                    this.$nodes_status.next({ node_id: new_node_id, online: false })
+            node && node.listening.map(evt => {
+                this.#events_map.get(evt)?.delete(node.node_id)
+            })
+            this.#nodes_map.delete(new_node_id)
+            this.$nodes_status.next({ node_id: new_node_id, online: false })
         }
 
         socket.$status.pipe(
@@ -162,7 +166,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                         peers: new_node.peers.map(p => ({ ...p, peers: [] }))
                     }
                     this.#nodes_map.set(new_node_id, nn)
-                    DEBUG && console.log({TCP_NEW_NODE: nn})
+                    DEBUG && console.log({ TCP_NEW_NODE: nn })
                     this.$nodes_status.next({ node_id: new_node_id, online: true })
                 } else {
                     cleaner()

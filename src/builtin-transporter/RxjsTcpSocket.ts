@@ -1,8 +1,7 @@
 import { TcpNetConnectOpts, createConnection, Socket } from "net"
-import { BehaviorSubject, Observable, Subject, filter, finalize, firstValueFrom, fromEvent, map, merge, mergeMap, takeUntil, tap, timer } from "rxjs"
-import { DEBUG } from "../const.js"
+import { BehaviorSubject, Subject, finalize, firstValueFrom, fromEvent, map, merge, takeUntil, tap, timer } from "rxjs"
 import frame from 'frame-stream'
-import { Encoder } from "../Encoder.js"
+import { sleep } from "../../src/helpers/sleep.js"
 
 
 export class RxjsTcpSocket<T = any> {
@@ -16,18 +15,22 @@ export class RxjsTcpSocket<T = any> {
         opened_by_remote_side && this.$status.next('ready')
     }
 
-    static connect<T = any>(options: TcpNetConnectOpts & { retry_times?: number }) {
-        const retry_times = options.retry_times || 5
+    static connect<T = any>({ retry_times = 5, retry_delay_ms = 5000, ...options }: TcpNetConnectOpts & { retry_times?: number, retry_delay_ms?: number }) {
         const $this = new this<T>(false)
         return new Promise<RxjsTcpSocket<T> | null>(async s => {
             for (let i = 1; i <= retry_times; i++) {
                 const socket = createConnection({ ...options, autoSelectFamily: true })
+                console.log(`Connect to ${options.host}:${options.port}`)
                 const connected = await firstValueFrom(merge(
                     fromEvent(socket, 'connect').pipe(map(() => true)),
                     fromEvent(socket, 'error').pipe(map(() => false)),
                     timer(1000).pipe(map(() => false))
                 ))
-                if (!connected) continue
+                console.log({connected})
+                if (!connected) {
+                    await sleep(retry_delay_ms)
+                    continue
+                }
                 $this.$status.next('ready')
                 const $error = $this.#join_util_error(socket)
                 s($this)
