@@ -241,12 +241,15 @@ export class SpiderMesh {
 
         // Manage nodes
         this.transporter.$nodes_status.subscribe(async ({ node_id, online }) => {
-            !online && this.#on_node_offline(node_id)
-            online && this.transporter.publish({
-                event: '#join',
-                data: [await this.$metadata()],
-                node_id
-            })
+            if (online) {
+                this.transporter.publish({
+                    event: '#join',
+                    data: [await this.$metadata()],
+                    node_id
+                })
+            } else {
+                this.#on_node_offline(node_id)
+            }
         })
 
         serviceInstanceList.pipe(
@@ -269,8 +272,7 @@ export class SpiderMesh {
         if (this.#$isolated.value) return
 
         const peer_updated = node.linked.includes(this.transporter.node_id)
-        DEBUG && console.log(`[${new Date().toLocaleString()}:${new Date().getMilliseconds()}] New node `, node, { peer_updated })
-
+        DEBUG && console.log(`[${new Date().toLocaleString()}:${new Date().getMilliseconds()}] New ${peer_updated ? 'updated' : 'out of date'} node`, node)
         const new_node: SpiderMeshNode = {
             ...node,
             online: true
@@ -278,19 +280,19 @@ export class SpiderMesh {
 
         this.#linked_nodes.set(node.id, new_node);
 
-
         (!peer_updated || node.revalidate_on_join) && await this.transporter.publish({
             event: '#join',
             data: [await this.$metadata(!peer_updated)],
             node_id: node.id
         })
 
-        peer_updated && Object.values(node.services).forEach(({ instance: service }) => {
 
-            const $service = this.#remote_rpc_services.get(service)
+        peer_updated && Object.keys(node.services).forEach(service_id => {
+
+            const $service = this.#remote_rpc_services.get(service_id)
 
             if (!$service) {
-                this.#remote_rpc_services.set(service, {
+                this.#remote_rpc_services.set(service_id, {
                     last_call_index: -1,
                     nodes: [node]
                 })
@@ -305,7 +307,6 @@ export class SpiderMesh {
             }
 
         })
-
 
 
         this.$nodes_monitor.next(node);

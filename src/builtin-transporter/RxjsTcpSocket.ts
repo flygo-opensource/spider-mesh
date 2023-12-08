@@ -18,17 +18,21 @@ export class RxjsTcpSocket<T = any> {
     static connect<T = any>({ retry_times = 5, retry_delay_ms = 5000, ...options }: TcpNetConnectOpts & { retry_times?: number, retry_delay_ms?: number }) {
         const $this = new this<T>(false)
         return new Promise<RxjsTcpSocket<T> | null>(async s => {
-            for (let i = 1; i <= retry_times; i++) {
+            for (let i = 0; i <= retry_times; i++) {
                 const socket = createConnection({ ...options, autoSelectFamily: true })
                 const connected = await firstValueFrom(merge(
                     fromEvent(socket, 'connect').pipe(map(() => true)),
                     fromEvent(socket, 'error').pipe(map(() => false)),
-                    timer(1000).pipe( map(() => false))
+                    timer(1000).pipe(map(() => false))
                 ))
-                if (!connected) { 
+                if (!connected) {
                     socket.destroy()
                     await sleep(retry_delay_ms)
-                    continue
+                    if (i == 0) {
+                        break
+                    } else {
+                        continue
+                    }
                 }
                 $this.$status.next('ready')
                 const $error = $this.#join_util_error(socket)
