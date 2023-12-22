@@ -341,15 +341,15 @@ export class SpiderMesh {
             if (current.nodes.some(node => node.id == options.$node_id)) return options.$node_id
             return
         }
-        if (options.$ip) {
-            const node = current
+        const nodes = options.$ip ? (
+            current
                 .nodes
                 .filter(node => node.public_ip == options.$ip || node.ip_addresses.includes(options.$ip))
-                .sort((a, b) => b.last_online - a.last_online)[0]
-            return node ? node.id : null
-        }
-        const index = ++current.last_call_index % current.nodes.length
-        return current.nodes[index].id
+        ) : current.nodes
+        if (nodes.length == 0) return
+
+        const index = ++current.last_call_index % nodes.length
+        return nodes[index].id
 
     }
 
