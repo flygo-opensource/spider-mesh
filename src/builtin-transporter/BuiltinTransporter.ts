@@ -4,7 +4,7 @@ import { Observable, Subject, debounceTime, filter, finalize, first, from, map, 
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
-import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS, PEERS, DEBUG } from "../const.js"
+import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS, DEBUG } from "../const.js"
 import { Encoder } from "../Encoder.js";
 
 type MeshMessage<T = any> = {
@@ -90,19 +90,9 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
             filter(Boolean)
         )
 
-        const $peer_connections = from(PEERS ? PEERS.split(',') : []).pipe(
-            map(l => {
-                const [host, port] = l.trim().split(':')
-                if (host && port) return { host, port: Number(port) }
-            }),
-            filter(Boolean),
-            mergeMap(({ host, port }) => RxjsTcpSocket.connect({ host, port, retry_delay_ms: 30000, retry_times: 10000 })),
-            filter(Boolean)
-        )
-
         tcp_server.$online.subscribe(({ port, $connection: $tcp_connections, $error }) => {
             this.#running_tcp_port = port
-            merge($tcp_connections, $udp_connections, $peer_connections).pipe(
+            merge($tcp_connections, $udp_connections).pipe(
                 takeUntil($error),
                 map(socket => this.#on_new_connection(socket))
             ).subscribe()
