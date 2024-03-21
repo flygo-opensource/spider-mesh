@@ -525,7 +525,7 @@ export class SpiderMesh {
         for (const { event, method, buffer_ms } of event_subscribers) {
             const $ = this.listen(event).pipe(filter(() => !this.#$isolated.value))
             const $$: Observable<any> = buffer_ms ? $.pipe(bufferTime(buffer_ms), filter(l => l.length > 0)) : $;
-            $$.subscribe(e => instance[method]?.(e))
+            $$.subscribe(e => instance[method]?.(e, this))
         }
 
 
@@ -552,7 +552,7 @@ export class SpiderMesh {
 
         // Active ready hook
         for (const { method } of listReadyHookMethods(Object.getPrototypeOf(instance))) {
-            instance[method]?.()
+            instance[method]?.(this)
         }
     }
 

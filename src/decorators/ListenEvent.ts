@@ -1,5 +1,6 @@
 import { Observable } from 'rxjs'
 import { SpiderMeshTransporterEvent } from '../interfaces/SpiderMeshTransporter.js'
+import { SpiderMesh } from 'src/SpiderMesh.js'
 
 
 const key = Symbol.for('SubscribeEvent')
@@ -19,7 +20,7 @@ export type EventHub<T> = {
 export const ListenEvent = <R = any, T = {}>(factory: { new(): EventHub<T> }) => (
     target: Object,
     method,
-    descriptor: TypedPropertyDescriptor<(event: SpiderMeshTransporterEvent<T>) => R>
+    descriptor: TypedPropertyDescriptor<(event: SpiderMeshTransporterEvent<T>, sm?: SpiderMesh) => R>
 ) => {
     const event = factory.name
     Object.defineProperty(descriptor.value, key, { value: { method, event } as EventMetadata<T> })
@@ -28,7 +29,7 @@ export const ListenEvent = <R = any, T = {}>(factory: { new(): EventHub<T> }) =>
 export const ListenEventBatch = <R = any, T = {}>(factory: { new(): EventHub<T> }, buffer_ms: number) => (
     target: Object,
     method,
-    descriptor: TypedPropertyDescriptor<(event: Array<SpiderMeshTransporterEvent<T>>) => R>
+    descriptor: TypedPropertyDescriptor<(event: Array<SpiderMeshTransporterEvent<T>>, sm?: SpiderMesh) => R>
 ) => {
     const event = factory.name
     Object.defineProperty(descriptor.value, key, { value: { method, event, buffer_ms } as EventMetadata<T> })
