@@ -7,7 +7,7 @@ export type OnMicroserviceReadyMetadata = { method: string }
 export const OnMicroserviceReady = () => <T>(
     target: Object,
     method: string | symbol,
-    descriptor: TypedPropertyDescriptor<T | ((sm?: SpiderMesh) => (void | Promise<void>))>
+    descriptor: TypedPropertyDescriptor<T | ((sm?: SpiderMesh) => Promise<void>)>
 ) => {
     Object.defineProperty(descriptor.value, key, { value: { method } as OnMicroserviceReadyMetadata })
 }
