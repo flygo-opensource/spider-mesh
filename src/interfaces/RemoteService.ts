@@ -13,7 +13,7 @@ export type RemoteService<T = { [key: string]: any }> = (
             ]) : null
         }
     } & {
-        [K in keyof T as (T[K] extends (...args: any) => any ? K : '')]: T[K] extends (...args: any) => any ? ((...args: Parameters<T[K]>) => Promise<Awaited<ReturnType<T[K]>>>) : null
+        [K in keyof T as (T[K] extends (...args: any) => any ? K : '')]: T[K] extends (...args: any) => any ? ((...args: Parameters<T[K]>) => ReturnType<T[K]> extends (Observable<any> | Promise<Observable<any>>) ? Awaited<ReturnType<T[K]>> : Promise<Awaited<ReturnType<T[K]>>>) : null
     } & {
         [key in keyof RPCOptions as `${key}`]: (value: RPCOptions[key]) => RemoteService<T>
     } & {

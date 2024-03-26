@@ -9,7 +9,7 @@ import { RemoteService } from './interfaces/RemoteService.js'
 import os from 'os'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, EMPTY, Observable, Subject, bufferTime, catchError, filter, finalize, firstValueFrom, from, map, merge, mergeAll, mergeMap, of, range, retry, switchMap, takeWhile, tap, throttleTime, timer } from 'rxjs'
+import { BehaviorSubject, EMPTY, Observable, Subject, Subscriber, bufferTime, catchError, filter, finalize, firstValueFrom, from, map, merge, mergeAll, mergeMap, of, range, retry, switchMap, takeUntil, takeWhile, tap, throttleTime, throwError, timer } from 'rxjs'
 import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
@@ -59,7 +59,7 @@ export class SpiderMesh {
     #linked_nodes = new Map<string, SpiderMeshNode>()
 
     #rpc_queue = new Map<string, {
-        $: Subject<any>
+        $: Subscriber<any>
         args: any[],
         request_time: number
         timeout: number
@@ -134,6 +134,7 @@ export class SpiderMesh {
 
     async #node_event_handler({ data: msg, sender_node_id }: SpiderMeshTransporterEvent<RpcPayload>) {
 
+
         if (msg.type == 'rpc') {
             if (msg.service == 'SpiderMesh' && !msg.method.startsWith('$')) {
                 sender_node_id && this.transporter.publish({
@@ -180,49 +181,47 @@ export class SpiderMesh {
             })
 
 
-
-            const stream = instance?.[msg.method]?.(...args)
-
-
-            if (stream instanceof Observable) {
-                stream.subscribe({
-                    complete: () => {
-                        sender_node_id && this.transporter.publish({
-                            event: sender_node_id,
-                            node_id: sender_node_id,
-                            data: [{ id: msg.id, type: 'end' }]
-                        })
-                    },
-                    error: (error) => {
-                        sender_node_id && this.transporter.publish({
-                            event: sender_node_id,
-                            node_id: sender_node_id,
-                            data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
-                        })
-                    },
-                    next: (response) => {
-                        sender_node_id && this.transporter.publish({
-                            event: sender_node_id,
-                            node_id: sender_node_id,
-                            data: [{ id: msg.id, type: 'next', response }]
-                        })
-                    }
-                })
-            } else {
-                try {
-                    const response = await stream
+            try {
+                const response = await instance?.[msg.method]?.(...args);
+                if (typeof response.subscribe == 'function') {
+                    response.subscribe({
+                        complete: () => {
+                            sender_node_id && this.transporter.publish({
+                                event: sender_node_id,
+                                node_id: sender_node_id,
+                                data: [{ id: msg.id, type: 'end' }]
+                            })
+                        },
+                        error: (error) => {
+                            sender_node_id && this.transporter.publish({
+                                event: sender_node_id,
+                                node_id: sender_node_id,
+                                data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
+                            })
+                        },
+                        next: (response) => {
+                            sender_node_id && this.transporter.publish({
+                                event: sender_node_id,
+                                node_id: sender_node_id,
+                                data: [{ id: msg.id, type: 'next', response }]
+                            })
+                        }
+                    })
+                } else {
                     sender_node_id && this.transporter.publish({
                         event: sender_node_id,
                         node_id: sender_node_id,
                         data: [{ id: msg.id, type: 'response', response }]
                     })
-                } catch (error) {
-                    sender_node_id && this.transporter.publish({
-                        event: sender_node_id,
-                        node_id: sender_node_id,
-                        data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
-                    })
                 }
+
+
+            } catch (error) {
+                sender_node_id && this.transporter.publish({
+                    event: sender_node_id,
+                    node_id: sender_node_id,
+                    data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
+                })
             }
 
             return
@@ -398,66 +397,69 @@ export class SpiderMesh {
 
     rpc<T = any>(service: string, method: string, args: any, options: RPCOptions) {
 
-        const $ = new Subject()
         const rid = randomUUID();
 
-        const observable = of(1).pipe(
-            switchMap(() => this.#initing),
-            mergeMap(async () => {
+        const observable = new Observable<T>(o => {
 
-                const reject = (err) => (options.$fallback !== undefined) ? (
-                    $.next(options.$fallback),
-                    $.complete()
-                ) : $.error(err);
+            setTimeout(async () => {
+
+                await this.#initing
+
+                const reject = (err: string) => {
+                    if (options.$fallback != undefined) {
+                        o.next(options.$fallback)
+                        o.complete()
+                    } else {
+                        o.error(err)
+                    }
+                }
 
 
-                !options.$nevermind && this.#rpc_queue.set(rid, {
-                    args,
-                    last_ping: 0,
-                    $,
-                    request_time: Date.now(),
-                    timeout: options.$timeout,
-                    target_node_id: options.$node_id
-                })
-
-                options.$timeout && firstValueFrom(merge(
-                    $.pipe(map(() => true)),
-                    timer(options.$timeout).pipe(map(() => false))
-                ).pipe(
-                    tap(responed => {
-                        if (responed) return
-                        reject(new Error('TIMEOUT'))
-                        this.#rpc_queue.delete(rid)
-                    })
-                ))
 
                 of(1).pipe(
                     mergeMap(async () => {
-                        const node_id = this.#caculate_rpc_node_id(service, options)
-                        if (!node_id) {
-                            reject(Object.assign(new Error(`SERVICE_NOT_RUNNING:${service}`), { service }))
-                            return 
-                        }
-                        await this.publish(service, { type: 'rpc', id: rid, args, method, service }, node_id)
+                        const target_node_id = this.#caculate_rpc_node_id(service, options)
+                        if (!target_node_id) return reject(`SERVICE_NOT_RUNNING:${service}`)
+
+                        !options.$nevermind && this.#rpc_queue.set(rid, {
+                            args,
+                            last_ping: 0,
+                            $: o,
+                            request_time: Date.now(),
+                            timeout: options.$timeout,
+                            target_node_id
+                        })
+
+
+                        await this.publish(service, { type: 'rpc', id: rid, args, method, service }, target_node_id)
                     }),
                     retry(options.$retry || 1),
                     catchError(() => {
-                        $.next(options.$fallback)
-                        $.complete()
+                        reject('RETRY_EXECTED')
                         return EMPTY
                     })
                 ).subscribe()
+            })
 
+            return () => {
+                this.#rpc_queue.delete(rid)
+            }
+        })
+
+        const $timeout = !options.$timeout ? EMPTY : timer(options.$timeout).pipe(
+            takeUntil(observable),
+            map(() => {
+                throw new Error('SPIDER_MESH_RPC_TIMEOUT')
             })
         )
 
         return Object.assign(observable, {
             then: async (success, error) => {
                 try {
-                    const value = await firstValueFrom(observable)
-                    success(value)
+                    const value = await firstValueFrom(merge(observable, $timeout))
+                    success(options.$safe_mode ? [null, value] : value)
                 } catch (e) {
-                    error(e)
+                    options.$safe_mode ? success([e, null]) : error(e)
                 }
             }
         }) as Observable<T> & Promise<T>
@@ -527,19 +529,12 @@ export class SpiderMesh {
                     return (...args) => {
                         const o = new Subject()
                         from(nodes).pipe(
-                            mergeMap(async node => {
-                                try {
-                                    const data = await this.rpc(
-                                        service_name,
-                                        real_method,
-                                        args,
-                                        { $node_id: node.id } as RPCOptions
-                                    )
-                                    return { data, node, error: null }
-                                } catch (error) {
-                                    return { node, data: null, error }
-                                }
-                            })
+                            mergeMap(async node => this.rpc(
+                                service_name,
+                                real_method,
+                                args,
+                                { $node_id: node.id } as RPCOptions
+                            ))
                         ).subscribe(o)
                         return o
                     }
@@ -549,16 +544,7 @@ export class SpiderMesh {
                     return new DeepProxy(
                         method => RPCOptionsList.has(method),
                         (method: string, options) => (
-                            async (...args) => {
-                                const safe = options.$safe_mode
-                                try {
-                                    const data = await this.rpc(service_name, method, args, options)
-                                    return safe ? [null, data] : data
-                                } catch (e) {
-                                    if (safe) return [e, null]
-                                    throw e
-                                }
-                            }
+                            (...args) => this.rpc(service_name, method, args, options)
                         )
                     ).nest()[method]
                 }
