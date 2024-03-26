@@ -9,7 +9,7 @@ import { RemoteService } from './interfaces/RemoteService.js'
 import os from 'os'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, Observable, Subject, bufferTime, filter, from, map, mergeAll, mergeMap, tap, throttleTime } from 'rxjs'
+import { BehaviorSubject, EMPTY, Observable, Subject, bufferTime, catchError, filter, finalize, firstValueFrom, from, map, merge, mergeAll, mergeMap, of, range, retry, switchMap, takeWhile, tap, throttleTime, timer } from 'rxjs'
 import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
@@ -59,8 +59,7 @@ export class SpiderMesh {
     #linked_nodes = new Map<string, SpiderMeshNode>()
 
     #rpc_queue = new Map<string, {
-        success: Function,
-        reject: Function,
+        $: Subject<any>
         args: any[],
         request_time: number
         timeout: number
@@ -181,20 +180,51 @@ export class SpiderMesh {
             })
 
 
-            try {
-                const response = await instance?.[msg.method]?.(...args)
-                sender_node_id && this.transporter.publish({
-                    event: sender_node_id,
-                    node_id: sender_node_id,
-                    data: [{ id: msg.id, type: 'response', response }]
+
+            const stream = instance?.[msg.method]?.(...args)
+
+
+            if (stream instanceof Observable) {
+                stream.subscribe({
+                    complete: () => {
+                        sender_node_id && this.transporter.publish({
+                            event: sender_node_id,
+                            node_id: sender_node_id,
+                            data: [{ id: msg.id, type: 'end' }]
+                        })
+                    },
+                    error: (error) => {
+                        sender_node_id && this.transporter.publish({
+                            event: sender_node_id,
+                            node_id: sender_node_id,
+                            data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
+                        })
+                    },
+                    next: (response) => {
+                        sender_node_id && this.transporter.publish({
+                            event: sender_node_id,
+                            node_id: sender_node_id,
+                            data: [{ id: msg.id, type: 'next', response }]
+                        })
+                    }
                 })
-            } catch (error) {
-                sender_node_id && this.transporter.publish({
-                    event: sender_node_id,
-                    node_id: sender_node_id,
-                    data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
-                })
+            } else {
+                try {
+                    const response = await stream
+                    sender_node_id && this.transporter.publish({
+                        event: sender_node_id,
+                        node_id: sender_node_id,
+                        data: [{ id: msg.id, type: 'response', response }]
+                    })
+                } catch (error) {
+                    sender_node_id && this.transporter.publish({
+                        event: sender_node_id,
+                        node_id: sender_node_id,
+                        data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
+                    })
+                }
             }
+
             return
         }
 
@@ -206,22 +236,35 @@ export class SpiderMesh {
             return
         }
 
+        if (msg.type == 'next') {
+            request.$.next(msg.response)
+            return
+        }
+
         if (msg.type == 'ack') {
             request.last_ping = Date.now()
             return
         }
 
         if (msg.type == 'error') {
-            request.reject(msg.error)
+            request.$.error(msg.error)
             this.#rpc_queue.delete(msg.id)
             return
         }
 
         if (msg.type == 'response') {
-            request.success(msg.response)
+            request.$.next(msg.response)
+            request.$.complete()
             this.#rpc_queue.delete(msg.id)
             return
         }
+
+        if (msg.type == 'end') {
+            request.$.complete()
+            this.#rpc_queue.delete(msg.id)
+            return
+        }
+
     }
 
     async #init() {
@@ -322,9 +365,9 @@ export class SpiderMesh {
             service.nodes = service.nodes.filter(node => node.id != id)
         }
 
-        for (const [rid, { target_node_id, reject }] of this.#rpc_queue) {
+        for (const [rid, { target_node_id, $ }] of this.#rpc_queue) {
             if (target_node_id == id) {
-                reject(new Error('SERVICE_OFFLINE'))
+                $.error(new Error('SERVICE_OFFLINE'))
                 this.#rpc_queue.delete(rid)
             }
         }
@@ -353,44 +396,71 @@ export class SpiderMesh {
 
     }
 
-    async rpc<T = any>(service: string, method: string, args: any, options: RPCOptions) {
-        await this.#initing
-        return await new Promise<T>(async (success, r) => {
+    rpc<T = any>(service: string, method: string, args: any, options: RPCOptions) {
 
-            const reject = (err) => (options.$fallback !== undefined) ? success(options.$fallback) : r(err);
+        const $ = new Subject()
+        const rid = randomUUID();
 
-            const rid = randomUUID();
+        const observable = of(1).pipe(
+            switchMap(() => this.#initing),
+            mergeMap(async () => {
 
-            options.$timeout && setTimeout(() => {
-                reject(new Error('TIMEOUT'))
-                this.#rpc_queue.delete(rid)
-            }, options.$timeout)
+                const reject = (err) => (options.$fallback !== undefined) ? (
+                    $.next(options.$fallback),
+                    $.complete()
+                ) : $.error(err);
 
-            !options.$nevermind && this.#rpc_queue.set(rid, {
-                args,
-                last_ping: 0,
-                reject,
-                request_time: Date.now(),
-                success,
-                timeout: options.$timeout,
-                target_node_id: options.$node_id
+
+                !options.$nevermind && this.#rpc_queue.set(rid, {
+                    args,
+                    last_ping: 0,
+                    $,
+                    request_time: Date.now(),
+                    timeout: options.$timeout,
+                    target_node_id: options.$node_id
+                })
+
+                options.$timeout && firstValueFrom(merge(
+                    $.pipe(map(() => true)),
+                    timer(options.$timeout).pipe(map(() => false))
+                ).pipe(
+                    tap(responed => {
+                        if (responed) return
+                        reject(new Error('TIMEOUT'))
+                        this.#rpc_queue.delete(rid)
+                    })
+                ))
+
+                of(1).pipe(
+                    mergeMap(async () => {
+                        const node_id = this.#caculate_rpc_node_id(service, options)
+                        if (!node_id) {
+                            reject(Object.assign(new Error(`SERVICE_NOT_RUNNING:${service}`), { service }))
+                            return 
+                        }
+                        await this.publish(service, { type: 'rpc', id: rid, args, method, service }, node_id)
+                    }),
+                    retry(options.$retry || 1),
+                    catchError(() => {
+                        $.next(options.$fallback)
+                        $.complete()
+                        return EMPTY
+                    })
+                ).subscribe()
+
             })
+        )
 
-            const retry_count = options.$retry || 1
-            for (let i = retry_count; i > 0; i--) {
+        return Object.assign(observable, {
+            then: async (success, error) => {
                 try {
-                    const node_id = this.#caculate_rpc_node_id(service, options)
-                    if (!node_id) return reject(Object.assign(new Error(`SERVICE_NOT_RUNNING:${service}`), { service }))
-                    await this.publish(service, { type: 'rpc', id: rid, args, method, service }, node_id)
-                    return
-                } catch (e) { }
-
-                i > 1 && await new Promise(
-                    s => setTimeout(s, options.$retry_delay || 1000)
-                )
+                    const value = await firstValueFrom(observable)
+                    success(value)
+                } catch (e) {
+                    error(e)
+                }
             }
-            if (options.$fallback) return success(options.$fallback)
-        })
+        }) as Observable<T> & Promise<T>
     }
 
     async link_remote_service<T>(factory: { new(...args: any[]): T }, wait_service_online: boolean = false) {
@@ -527,7 +597,6 @@ export class SpiderMesh {
             const $$: Observable<any> = buffer_ms ? $.pipe(bufferTime(buffer_ms), filter(l => l.length > 0)) : $;
             $$.subscribe(e => instance[method]?.(e, this))
         }
-
 
     }
 
