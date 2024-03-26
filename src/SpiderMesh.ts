@@ -67,6 +67,10 @@ export class SpiderMesh {
         target_node_id: string
     }>
 
+    #rpc_response_queue = new Map<string, {
+        $cancel: Subject<void>
+    }>
+
     #public_ip = new Promise<string | null>(async s => {
         for (let i = 1; i <= 5; i++) {
             const ip = await new Promise<string | null>(s => {
@@ -184,29 +188,37 @@ export class SpiderMesh {
             try {
                 const response = await instance?.[msg.method]?.(...args);
                 if (typeof response.subscribe == 'function') {
-                    response.subscribe({
-                        complete: () => {
-                            sender_node_id && this.transporter.publish({
-                                event: sender_node_id,
-                                node_id: sender_node_id,
-                                data: [{ id: msg.id, type: 'end' }]
-                            })
-                        },
-                        error: (error) => {
-                            sender_node_id && this.transporter.publish({
-                                event: sender_node_id,
-                                node_id: sender_node_id,
-                                data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
-                            })
-                        },
-                        next: (response) => {
-                            sender_node_id && this.transporter.publish({
-                                event: sender_node_id,
-                                node_id: sender_node_id,
-                                data: [{ id: msg.id, type: 'next', response }]
-                            })
-                        }
-                    })
+                    const $cancel = new Subject<void>()
+                    this.#rpc_response_queue.set(msg.id, { $cancel })
+                    response
+                        .pipe(
+                            takeUntil($cancel)
+                        )
+                        .subscribe({
+                            complete: () => {
+                                this.#rpc_response_queue.delete(msg.id)
+                                sender_node_id && this.transporter.publish({
+                                    event: sender_node_id,
+                                    node_id: sender_node_id,
+                                    data: [{ id: msg.id, type: 'end' }]
+                                })
+                            },
+                            error: (error) => {
+                                this.#rpc_response_queue.delete(msg.id)
+                                sender_node_id && this.transporter.publish({
+                                    event: sender_node_id,
+                                    node_id: sender_node_id,
+                                    data: [{ id: msg.id, type: 'error', error: error?.code || error?.message || error || 'UNKNOWN' }]
+                                })
+                            },
+                            next: (response) => {
+                                sender_node_id && this.transporter.publish({
+                                    event: sender_node_id,
+                                    node_id: sender_node_id,
+                                    data: [{ id: msg.id, type: 'next', response }]
+                                })
+                            }
+                        })
                 } else {
                     sender_node_id && this.transporter.publish({
                         event: sender_node_id,
@@ -224,6 +236,12 @@ export class SpiderMesh {
                 })
             }
 
+            return
+        }
+
+        if (msg.type == 'rpc-cancel') {
+            const responding = this.#rpc_response_queue.get(msg.id)
+            responding?.$cancel.next()
             return
         }
 
@@ -429,8 +447,6 @@ export class SpiderMesh {
                             timeout: options.$timeout,
                             target_node_id
                         })
-
-
                         await this.publish(service, { type: 'rpc', id: rid, args, method, service }, target_node_id)
                     }),
                     retry(options.$retry || 1),
@@ -442,6 +458,8 @@ export class SpiderMesh {
             })
 
             return () => {
+                const req = this.#rpc_queue.get(rid)
+                req?.target_node_id && this.publish(service, { type: 'rpc-cancel', id: rid, args: [], method, service }, req.target_node_id)
                 this.#rpc_queue.delete(rid)
             }
         })
