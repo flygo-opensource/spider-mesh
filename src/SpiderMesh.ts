@@ -187,7 +187,7 @@ export class SpiderMesh {
 
             try {
                 const response = await instance?.[msg.method]?.(...args);
-                if (typeof response.subscribe == 'function') {
+                if (response && typeof response.subscribe == 'function') {
                     const $cancel = new Subject<void>()
                     this.#rpc_response_queue.set(msg.id, { $cancel })
                     response
