@@ -1,5 +1,6 @@
 import { createSocket } from "dgram"
 import { Observable } from "rxjs"
+import { networkInterfaces } from 'os'
 
 export type RxjsUdpBroadcasterConfig = {
     node_id: string,
@@ -43,7 +44,17 @@ export class RxjsUdpBroadcaster {
         })
 
         const broadcast_ips = ['255.255.255.255']
-        for (const address of udp_address.split(',').map(a => a.trim())) {
+        const network_address = (
+            Object.entries(networkInterfaces())
+                .filter(([i]) => !i.startsWith('lo'))
+                .map(e => e[1])
+                .flat(2)
+                .filter(d => d.family == 'IPv4')
+                .map(d => d.address.split('.').slice(0, 3).join('.'))
+        )
+        const env_address = udp_address.split(',').map(a => a.trim()).filter(a => !!a)
+
+        for (const address of [...network_address, ...env_address]) {
             const splited = address.split('.')
             splited.length == 4 && broadcast_ips.push(address)
             splited.length == 3 && new Array(256).fill(0).map((_, i) => broadcast_ips.push(`${address}.${i}`))

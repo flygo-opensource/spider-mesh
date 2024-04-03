@@ -318,7 +318,7 @@ export class SpiderMesh {
                 await this.#active_local_service(instance, metadata)
                 await this.#active_ready_hooks(instance)
             }),
-            throttleTime(1000),
+            throttleTime(1000, undefined, { leading: true, trailing: true }),
             mergeMap(async () => {
                 const me = await this.$metadata()
                 await this.publish('#join', me)
@@ -349,27 +349,21 @@ export class SpiderMesh {
 
         peer_updated && Object.keys(node.services).forEach(service_id => {
 
-            const $service = this.#remote_rpc_services.get(service_id)
-
-            if (!$service) {
+            if (!this.#remote_rpc_services.has(service_id)) {
                 this.#remote_rpc_services.set(service_id, {
                     last_call_index: -1,
-                    nodes: [node]
+                    nodes: []
                 })
-                return
             }
 
-            if ($service.nodes) {
-                const index = $service.nodes.findIndex(n => n.id == new_node.id)
-                index >= 0 ? ($service.nodes[index] = new_node) : $service.nodes.push(new_node)
-            } else {
-                $service.nodes = [new_node]
-            }
-
+            const $service = this.#remote_rpc_services.get(service_id)
+            const index = $service.nodes.findIndex(n => n.id == new_node.id)
+            index >= 0 ? ($service.nodes[index] = new_node) : $service.nodes.push(new_node)
+            this.$nodes_monitor.next(node);
         })
 
 
-        this.$nodes_monitor.next(node);
+
 
     }
 
