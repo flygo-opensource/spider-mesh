@@ -103,7 +103,12 @@ export class SpiderMesh {
     }
 
     async $metadata() {
-        const ips = Object.values(networkInterfaces()).map(itf => itf?.map(ip => ip.address) || []).flat(2)
+        const ips = (
+            Object.values(networkInterfaces())
+                .flat(2)
+                .filter(a => !a.internal)
+                .map(a => a.address)
+        )
         const services = [...this.#local_rpc_services.entries()].reduce(
             (p, [service_id, { metadata }]) => ({
                 ...p,
@@ -354,7 +359,7 @@ export class SpiderMesh {
             ...node,
             online: true
         }
-        
+
         this.#linked_nodes.set(node.id, new_node);
         if (!peer_updated) return await this.#self_introduce(node.id)
 
