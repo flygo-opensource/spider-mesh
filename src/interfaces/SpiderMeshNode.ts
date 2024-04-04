@@ -4,17 +4,22 @@ export type ServiceMetadata = {
 
 export type SpiderMeshNodeMetadata = {
     id: string
+    name: string
+    version: string,
+    path: string
+    uptime: number,
+    plaform: string,
+    hostname: string,
+    node_version: string
     namespace: string
     public_ip: string | null,
     ip_addresses: string[]
     last_online: number
-    active: boolean
     online: boolean
-    services: { [service_id: string]: { instance: any, metadata: ServiceMetadata } }
+    services: { [service_id: string]: { metadata: any } }
     linked: string[]
-    isolate: boolean
-    revalidate_on_join?: boolean
-
+    isolated_nodes: string[]
+    isolated: boolean
 }
 
 export type SpiderMeshNode = SpiderMeshNodeMetadata

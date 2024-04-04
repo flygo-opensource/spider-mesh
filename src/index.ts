@@ -9,7 +9,6 @@ export { OnMicroserviceReady } from './decorators/OnMicroserviceReady.js'
 export {
     Microservice,
     NestJSExposeMicroservice,
-    exposeMicroservice,
     NestJSLinkMicroservice,
     NestJSLinkEvent
 } from './decorators/Microservice.js'

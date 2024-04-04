@@ -5,18 +5,16 @@ import { SpiderMesh } from "../../src/SpiderMesh.js"
 
 export const serviceInstanceList = new ReplaySubject<{ instance: any, namespace: string, metadata: ServiceMetadata }>()
 
-export const exposeMicroservice = (instance: any, metadata: ServiceMetadata = {}, namespace: string = NAMEPSACE) => {
-    serviceInstanceList.next({
-        instance,
-        namespace,
-        metadata
-    })
-}
+ 
 
 export const NestJSExposeMicroservice = (factory, metadata: ServiceMetadata = {}, namespace: string = NAMEPSACE) => ({
     provide: Symbol(),
     inject: [factory],
-    useFactory: instance => exposeMicroservice(instance, metadata, namespace)
+    useFactory: instance => serviceInstanceList.next({
+        instance,
+        namespace,
+        metadata
+    })
 })
 
 export const NestJSLinkMicroservice = (factory, wait_service_online?: boolean) => ({

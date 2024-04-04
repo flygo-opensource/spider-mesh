@@ -50,7 +50,7 @@ export class RxjsUdpBroadcaster {
                 .map(e => e[1])
                 .flat(2)
                 .filter(d => d.family == 'IPv4')
-                .map(d => d.address.split('.').slice(0, 3).join('.'))
+                .map(d => d.address.split('.').slice(0, 3).join('.') + '.255')
         )
         const env_address = udp_address.split(',').map(a => a.trim()).filter(a => !!a)
 

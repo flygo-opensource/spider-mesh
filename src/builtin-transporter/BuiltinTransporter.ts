@@ -4,7 +4,7 @@ import { Observable, Subject, debounceTime, filter, finalize, first, from, map, 
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
-import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS, DEBUG } from "../const.js"
+import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS } from "../const.js"
 import { Encoder } from "../Encoder.js";
 
 type MeshMessage<T = any> = {
@@ -156,7 +156,6 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
                         peers: new_node.peers.map(p => ({ ...p, peers: [] }))
                     }
                     this.#nodes_map.set(new_node_id, nn)
-                    DEBUG && console.log({ TCP_NEW_NODE: nn })
                     this.$nodes_status.next({ node_id: new_node_id, online: true })
                 } else {
                     cleaner()
