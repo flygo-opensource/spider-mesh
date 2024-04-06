@@ -146,7 +146,7 @@ export class SpiderMesh {
 
     async #self_introduce(node_id?: string) {
         const me = await this.$metadata()
-        this.transporter.publish({
+        await this.transporter.publish({
             event: '#join',
             data: [me],
             node_id
@@ -322,11 +322,10 @@ export class SpiderMesh {
         this.listen<SpiderMeshNode>('#join')
             .pipe(
                 groupBy(node => node.sender_node_id),
-                mergeMap(grouped => grouped.pipe(debounceTime(1000)))
+                mergeMap(grouped => grouped.pipe(debounceTime(1000))),
+                mergeMap(({ data }) => this.#on_node_discovered(data), 1)
             )
-            .subscribe(({ data }) => {
-                this.#on_node_discovered(data)
-            })
+            .subscribe()
 
         // Sync node status
         this.transporter.$nodes_status.pipe(
@@ -360,8 +359,8 @@ export class SpiderMesh {
             online: true
         }
 
+        if (!peer_updated) await this.#self_introduce(node.id)
         this.#linked_nodes.set(node.id, new_node);
-        if (!peer_updated) return await this.#self_introduce(node.id)
 
         for (const service_id of Object.keys(node.services)) {
             if (!this.#remote_rpc_services.has(service_id)) {
@@ -373,9 +372,9 @@ export class SpiderMesh {
             const $service = this.#remote_rpc_services.get(service_id)
             const index = $service.nodes.findIndex(n => n.id == new_node.id)
             index >= 0 ? ($service.nodes[index] = new_node) : $service.nodes.push(new_node)
-            this.$nodes_monitor.next(node);
         }
 
+        this.$nodes_monitor.next(node)
 
     }
 
@@ -612,10 +611,9 @@ export class SpiderMesh {
     }
 
     async #wait_service_online(service_name: string = 'all') {
-        if (this.#remote_rpc_services.size == 0) return
 
         while (true) {
-            await sleep(500)
+            await sleep(1000)
             const nodes = service_name == 'all' ? (
                 [...this.#remote_rpc_services.values()].map(s => s.nodes).flat(2)
             ) : (
