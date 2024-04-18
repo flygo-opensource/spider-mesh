@@ -1,13 +1,13 @@
 import { randomUUID } from "crypto";
 import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent } from "../interfaces/SpiderMeshTransporter.js";
-import { Observable, Subject, debounceTime, filter, finalize, first, from, map, merge, mergeAll, mergeMap, take, takeUntil, tap } from 'rxjs'
+import { Observable, Subject, debounceTime, filter, finalize, map, merge, mergeAll, mergeMap, takeUntil, tap } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpBroadcaster } from "./RxjsUdpBroadcaster.js";
 import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS } from "../const.js"
-import { Encoder } from "../Encoder.js";
+import { Encodeable, Encoder } from "../Encoder.js";
 
-type MeshMessage<T = any> = {
+type MeshMessage<T extends Encodeable = Encodeable> = {
     topic: string
     namespace: string
     data: T,
@@ -25,8 +25,6 @@ type TcpNode = {
 
 
 type HelloMessage = TcpNode
-
-
 
 type NodeID = string
 type ListenderID = string
@@ -55,15 +53,18 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         socket.$incoming_data
             .pipe(
                 takeUntil(socket.$status.pipe(filter(s => s == 'closed'))),
-                map(buf => Encoder.decode<MeshMessage>(buf)),
+                map(buf => Encoder.decode<MeshMessage<TcpNode>>(buf)),
                 filter(Boolean),
                 filter(msg => msg.sender_node_id != this.node_id),
                 filter(msg => msg.namespace == this.namespace)
             )
             .subscribe(
                 async msg => {
-                    if (msg.topic == `#hello`) return await this.#sync_node(socket, msg.data)
-                    this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, msg.data))
+                    const data = msg.data
+                    if (msg.topic == `#hello`) {
+                        return await this.#sync_node(socket, data)
+                    }
+                    this.#listeners.get(msg.topic)?.forEach(cb => cb(msg.sender_node_id, data))
                 }
             )
         !socket.opened_by_remote_side && this.#tcp_hello(socket)
@@ -71,7 +72,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     async start() {
 
-        const tcp_server = await RxjsTcpServer.start<MeshMessage>()
+        const tcp_server = await RxjsTcpServer.start<MeshMessage<any>>()
 
         const udp_broadcaster = await RxjsUdpBroadcaster.start({
             namespace: this.namespace,
@@ -81,7 +82,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
         })
 
         const $udp_connections = udp_broadcaster.$new_node_discovered.pipe(
-            mergeMap(node => RxjsTcpSocket.connect<MeshMessage>({
+            mergeMap(node => RxjsTcpSocket.connect({
                 ...node,
                 keepAlive: true,
                 retry_delay_ms: 5000,
@@ -113,7 +114,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     }
 
 
-    async #sync_node(node_socket: RxjsTcpSocket<any>, new_node: HelloMessage) {
+    async #sync_node(node_socket: RxjsTcpSocket, new_node: HelloMessage) {
         const host = node_socket.rawSocket.remoteAddress
         if (!host) return
 
@@ -171,22 +172,24 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
 
     async #tcp_hello(tcp_socket: RxjsTcpSocket) {
         if (!this.#running_tcp_port) return
+        const data = {
+            host: '',
+            node_id: this.node_id,
+            port: this.#running_tcp_port,
+            listening: ['#hello', ... this.#listeners.keys()],
+            peers: [... this.#nodes_map.values()].map(({ socket, ...node }) => node),
+            version: this.#version
+        }
         const msg: MeshMessage = {
-            data: {
-                node_id: this.node_id,
-                port: this.#running_tcp_port,
-                listening: ['#hello', ... this.#listeners.keys()],
-                peers: [... this.#nodes_map.values()].map(({ socket, ...node }) => node),
-                version: this.#version
-            } as HelloMessage,
+            data,
             namespace: this.namespace,
             sender_node_id: this.node_id,
             topic: '#hello'
         }
-        tcp_socket.write(Encoder.encode(msg))
+        tcp_socket.write(Encoder.encode(msg).buffer)
     }
 
-    listen<T = any>(topic: string) {
+    listen<T extends Encodeable = Encodeable>(topic: string) {
         return new Observable<SpiderMeshTransporterEvent<T>>(o => {
             this.#version = Date.now()
             !this.#listeners.has(topic) && this.#listeners.set(topic, new Map())
@@ -210,27 +213,27 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     }
 
 
-    async publish<T = any>({ data, event, node_id }: PublishMetadata<T>) {
+    async publish({ data, event, node_id }: PublishMetadata) {
 
-        const msg: MeshMessage = {
+        const msg: MeshMessage<Encodeable> = {
             data,
             namespace: this.namespace,
             sender_node_id: this.node_id,
             topic: event || node_id || '#'
         }
 
-        const buf = Encoder.encode(msg)
+        const { buffer } = Encoder.encode(msg)
 
         if (node_id == 'all' || !node_id) {
             for (const node_id of this.#events_map.get(event) || []) {
                 const node = this.#nodes_map.get(node_id)
-                await node?.socket?.write(buf)
+                await node?.socket?.write(buffer)
             }
             return
         }
 
 
-        node_id && await this.#nodes_map.get(node_id)?.socket?.write(buf)
+        node_id && await this.#nodes_map.get(node_id)?.socket?.write(buffer)
 
 
 

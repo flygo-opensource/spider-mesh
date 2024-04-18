@@ -9,14 +9,14 @@ export class RxjsTcpServer {
     static start<T = object>(start_port: number = 10001) {
         const $online = new Subject<{
             port: number,
-            $connection: Subject<RxjsTcpSocket<T>>,
+            $connection: Subject<RxjsTcpSocket>,
             $error: Observable<Error>
         }>()
 
 
         setTimeout(async () => {
             for (let port = start_port; true; port++) {
-                const $connection = new Subject<RxjsTcpSocket<T>>()
+                const $connection = new Subject<RxjsTcpSocket>()
                 const server = createServer()
                 const success = await new Promise<boolean>(s => {
                     server.once('listening', () => s(true))
@@ -25,7 +25,7 @@ export class RxjsTcpServer {
                 })
                 if (!success) continue
                 server.on('connection', async socket => {
-                    const stable_socket = await RxjsTcpSocket.join<T>(socket)
+                    const stable_socket = await RxjsTcpSocket.join(socket)
                     $connection.next(stable_socket)
                 })
                 const $error = fromEvent(server, 'error') as Observable<Error>

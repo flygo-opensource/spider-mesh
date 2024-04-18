@@ -4,20 +4,20 @@ import frame from 'frame-stream'
 import { sleep } from "../../src/helpers/sleep.js"
 
 
-export class RxjsTcpSocket<T = any> {
+export class RxjsTcpSocket {
 
     #$outgoing_data = new Subject<Buffer>()
     $incoming_data = new Subject<Buffer>()
     $status = new BehaviorSubject<'connecting' | 'ready' | 'closed' | 'error'>('connecting')
     rawSocket: Socket
 
-    constructor(public readonly opened_by_remote_side: boolean) {
+    private constructor(public readonly opened_by_remote_side: boolean) {
         opened_by_remote_side && this.$status.next('ready')
     }
 
-    static connect<T = any>({ retry_times = 5, retry_delay_ms = 5000, ...options }: TcpNetConnectOpts & { retry_times?: number, retry_delay_ms?: number }) {
-        const $this = new this<T>(false)
-        return new Promise<RxjsTcpSocket<T> | null>(async s => {
+    static connect({ retry_times = 5, retry_delay_ms = 5000, ...options }: TcpNetConnectOpts & { retry_times?: number, retry_delay_ms?: number }) {
+        const $this = new this(false)
+        return new Promise<RxjsTcpSocket | null>(async s => {
             for (let i = 0; i <= retry_times; i++) {
                 const socket = createConnection({ ...options, autoSelectFamily: true })
                 const connected = await firstValueFrom(merge(
@@ -46,8 +46,8 @@ export class RxjsTcpSocket<T = any> {
         })
     }
 
-    static async join<T = any>(socket: Socket) {
-        const $this = new this<T>(true)
+    static async join(socket: Socket) {
+        const $this = new this(true)
         $this.#join_util_error(socket)
         return $this
     }
@@ -88,7 +88,7 @@ export class RxjsTcpSocket<T = any> {
     }
 
 
-    async write(data: Buffer) {
+    write(data: Buffer) {
         this.#$outgoing_data.next(data)
     }
 }

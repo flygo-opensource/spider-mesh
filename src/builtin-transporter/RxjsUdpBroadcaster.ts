@@ -6,14 +6,14 @@ export type RxjsUdpBroadcasterConfig = {
     node_id: string,
     namespace: string,
     udp_address?: string,
-    udp_port
+    udp_port: number
 }
 
 export class RxjsUdpBroadcaster {
 
 
 
-    static async start({ namespace, node_id, udp_port, udp_address }: RxjsUdpBroadcasterConfig) {
+    static async start({ namespace, node_id, udp_port, udp_address = '' }: RxjsUdpBroadcasterConfig) {
         type BroadcastMessage = {
             port: number
             node_id: string
@@ -49,8 +49,8 @@ export class RxjsUdpBroadcaster {
                 .filter(([i]) => !i.startsWith('lo'))
                 .map(e => e[1])
                 .flat(2)
-                .filter(d => d.family == 'IPv4')
-                .map(d => d.address.split('.').slice(0, 3).join('.') + '.255')
+                .filter(d => d && d.family == 'IPv4' && d.address)
+                .map(d => d!.address.split('.').slice(0, 3).join('.') + '.255')
         )
         const env_address = udp_address.split(',').map(a => a.trim()).filter(a => !!a)
 

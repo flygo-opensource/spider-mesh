@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "strict": true,   
     "module": "NodeNext",
     "declaration": true,
     "removeComments": true,
@@ -9,7 +10,8 @@
     "target": "ESNext",
     "sourceMap": true,
     "baseUrl": ".",
-    "moduleResolution": "NodeNext",
+    "moduleResolution": "NodeNext", 
+    "strictPropertyInitialization": false ,
     "outDir": "./build",
     "incremental": false,
     "useDefineForClassFields": true,
@@ -22,7 +24,8 @@
       "ESNext"
     ],
     "esModuleInterop": true,
-    "importHelpers": true
+    "importHelpers": true,
+    "strictNullChecks": true
   },
   "exclude": [
     "node_modules",

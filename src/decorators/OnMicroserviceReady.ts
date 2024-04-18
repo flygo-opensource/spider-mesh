@@ -12,7 +12,7 @@ export const OnMicroserviceReady = () => <T>(
     Object.defineProperty(descriptor.value, key, { value: { method } as OnMicroserviceReadyMetadata })
 }
 
-export const listReadyHookMethods = (target) => {
+export const listReadyHookMethods = (target: any) => {
     const methods = [] as OnMicroserviceReadyMetadata[]
     for (let f = target; f != null; f = Object.getPrototypeOf(f)) {
         for (const method of Object.getOwnPropertyNames(f)) {

@@ -7,7 +7,7 @@ export class DeepProxy {
 
     constructor(
         private option_parser: (method: string) => boolean,
-        private handler: (method: string, options) => any
+        private handler: (method: string, options: any) => any
     ) { }
 
 
