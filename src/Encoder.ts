@@ -133,6 +133,4 @@ export const Encoder = {
     }
 }
 const a = Encoder.encode(undefined as any)
-console.log(a)
 const b = Encoder.decode(a.buffer)
-console.log(b)
