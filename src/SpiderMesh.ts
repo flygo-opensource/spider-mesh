@@ -668,12 +668,19 @@ export class SpiderMesh {
                     return (...args: any[]) => {
                         const o = new Subject()
                         from(nodes).pipe(
-                            mergeMap(async node => this.rpc(
-                                service_name,
-                                real_method,
-                                args,
-                                { $node_id: node.id } as RPCOptions
-                            ))
+                            mergeMap(async node => {
+                                try {
+                                    const data = await this.rpc(
+                                        service_name,
+                                        real_method,
+                                        args,
+                                        { $node_id: node.id } as RPCOptions
+                                    )
+                                    return { node, data }
+                                } catch (error) {
+                                    return { node, error }
+                                }
+                            })
                         ).subscribe(o)
                         return o
                     }
