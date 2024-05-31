@@ -251,7 +251,7 @@ export class SpiderMesh {
                 return new Observable(o => {
                     clearTimeout(tid)
                     if (!this.#requests.has(session_id)) {
-                        return o.next('RPC_OFFLINE')
+                        return o.error('RPC_OFFLINE')
                     }
                     const channel_id = randomUUID()
                     const s = new Subject<PureData>()
@@ -389,7 +389,8 @@ export class SpiderMesh {
 
 
         const o = req.observables.get(msg.observable_id)
-        if (!o) return
+        if (!o) return response({ error: 'RPC_SESSION_NOT_FOUND' })
+
         const subscription = o.pipe(
             finalize(() => {
                 if (req.subscriptions.size == 0 && req.channels.size == 0) {
@@ -404,6 +405,8 @@ export class SpiderMesh {
         req.subscriptions.set(msg.channel_id, subscription)
 
     }
+
+    
     #unsubcribe_channel(node_id: string, session_id: string, channel_id: string,) {
         return this.publish<RpcUnsubscribeChannel>(
             node_id,

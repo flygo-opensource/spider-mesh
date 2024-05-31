@@ -17,9 +17,20 @@ export type Encodeable = PureData | Array<EncoablePrimitiveType | Encodeable> | 
 export const Encoder = {
 
     encode: <T extends Encodeable>(content: T) => {
+
         const buffers: Buffer[] = []
         const functions = new Map<string, Function>()
         const observables = new Map<string, Observable<PureData>>()
+
+        if (content == null || content == undefined) {
+            const buffer = Buffer.alloc(4)
+            buffer.writeInt32LE(-1)
+            return {
+                buffer,
+                functions,
+                observables
+            }
+        }
 
         function replacer(this: any, key: string, value: any) {
             const originalObject = this[key]
@@ -83,7 +94,7 @@ export const Encoder = {
     ) => {
         const buffers: Buffer[] = []
         const length = raw.readUInt32LE(0)
-        if (length > raw.length) return null
+        if (length > raw.length || length < 0) return null
         let index = 4
         for (let i = 0; i < length; i++) {
             const blength = raw.readUint32LE(index)
@@ -121,3 +132,7 @@ export const Encoder = {
         return JSON.parse(metadata, receiver) as T
     }
 }
+const a = Encoder.encode(undefined as any)
+console.log(a)
+const b = Encoder.decode(a.buffer)
+console.log(b)
