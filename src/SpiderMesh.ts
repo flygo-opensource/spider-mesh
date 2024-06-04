@@ -3,82 +3,72 @@ import { get } from 'http'
 import { networkInterfaces } from 'os'
 import { DeepProxy } from './decorators/DeepProxy.js'
 import { ServiceMetadata, SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'
-import { SpiderMeshTransporter, SpiderMeshTransporterEvent } from './interfaces/SpiderMeshTransporter.js'
+import { SpiderMeshTransporter, SpiderMeshTransporterEvent, TcpNodeStatus } from './interfaces/SpiderMeshTransporter.js'
 import { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 import { RemoteService } from './interfaces/RemoteService.js'
 import os from 'os'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, EMPTY, Observable, ReplaySubject, Subject, Subscriber, Subscription, bufferTime, catchError, debounceTime, defer, filter, finalize, first, firstValueFrom, from, groupBy, lastValueFrom, map, merge, mergeAll, mergeMap, observable, of, retry, share, switchMap, takeUntil, tap, throttleTime, throwError, timer } from 'rxjs'
+import { BehaviorSubject, EMPTY, Observable, Subject, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, share, tap, timer } from 'rxjs'
 import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
+import { Encodeable } from './Encoder.js'
+import { NAMEPSACE } from './const.js'
 import { BuiltinTransporter } from './builtin-transporter/BuiltinTransporter.js'
-import { NAMEPSACE, NODE_ID } from './const.js'
-import { Encodeable, Encoder } from './Encoder.js'
 
 export type PureData = string | number | boolean | null | Buffer | PureData[] | { [key: string]: PureData }
 
 
-
-export enum MessageType {
-    RpcRequest = 10,
-    RpcSubscribeChannel = 20,
-    RpcUnsubscribeChannel = 30,
-    RpcStream = 50,
+export type SpiderMeshRpcEvent = {
+    request: {
+        request_id: string,
+        args: Buffer,
+        service: string,
+        method: string
+    }
+    response: {
+        request_id: string,
+        error?: PureData
+        data?: { value: PureData }
+        completed?: boolean
+    }
 }
 
-export type RpcRequest = {
-    session_id: string,
-    type: MessageType.RpcRequest
-    args: Buffer,
-    service: string,
-    method: string
-}
-
-export type RpcSubscribeChannel = {
-    session_id: string,
-    observable_id: string
-    channel_id: string
-    type: MessageType.RpcSubscribeChannel
-}
-
-export type RpcUnsubscribeChannel = {
-    session_id: string,
-    channel_id: string
-    type: MessageType.RpcUnsubscribeChannel
-}
-
-
-export type RpcStream = {
-    session_id: string,
-    channel_id: string
-    type: MessageType.RpcStream
-    error?: PureData
-    data?: PureData
-    completed?: true
-}
-
-
-
-export type RpcEvent = RpcRequest | RpcStream | RpcSubscribeChannel | RpcUnsubscribeChannel
 
 
 const PACKAGE_JSON = JSON.parse(readFileSync(`package.json`, 'utf8')) || {}
 
 export type SpiderMeshNamespace = string
 
-export type SpiderMeshRequest = {
-    target_node_id: string
-    observables: Map<string, Observable<PureData>> // Out data
-    channels: Map<string, Subject<PureData>> // In data
-    subscriptions: Map<string, Subscription>
+export type SpiderMeshPublishPayload<T extends Encodeable = Encodeable> = {
+    topic: string | { new(): EventHub<T> },
+    payload: T,
+    node_id?: string,
+    local_transporter_id?: string
 }
+
+export type SpiderMeshBatchPublishPayload<T extends Encodeable = Encodeable> = {
+    topic: string | { new(): EventHub<T> },
+    payload: T[],
+    node_id?: string,
+    local_transporter_id?: string
+}
+
+type SpiderMeshEventWrapper<T extends Encodeable = Encodeable> = {
+    node_id: string
+    payload: T
+}
+
+
+type NodeId = string
+type RemoteTransporterID = string
 
 export class SpiderMesh {
 
-    #requests = new Map<string, SpiderMeshRequest>
+    #node_id = randomUUID()
 
+    #requests = new Map<string, { rpc_node_id: string, $response: Subject<any> }>
 
     #local_services = new Map<string, {
         instance: any,
@@ -89,8 +79,6 @@ export class SpiderMesh {
         last_call_index: number
         nodes: SpiderMeshNode[]
     }>
-
-
     #linked_nodes = new Map<string, SpiderMeshNode>()
 
     #public_ip = new Promise<string | null>(async s => {
@@ -111,23 +99,27 @@ export class SpiderMesh {
 
     $nodes_monitor = new Subject<SpiderMeshNode>()
 
-    #initing: Promise<any>
 
     #$isolated = new BehaviorSubject<boolean>(false)
 
-    constructor(
-        private transporter: SpiderMeshTransporter = new BuiltinTransporter(NODE_ID, NAMEPSACE)
-    ) {
-        this.#initing = this.#init()
-    }
+    #transporters = new Map<string, {
+        nodes: Map<RemoteTransporterID, NodeId>,
+        transporter: SpiderMeshTransporter
+    }>()
 
+    constructor(using_default_transporter: boolean = true) {
+        if (using_default_transporter) {
+            const transporter = new BuiltinTransporter()
+            this.link_transporter(transporter)
+        }
+    }
 
 
     #caculate_rpc_node_id(service_name: string, options: Partial<RPCOptions> = {}) {
         const current = this.#remote_services.get(service_name)
         if (!current || current.nodes.length == 0) return
         if (options.$node_id) {
-            if (current.nodes.some(node => node.id == options.$node_id)) return options.$node_id
+            if (current.nodes.some(node => node.node_id == options.$node_id)) return options.$node_id
             return
         }
         const option_ip = options.$ip
@@ -139,58 +131,30 @@ export class SpiderMesh {
         if (nodes.length == 0) return
 
         current.last_call_index = (current.last_call_index + 1) % nodes.length
-        return nodes[current.last_call_index].id
+        return nodes[current.last_call_index].node_id
 
     }
 
-
-
     rpc<T = any>(service: string, method: string, args: any, options: Partial<RPCOptions> = {}) {
 
+        const rpc_node_id = this.#caculate_rpc_node_id(service, options)
+        if (!rpc_node_id) throw `SERVICE_NOT_RUNNING:${service}`
 
-        const target_node_id = this.#caculate_rpc_node_id(service, options)
-        if (!target_node_id) throw `SERVICE_NOT_RUNNING:${service}`
 
-        const session_id = randomUUID()
 
-        const { buffer, observables } = Encoder.encode(args)
+        const request_id = randomUUID()
+
 
         // Send RPC request here
-        const req: SpiderMeshRequest = {
-            channels: new Map(),
-            target_node_id,
-            observables,
-            subscriptions: new Map()
-        }
-        this.#requests.set(session_id, req)
-        this.publish<RpcRequest>(
-            target_node_id,
-            {
-                type: MessageType.RpcRequest,
-                session_id,
-                args: buffer,
-                method,
-                service,
-            },
-            target_node_id
-        )
+        const $response = new Subject<T>()
+        this.#requests.set(request_id, { $response, rpc_node_id })
 
-        const o = new Subject<PureData>()
-        req.channels.set(session_id, o)
-
-        const $ = o.pipe(
-            first(),
-            mergeMap(data => {
-                if (data instanceof Buffer) {
-                    const [response, is_pure] = this.#decode_rpc_buffer<any | Observable<any>>(req, data, session_id)
-                    if (is_pure) {
-                        this.#requests.delete(session_id)
-                    }
-                    req.channels.delete(session_id)
-                    return response instanceof Observable ? response : of(response)
-                }
-                return EMPTY
-            }),
+        const $ = merge(
+            !options.$timeout ? EMPTY : timer(options.$timeout).pipe(
+                map(() => { throw new Error('TIMEOUT') })
+            ),
+            $response
+        ).pipe(
             catchError(err => {
                 if (options.$fallback) {
                     return of(options.$fallback)
@@ -200,7 +164,25 @@ export class SpiderMesh {
             share()
         )
 
-        $.subscribe()
+        $.subscribe({
+            complete: () => { },
+            error: () => { },
+            next: () => { }
+        })
+
+
+        // Send RPC request here 
+        this.publish<Pick<SpiderMeshRpcEvent, 'request'>>({
+            topic: rpc_node_id,
+            payload: {
+                request: {
+                    args,
+                    method,
+                    request_id,
+                    service
+                }
+            }
+        })
 
         return Object.assign($, {
             then: async (success: Function, error: Function) => {
@@ -221,241 +203,6 @@ export class SpiderMesh {
         }) as Observable<T> & Promise<T>
     }
 
-
-    #get_rpc_target(msg: RpcRequest) {
-        if (msg.service == 'SpiderMesh') {
-            if (!msg.method.startsWith('$')) throw `SPIDER_MESH_METHOD_NOT_ALLOW`
-            return this
-        }
-        const service = this.#local_services.get(msg.service)?.instance
-        if (!service) throw 'RPC_SERVICE_NOT_FOUND'
-        if (typeof service[msg.method] != 'function') throw 'RPC_METHOD_NOT_FOUND'
-        return service
-    }
-
-    #decode_rpc_buffer<T>(req: SpiderMeshRequest, data: Buffer, session_id: string) {
-        let is_pure = true
-        const result = Encoder.decode<T>(
-            data,
-            () => () => {
-                throw new Error('CAN_NOT_CALL_FUNCTION_IN_RPC')
-            },
-            observable_id => {
-
-                is_pure = false
-                const tid = setTimeout(() => {
-                    throw new Error('Orphant Observable detected !', {
-                        cause: 'All Observable object need to subscribe within 2 second'
-                    })
-                }, 2000)
-                return new Observable(o => {
-                    clearTimeout(tid)
-                    if (!this.#requests.has(session_id)) {
-                        return o.error('RPC_OFFLINE')
-                    }
-                    const channel_id = randomUUID()
-                    const s = new Subject<PureData>()
-                    req.channels.set(channel_id, s)
-                    s.subscribe(o)
-                    this.#subscribe_channel(req.target_node_id, session_id, observable_id, channel_id)
-                    return () => {
-                        this.#unsubcribe_channel(req.target_node_id, session_id, channel_id)
-                    }
-                })
-            }
-        )
-        return [result, is_pure] as [T, boolean]
-    }
-
-
-    async #on_rpc(msg: RpcRequest, sender_node_id: string) {
-
-        const instance = this.#get_rpc_target(msg)
-
-        this.#requests.set(msg.session_id, {
-            observables: new Map(),
-            target_node_id: sender_node_id,
-            subscriptions: new Map(),
-            channels: new Map()
-        })
-
-        const req = this.#requests.get(msg.session_id)
-        if (!req) return
-
-
-
-        const channel_id = msg.session_id
-        try {
-            const [args] = this.#decode_rpc_buffer<any[]>(req, msg.args, msg.session_id)
-            if (!args) return this.#stream_error(
-                sender_node_id,
-                msg.session_id,
-                channel_id,
-                Buffer.from('INVAILD_ARGS')
-            )
-            const result = await instance?.[msg.method]?.(...args)
-            const { buffer, observables } = Encoder.encode(await result)
-            for (const [observable_id, o] of observables) req.observables.set(observable_id, o)
-            this.#stream_next(sender_node_id, msg.session_id, channel_id, buffer)
-        } catch (error) {
-            if (error instanceof Error) {
-                this.#stream_error(
-                    sender_node_id,
-                    msg.session_id,
-                    channel_id,
-                    Encoder.encode(JSON.stringify(error)).buffer
-                )
-            }
-        }
-
-    }
-
-    #stream_next(node_id: string, session_id: string, channel_id: string, data: PureData) {
-        return this.publish<RpcStream>(
-            node_id,
-            {
-                type: MessageType.RpcStream,
-                channel_id,
-                session_id,
-                data
-            },
-            node_id
-        )
-    }
-
-    #stream_error(node_id: string, session_id: string, channel_id: string, error: PureData) {
-        return this.publish<RpcStream>(
-            node_id,
-            {
-                type: MessageType.RpcStream,
-                channel_id,
-                session_id,
-                error
-            },
-            node_id
-        )
-    }
-
-    #stream_complete(node_id: string, session_id: string, channel_id: string) {
-        return this.publish<RpcStream>(
-            node_id,
-            {
-                type: MessageType.RpcStream,
-                channel_id,
-                completed: true,
-                session_id
-            },
-            node_id
-        )
-    }
-
-
-
-    #subscribe_channel(node_id: string, session_id: string, observable_id: string, channel_id: string,) {
-        return this.publish<RpcSubscribeChannel>(
-            node_id,
-            {
-                type: MessageType.RpcSubscribeChannel,
-                channel_id,
-                session_id,
-                observable_id
-            },
-            node_id
-        )
-    }
-
-    #on_subscribe_channel(msg: RpcSubscribeChannel, sender_node_id: string) {
-
-
-        const response = (e: Omit<RpcStream, 'session_id' | 'channel_id' | 'type'>) => {
-
-            this.publish<RpcStream>(
-                sender_node_id,
-                {
-                    session_id: msg.session_id,
-                    channel_id: msg.channel_id,
-                    type: MessageType.RpcStream,
-                    ...e
-                },
-                sender_node_id
-            )
-        }
-
-        const req = this.#requests.get(msg.session_id)
-        if (!req) {
-            response({ error: 'RPC_SESSION_EXPIRED' })
-            return
-        }
-
-
-        const o = req.observables.get(msg.observable_id)
-        if (!o) return response({ error: 'RPC_SESSION_NOT_FOUND' })
-
-        const subscription = o.pipe(
-            finalize(() => {
-                if (req.subscriptions.size == 0 && req.channels.size == 0) {
-                    this.#requests.delete(msg.session_id)
-                }
-            })
-        ).subscribe({
-            complete: () => this.#stream_complete(sender_node_id, msg.session_id, msg.channel_id),
-            error: error => this.#stream_error(sender_node_id, msg.session_id, msg.channel_id, error),
-            next: data => this.#stream_next(sender_node_id, msg.session_id, msg.channel_id, data)
-        })
-        req.subscriptions.set(msg.channel_id, subscription)
-
-    }
-
-    
-    #unsubcribe_channel(node_id: string, session_id: string, channel_id: string,) {
-        return this.publish<RpcUnsubscribeChannel>(
-            node_id,
-            {
-                type: MessageType.RpcUnsubscribeChannel,
-                channel_id,
-                session_id
-            },
-            node_id
-        )
-    }
-
-    #on_unsubscribe_channel(msg: RpcUnsubscribeChannel) {
-
-        const req = this.#requests.get(msg.session_id)
-        if (!req) return
-
-        req.subscriptions.get(msg.channel_id)?.unsubscribe()
-        req.subscriptions.delete(msg.channel_id)
-
-        if (req.channels.size == 0 && req.subscriptions.size == 0) {
-            this.#requests.delete(msg.session_id)
-        }
-    }
-
-
-    #on_stream(stream: RpcStream) {
-        const req = this.#requests.get(stream.session_id)
-        if (!req) return
-
-
-        const $ = req.channels.get(stream.channel_id)
-        if (!$) return
-
-
-
-        if (stream.data != undefined) {
-            $.next(stream.data)
-        }
-        if (stream.completed || stream.error) {
-            stream.error && $.error(stream.error)
-            stream.completed && $.complete()
-            req.channels.delete(stream.channel_id);
-            if (req.channels.size == 0 && req.subscriptions.size == 0) {
-                this.#requests.delete(stream.session_id)
-            }
-        }
-    }
-
     async $metadata() {
         const ips = (
             Object.values(networkInterfaces())
@@ -473,11 +220,11 @@ export class SpiderMesh {
         const isolated_nodes = [
             ...new Set([...this.#linked_nodes.values()]
                 .filter(node => node.isolated)
-                .map(node => node.id))
+                .map(node => node.local_transporter_id))
         ]
 
-        const metadata: SpiderMeshNodeMetadata = {
-            id: this.transporter.node_id,
+        const metadata: Omit<SpiderMeshNodeMetadata, 'local_transporter_id' | 'remote_transporter_id'> = {
+            node_id: this.#node_id,
             name: PACKAGE_JSON?.name || 'UNKNOWN',
             version: PACKAGE_JSON?.version || '1.0.0',
             path: process.cwd(),
@@ -490,7 +237,7 @@ export class SpiderMesh {
             last_online: Date.now(),
             online: true,
             services,
-            namespace: this.transporter.namespace,
+            namespace: NAMEPSACE,
             linked: [...this.#linked_nodes.keys()],
             isolated_nodes,
             isolated: this.#$isolated.value,
@@ -498,10 +245,23 @@ export class SpiderMesh {
         return metadata
     }
 
-    async #self_introduce(node_id?: string) {
-        const me = await this.$metadata()
-        await this.publish<SpiderMeshNodeMetadata[]>('#join', [me], node_id)
-        return me
+
+    async #self_introduce(local_transporter_id?: string, remote_transporter_id?: string) {
+
+        const list = local_transporter_id ? [this.#transporters.get(local_transporter_id)] : [... this.#transporters.values()]
+        for (const target of list) {
+            if (!target) continue
+            const me: SpiderMeshNodeMetadata = {
+                ...await this.$metadata(),
+                local_transporter_id: target.transporter.transporter_id,
+                remote_transporter_id: '#'
+            }
+            await this.publish({
+                topic: '#join',
+                payload: me,
+                local_transporter_id
+            })
+        }
     }
 
     async $update_isolate_mode(active: boolean) {
@@ -510,66 +270,145 @@ export class SpiderMesh {
         return me
     }
 
-    #node_event_handler({ data: msg, sender_node_id }: { data: RpcEvent, sender_node_id: string }) {
-        if (msg.type == MessageType.RpcRequest) return this.#on_rpc(msg, sender_node_id)
-        if (msg.type == MessageType.RpcStream) return this.#on_stream(msg)
-        if (msg.type == MessageType.RpcSubscribeChannel) return this.#on_subscribe_channel(msg, sender_node_id)
-        if (msg.type == MessageType.RpcUnsubscribeChannel) return this.#on_unsubscribe_channel(msg)
+    #get_rpc_target(msg: SpiderMeshRpcEvent['request']) {
+        if (msg.service == 'SpiderMesh') {
+            if (!msg.method.startsWith('$')) throw `SPIDER_MESH_METHOD_NOT_ALLOW`
+            return this
+        }
+        const service = this.#local_services.get(msg.service)?.instance
+        if (!service) throw 'RPC_SERVICE_NOT_FOUND'
+        if (typeof service[msg.method] != 'function') throw 'RPC_METHOD_NOT_FOUND'
+        return service
     }
 
-    async #init() {
+    async #node_event_handler({ data: event, sender_node_id }: { data: SpiderMeshRpcEvent, sender_node_id: string }) {
 
-        // Init transporter
-        await this.transporter.start()
+        if (event.request) {
+            const response = (data: Partial<SpiderMeshRpcEvent['response']>) => {
+                const error = data.error ? (data.error instanceof Error ? {
+                    cause: data.error.cause as string,
+                    message: data.error.message,
+                    name: data.error.name as string,
+                    stack: data.error.stack as string
+                } : data.error) : undefined
+                return this.publish<Pick<SpiderMeshRpcEvent, 'response'>>({
+                    topic: sender_node_id,
+                    payload: {
+                        response: {
+                            request_id: event.request.request_id,
+                            ...data,
+                            error
+                        },
+                    }
+                })
+            }
+            try {
+                const instance = this.#get_rpc_target(event.request)
+
+                try {
+                    const value = await instance?.[event.request.method]?.(...event.request.args || [])
+                    if (value instanceof Observable) {
+                        value.subscribe({
+                            complete: () => response({ completed: true }),
+                            error: error => response({ error }),
+                            next: value => response({ data: { value } })
+                        })
+                        return
+                    } else {
+                        response({ completed: true, data: { value } })
+                    }
+                } catch (error) {
+                    response({ error: error as PureData })
+                }
+            } catch (error) {
+                response({ error: error as any })
+            }
+        }
+
+        if (event.response) {
+            const request = this.#requests.get(event.response.request_id)
+            if (!request) return
+            if (event.response.data) {
+                request.$response.next(event.response.data.value)
+            }
+            if (event.response.completed) {
+                request.$response.complete()
+            }
+            if (event.response.error) {
+                request.$response.error(event.response.error)
+            }
+        }
+    }
+
+    async link_transporter(transporter: SpiderMeshTransporter) {
+
+        this.#transporters.set(transporter.transporter_id, {
+            transporter,
+            nodes: new Map()
+        })
+
 
         // Listen RPC
-        this.listen<RpcEvent>(this.transporter.node_id).subscribe(
+        this.listen<SpiderMeshRpcEvent>(this.#node_id).subscribe(
             msg => this.#node_event_handler(msg)
         )
 
         // Listen new node
-        this.listen<SpiderMeshNode>('#join')
-            .pipe(
-                groupBy(node => node.sender_node_id),
-                mergeMap(grouped => grouped.pipe(debounceTime(1000))),
-                mergeMap(({ data }) => this.#on_node_discovered(data), 1),
-            )
-            .subscribe()
+        this.listen<SpiderMeshNode>('#join').pipe(
+            filter(node => node.sender_node_id != this.#node_id),
+            groupBy(node => node.sender_node_id),
+            mergeMap(grouped => grouped.pipe(debounceTime(1000)).pipe(
+                map(({ data: node, received_transporter_id, sender_transporter_id }) => ({
+                    ...node,
+                    local_transporter_id: received_transporter_id,
+                    remote_transporter_id: sender_transporter_id,
+                } as SpiderMeshNode)),
+                mergeMap(node => this.#on_node_discovered(node), 1),
+            )),
+
+        ).subscribe()
 
         // Sync node status
-        this.transporter.$nodes_status.pipe(
-            tap(node => !node.online && this.#on_node_offline(node.node_id)),
-            groupBy(node => node.node_id),
-            mergeMap(grouped => grouped.pipe(debounceTime(1000))),
-            filter(node => node.online),
-            mergeMap(({ node_id }) => this.#self_introduce(node_id), 1)
+        transporter.$nodes_status.pipe(
+            tap(node => !node.online && this.#on_node_offline(node)),
+            groupBy(node => node.local_transporter_id),
+            mergeMap(grouped => grouped.pipe(debounceTime(1000)).pipe(
+                map(node => node as TcpNodeStatus),
+                filter(node => node.online),
+                mergeMap(node => this.#self_introduce(
+                    transporter.transporter_id,
+                    node.remote_transporter_id
+                ), 1)
+            ))
         )
             .subscribe()
 
         serviceInstanceList.pipe(
-            filter(i => i.namespace == this.transporter.namespace),
             mergeMap(async ({ instance, metadata }) => {
                 await this.#active_local_service(instance, metadata)
                 await this.#active_ready_hooks(instance)
             }),
             debounceTime(1000),
-            mergeMap(() => this.#self_introduce())
+            mergeMap(async () => {
+                const me = await this.$metadata()
+            })
         ).subscribe()
     }
 
     async #on_node_discovered(node: SpiderMeshNode) {
-        if (node.id == this.transporter.node_id) return
-        if (this.#$isolated.value) return
-        const saved_node = this.#linked_nodes.get(node.id)
+        if (node.node_id == this.#node_id) return
+
+        const saved_node = this.#linked_nodes.get(node.node_id)
         if (saved_node && saved_node.last_online > node.last_online) return
-        const peer_updated = node.linked.includes(this.transporter.node_id)
+        const peer_updated = node.linked.includes(this.#node_id)
         const new_node: SpiderMeshNode = {
             ...node,
             online: true
         }
 
-        if (!peer_updated) await this.#self_introduce(node.id)
-        this.#linked_nodes.set(node.id, new_node);
+        this.#linked_nodes.set(node.node_id, new_node);
+        this.#transporters.get(node.local_transporter_id)?.nodes.set(node.remote_transporter_id, node.node_id)
+        if (!peer_updated && !this.#$isolated.value) await this.#self_introduce(node.local_transporter_id, node.remote_transporter_id)
 
         for (const service_id of Object.keys(node.services)) {
             if (!this.#remote_services.has(service_id)) {
@@ -579,7 +418,7 @@ export class SpiderMesh {
                 })
             }
             const $service = this.#remote_services.get(service_id)!
-            const index = $service.nodes.findIndex(n => n.id == new_node.id)
+            const index = $service.nodes.findIndex(n => n.node_id == new_node.node_id)
             index >= 0 ? ($service.nodes[index] = new_node) : $service.nodes.push(new_node)
         }
 
@@ -587,25 +426,30 @@ export class SpiderMesh {
 
     }
 
-    #on_node_offline(id: string) {
+    #on_node_offline({ local_transporter_id, remote_transporter_id, }: TcpNodeStatus) {
+
+        const node_id = this.#transporters.get(local_transporter_id)?.nodes?.get(remote_transporter_id)
+        if (!node_id) return
+        const node = this.#linked_nodes.get(node_id)
+        if (!node) return
+
 
         // Remove remote node from linked remote services
         for (const service of this.#remote_services.values()) {
-            service.nodes = service.nodes.filter(node => node.id != id)
+            service.nodes = service.nodes.filter(node => node.remote_transporter_id != remote_transporter_id)
         }
 
         // Throw errors fro requests
-        for (const [rid, { target_node_id, channels, observables, subscriptions }] of this.#requests) {
-            if (target_node_id == id) {
-                for (const [_, $] of channels) $.error(new Error('SERVICE_OFFLINE'))
-                subscriptions.forEach(s => s.unsubscribe())
+        for (const [rid, { $response, rpc_node_id }] of this.#requests) {
+            if (rpc_node_id == node_id) {
+                $response.error('OFFLINE')
                 this.#requests.delete(rid)
             }
         }
 
-        const node = this.#linked_nodes.get(id)
+
         node && this.$nodes_monitor.next({ ...node, online: false })
-        this.#linked_nodes.delete(id)
+        this.#linked_nodes.delete(node_id)
 
     }
 
@@ -677,7 +521,7 @@ export class SpiderMesh {
                                         service_name,
                                         real_method,
                                         args,
-                                        { $node_id: node.id } as RPCOptions
+                                        { $node_id: node.node_id } as RPCOptions
                                     )
                                     return { node, data }
                                 } catch (error) {
@@ -707,7 +551,10 @@ export class SpiderMesh {
     async link_event<T extends Encodeable = Encodeable>(event_factory: { new(...args: any[]): T }, publish_buffer_ms?: number) {
         const $ = new Subject<T>()
         const $$: Observable<T | T[]> = publish_buffer_ms ? $.pipe(bufferTime(publish_buffer_ms), filter(l => l.length > 0)) : $
-        $$.subscribe(data => this.publish(event_factory.name, data))
+        $$.subscribe(data => this.publish({
+            payload: data,
+            topic: event_factory.name
+        }))
 
         return {
             publish: async (data: T) => $.next(data),
@@ -722,7 +569,7 @@ export class SpiderMesh {
         const name = prototype.constructor.name
 
         this.#local_services.set(name, { instance, metadata })
-        this.listen<RpcEvent>(name).subscribe(evt => this.#node_event_handler(evt))
+        this.listen<SpiderMeshRpcEvent>(name).subscribe(evt => this.#node_event_handler(evt))
 
 
         // Active event subscribers
@@ -761,35 +608,68 @@ export class SpiderMesh {
         }
     }
 
-    async publish<T extends Encodeable>(topic: string | { new(): EventHub<T> }, payload: T, node_id?: string) {
-        await this.#initing
+    async batch_publish<T extends Encodeable>({ payload, topic, node_id, local_transporter_id }: SpiderMeshBatchPublishPayload<T>) {
         const event = typeof topic == 'string' ? topic : topic.name
-        const data = Array.isArray(payload) ? payload : [payload]
-        this.transporter.publish({
-            event,
-            data,
-            node_id
+        const data: SpiderMeshEventWrapper<T[]> = { payload, node_id: this.#node_id }
+        if (node_id) {
+            const node = this.#linked_nodes.get(node_id)
+            if (!node) return
+            const target = this.#transporters.get(node.local_transporter_id)
+            if (!target) return
+            target.transporter.publish({
+                event,
+                remote_transporter_id: node.remote_transporter_id,
+                data
+            })
+            return
+        }
+        if (local_transporter_id) {
+            const target = this.#transporters.get(local_transporter_id)
+            target?.transporter?.publish({
+                event,
+                data
+            })
+            return
+        }
+        for (const { transporter } of this.#transporters.values()) {
+            transporter.publish({
+                event,
+                data
+            })
+        }
+
+    }
+
+    publish<T extends Encodeable>({ payload, topic, node_id, local_transporter_id }: SpiderMeshPublishPayload<T>) {
+        return this.batch_publish({
+            node_id,
+            payload: [payload],
+            topic,
+            local_transporter_id
         })
     }
 
     listen<T extends Encodeable = Encodeable>(topic: string | { new(...args: any[]): T }) {
         const topic_name = typeof topic == 'string' ? topic : topic.name
-        return this.transporter.listen<T>(topic_name).pipe(
-            map(e => {
-                const data = e.data
-                if (!Array.isArray(data)) return []
-                return data.map(
-                    data => (
-                        {
-                            data: data as T,
-                            sender_node_id: e.sender_node_id
+        return merge(
+            ...[...this.#transporters.values()].map(t => t.transporter.listen<T>(topic_name))
+        ).pipe(
+            map(({ data, received_transporter_id, sender_transporter_id }) => {
+                const items = data as { payload: T[], node_id: string }
+                try {
+                    return items.payload.map(data => {
+                        return {
+                            data,
+                            received_transporter_id,
+                            sender_transporter_id,
+                            sender_node_id: items.node_id
                         }
-                    )
-                )
+                    })
+                } catch (e) {
+                    return []
+                }
             }),
             mergeAll()
         )
     }
-
-
 }

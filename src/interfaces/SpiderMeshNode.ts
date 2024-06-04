@@ -3,7 +3,9 @@ export type ServiceMetadata = {
 }
 
 export type SpiderMeshNodeMetadata = {
-    id: string
+    node_id: string
+    local_transporter_id: string
+    remote_transporter_id: string
     name: string
     version: string,
     path: string

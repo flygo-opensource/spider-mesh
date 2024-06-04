@@ -91,5 +91,9 @@ export class RxjsTcpSocket {
     write(data: Buffer) {
         this.#$outgoing_data.next(data)
     }
+
+    close(){
+        this.rawSocket?.end()
+    }
 }
 

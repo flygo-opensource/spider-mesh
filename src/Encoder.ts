@@ -1,17 +1,14 @@
-import { randomUUID } from "crypto"
 import { Observable } from "rxjs"
 
 export type PureData = string | number | boolean | null | Buffer | PureData[] | {
     [key: string]: PureData
 }
 
+ 
 
 
-export type EncoablePrimitiveType = Function | PureData | Observable<any> | Buffer
-
-
-export type Encodeable = PureData | Array<EncoablePrimitiveType | Encodeable> | {
-    [key: string]: EncoablePrimitiveType | Encodeable
+export type Encodeable = PureData | Array<PureData | Encodeable> | {
+    [key: string]: PureData | Encodeable
 } | Observable<PureData>
 
 export const Encoder = {
@@ -19,17 +16,12 @@ export const Encoder = {
     encode: <T extends Encodeable>(content: T) => {
 
         const buffers: Buffer[] = []
-        const functions = new Map<string, Function>()
-        const observables = new Map<string, Observable<PureData>>()
+        
 
         if (content == null || content == undefined) {
             const buffer = Buffer.alloc(4)
             buffer.writeInt32LE(-1)
-            return {
-                buffer,
-                functions,
-                observables
-            }
+            return buffer
         }
 
         function replacer(this: any, key: string, value: any) {
@@ -43,24 +35,7 @@ export const Encoder = {
                 __$$__dataType: 'Set',
                 __$$__value: Array.from(originalObject.values()), // or with spread: __$$__value: [...originalObject]
             }
-
-            if (originalObject instanceof Observable) {
-                const id = randomUUID()
-                observables.set(id, originalObject)
-                return {
-                    __$$__dataType: 'Observable',
-                    id
-                }
-            }
-
-            if (typeof originalObject == 'function') {
-                const id = randomUUID()
-                functions.set(id, originalObject)
-                return {
-                    __$$__dataType: 'Function',
-                    id
-                }
-            }
+ 
 
             if (originalObject instanceof Buffer) {
                 buffers.push(originalObject)
@@ -84,13 +59,11 @@ export const Encoder = {
         }).flat(2)
         const data = Buffer.from(metadata, 'utf-8')
         const buffer = Buffer.concat([buffers_count, ...buffers_list, data])
-        return { buffer, functions, observables }
+        return buffer
     },
 
     decode: <T>(
-        raw: Buffer,
-        function_handler: (index: string) => Function = (() => () => { }),
-        oservable_handler: (id: string) => Observable<any> = () => new Observable()
+        raw: Buffer
     ) => {
         const buffers: Buffer[] = []
         const length = raw.readUInt32LE(0)
@@ -113,24 +86,15 @@ export const Encoder = {
                 if (value.__$$__dataType === 'Set') {
                     return new Set(value.__$$__value);
                 }
-
-                if (value.__$$__dataType == 'Function') {
-                    return function_handler(value.id)
-                }
+ 
 
                 if (value.__$$__dataType == 'Buffer') {
                     return buffers[value.__index]
-                }
-
-                if (value.__$$__dataType == 'Observable') {
-                    return oservable_handler(value.id) || (() => new Observable())
-                }
+                } 
             }
 
             return value;
         }
         return JSON.parse(metadata, receiver) as T
     }
-}
-const a = Encoder.encode(undefined as any)
-const b = Encoder.decode(a.buffer)
+} 

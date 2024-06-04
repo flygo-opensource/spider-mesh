@@ -1,5 +1,4 @@
 node_modules
 bin
 build
-.vscode
-tests
+.vscode 
