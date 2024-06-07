@@ -1,4 +1,4 @@
-import { filter, firstValueFrom, from, last, lastValueFrom, map, mergeMap, timer, toArray } from 'rxjs'
+import { filter, firstValueFrom, from, last, lastValueFrom, map, merge, mergeMap, take, tap, timer, toArray } from 'rxjs'
 import { SpiderMesh } from '../src/SpiderMesh.js'
 import { ExampleService } from './ExampleService.js'
 import { before, it, describe } from 'node:test'
@@ -7,25 +7,41 @@ import { RemoteService } from 'src/index.js'
 
 if (process.argv[2] == 'a') {
     describe('Test RPC running service', {}, () => {
-        new SpiderMesh()
-        const service = new ExampleService()
+        const sm = new SpiderMesh()
+        const service = new ExampleService(sm)
         strictEqual(service.online, true, 'Service must online')
     })
 }
 
 if (process.argv[2] == 'b') {
 
-    describe('Test RPC requester', { concurrency: 1 }, () => {
+
+
+
+    describe('Test RPC requester', undefined, () => {
         let service: RemoteService<ExampleService>
 
         before(async () => {
             const sm = new SpiderMesh()
             service = await sm.link_remote_service(ExampleService)
+            // console.log(`Listen new nodes`)
+            // service.$watch().pipe(
+            //     tap(node => console.log({ id: node.node_id, online: node.online })),
+            // ).subscribe() 
         })
+
+
 
         it(`Wait service online`, async () => {
             await service.$wait_service_online()
             strictEqual(service.$list_nodes().length >= 1, true)
+        })
+
+        it(`Wait 2 service online`, async () => {
+
+            await service.$wait_service_online()
+            strictEqual(service.$list_nodes().length >= 2, true)
+
         })
 
         it(`Test not found`, async () => {
@@ -107,13 +123,14 @@ if (process.argv[2] == 'b') {
         })
 
         it(`RRR`, async () => {
-            const ids = service.$list_nodes().map((a, i) => `${i + 1}`)
+            const ids = service.$list_nodes().map((a, i) => a.node_id)
             const called = ids.map(() => 0)
             for (let i = 1; i <= ids.length * 10; i++) {
                 const id = await service.get_id()
                 const j = ids.findIndex(a => a == id)
                 called[j]++
             }
+            console.log({called})
             for (let i = 1; i < ids.length; i++) {
                 strictEqual(called[i - 1], called[i])
             }
@@ -130,48 +147,11 @@ if (process.argv[2] == 'b') {
 
 
 
+}
 
 
+if (process.argv[2] == 'c') {
 
+    const sm = new SpiderMesh()
 
-    // console.log(`Batch`)
-    // console.log(await firstValueFrom(service.$batch_get_time().pipe(toArray())))
-
-    // console.log(`Timeout`)
-    // const data = await service.$timeout(500).$fallback(7).asyncSum(1, 2)
-    // console.log({ data })
-
-
-    // console.log('Interator')
-    // await lastValueFrom(service.interator().pipe(
-    //     map(n => console.log({ n }))
-    // ))
-
-    // console.log('ERROR')
-    // try {
-    //     await service.errror_test()
-    // } catch (e) {
-    //     console.log(JSON.stringify(e))
-    // }
-
-    // console.log('ERROR OBJ')
-    // try {
-    //     await service.obj_errror_test()
-    // } catch (e) {
-    //     console.log(e)
-    // }
-
-    // console.log('Async interator')
-    // await lastValueFrom(service.asyncInterator().pipe(
-    //     map(n => console.log({ n }))
-    // ))
-
-    // console.log('Buffer')
-    // const buffer = await service.buffer()
-    // console.log({ buffer, v: buffer.toString('utf8') })
-
-    // console.log('interatorBufferMix')
-    // await lastValueFrom(service.interatorBufferMix().pipe(
-    //     map(n => console.log({ n }))
-    // ))
 }

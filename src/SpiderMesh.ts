@@ -9,15 +9,16 @@ import { RemoteService } from './interfaces/RemoteService.js'
 import os from 'os'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, EMPTY, Observable, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, first, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, retry, scan, share, takeWhile, tap, timeout, timer } from 'rxjs'
+import { BehaviorSubject, Observable, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, retry, scan, share, tap, timeout } from 'rxjs'
 import { readFileSync } from 'fs'
-import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
-import { Encodeable } from './Encoder.js'
+import { Encodable } from './Encoder.js'
 import { NAMEPSACE } from './const.js'
 import { BuiltinTransporter } from './builtin-transporter/BuiltinTransporter.js'
+import { $services } from './decorators/Microservice.js'
 
-export type PureData = string | number | boolean | null | Buffer | PureData[] | { [key: string]: PureData }
+
+type SpiderMeshMetadata = { smnid: string }
 
 
 export type SpiderMeshRpcEvent = {
@@ -29,8 +30,8 @@ export type SpiderMeshRpcEvent = {
     }
     response: {
         request_id: string,
-        error?: PureData
-        data?: { value: PureData }
+        error?: Encodable
+        data?: { value: Encodable }
         completed?: boolean
     }
 }
@@ -41,21 +42,21 @@ const PACKAGE_JSON = JSON.parse(readFileSync(`package.json`, 'utf8')) || {}
 
 export type SpiderMeshNamespace = string
 
-export type SpiderMeshPublishPayload<T extends Encodeable = Encodeable> = {
+export type SpiderMeshPublishPayload<T extends Encodable = Encodable> = {
     topic: string | { new(): EventHub<T> },
     payload: T,
     node_id?: string,
     local_transporter_id?: string
 }
 
-export type SpiderMeshBatchPublishPayload<T extends Encodeable = Encodeable> = {
+export type SpiderMeshBatchPublishPayload<T extends Encodable = Encodable> = {
     topic: string | { new(): EventHub<T> },
     payload: T[],
     node_id?: string,
     local_transporter_id?: string
 }
 
-type SpiderMeshEventWrapper<T extends Encodeable = Encodeable> = {
+type SpiderMeshEventWrapper<T extends Encodable = Encodable> = {
     node_id: string
     payload: T
 }
@@ -158,6 +159,7 @@ export class SpiderMesh {
         const $ = new Observable($response => {
             const request_id = randomUUID()
 
+
             // Send RPC request here 
             this.#requests.set(request_id, { $response, rpc_node_id })
 
@@ -256,7 +258,6 @@ export class SpiderMesh {
 
 
     async #self_introduce(local_transporter_id?: string, remote_transporter_id?: string) {
-
         const list = local_transporter_id ? [this.#transporters.get(local_transporter_id)] : [... this.#transporters.values()]
         for (const target of list) {
             if (!target) continue
@@ -286,7 +287,7 @@ export class SpiderMesh {
         return service
     }
 
-    async #node_event_handler({ data: event, sender_node_id }: { data: SpiderMeshRpcEvent, sender_node_id: string }) {
+    async #node_event_handler({ payload: event, sti, metadata: { smnid } }: SpiderMeshTransporterEvent<SpiderMeshRpcEvent, SpiderMeshMetadata>) {
 
         if (event.request) {
             const response = (data: Partial<SpiderMeshRpcEvent['response']>) => {
@@ -297,7 +298,7 @@ export class SpiderMesh {
                     stack: data.error.stack as string
                 } : data.error) : undefined
                 return this.publish<Pick<SpiderMeshRpcEvent, 'response'>>({
-                    topic: sender_node_id,
+                    topic: smnid,
                     payload: {
                         response: {
                             request_id: event.request.request_id,
@@ -327,7 +328,7 @@ export class SpiderMesh {
                     }
                 } catch (error) {
                     if (event.request.request_id == '#') return
-                    response({ error: error as PureData })
+                    response({ error: error as Encodable })
                 }
             } catch (error) {
                 if (event.request.request_id == '#') return
@@ -365,14 +366,16 @@ export class SpiderMesh {
 
         // Listen new node
         this.listen<SpiderMeshNode>('#join').pipe(
-            filter(node => node.sender_node_id != this.#node_id),
-            groupBy(node => node.sender_node_id),
-            mergeMap(grouped => grouped.pipe(debounceTime(1000)).pipe(
-                map(({ data: node, received_transporter_id, sender_transporter_id }) => ({
-                    ...node,
-                    local_transporter_id: received_transporter_id,
-                    remote_transporter_id: sender_transporter_id,
+            filter(node => node.metadata.smnid != this.#node_id),
+            groupBy(node => node.metadata.smnid),
+            mergeMap(grouped => grouped.pipe(
+                debounceTime(500),
+                map(({ payload, sti }) => ({
+                    ...payload,
+                    local_transporter_id: transporter.transporter_id,
+                    remote_transporter_id: sti,
                 } as SpiderMeshNode)),
+                filter(node => node.node_id != this.#node_id),
                 mergeMap(node => this.#on_node_discovered(node), 1),
             )),
 
@@ -380,31 +383,27 @@ export class SpiderMesh {
 
         // Sync node status
         transporter.$nodes_status.pipe(
-            groupBy(node => node.local_transporter_id),
-            mergeMap(grouped => grouped.pipe(debounceTime(1000)).pipe(
+            tap(node => !node.online && this.#on_node_offline(transporter.transporter_id, node.remote_transporter_id)),
+            groupBy(node => node.remote_transporter_id),
+            mergeMap(grouped => grouped.pipe(
                 scan((prev, current) => {
                     if (!prev || (prev.online != current.online)) return current as TcpNodeStatus
                     return undefined
                 }, undefined as (undefined | TcpNodeStatus)),
                 filter(Boolean),
                 map(node => node as TcpNodeStatus),
-                tap(node => {
-                    if (node.online) {
-                        this.#self_introduce(node.local_transporter_id, node.remote_transporter_id)
-                    } else {
-                        this.#on_node_offline(node)
-                    }
-                })
+                filter(node => node.online),
+                tap(node => this.#self_introduce(transporter.transporter_id, node.remote_transporter_id))
             ))
         )
             .subscribe()
 
-        serviceInstanceList.pipe(
+        $services.pipe(
             mergeMap(async ({ instance, metadata }) => {
                 await this.#active_local_service(instance, metadata)
                 await this.#active_ready_hooks(instance)
             }),
-            debounceTime(1000),
+            debounceTime(500),
             mergeMap(async () => {
                 this.#self_introduce(transporter.transporter_id)
             })
@@ -442,7 +441,7 @@ export class SpiderMesh {
 
     }
 
-    #on_node_offline({ local_transporter_id, remote_transporter_id, }: TcpNodeStatus) {
+    #on_node_offline(local_transporter_id: string, remote_transporter_id: string) {
 
         const node_id = this.#transporters.get(local_transporter_id)?.nodes?.get(remote_transporter_id)
         if (!node_id) return
@@ -564,7 +563,7 @@ export class SpiderMesh {
 
     }
 
-    async link_event<T extends Encodeable = Encodeable>(event_factory: { new(...args: any[]): T }, publish_buffer_ms?: number) {
+    async link_event<T extends Encodable = Encodable>(event_factory: { new(...args: any[]): T }, publish_buffer_ms?: number) {
         const $ = new Subject<T>()
         const $$: Observable<T | T[]> = publish_buffer_ms ? $.pipe(bufferTime(publish_buffer_ms), filter(l => l.length > 0)) : $
         $$.subscribe(data => this.publish({
@@ -624,17 +623,18 @@ export class SpiderMesh {
         }
     }
 
-    #publish<T extends Encodeable>(transporter: SpiderMeshTransporter, topic: string | (new () => EventHub<T>), payload: T[], remote_transporter_id?: string) {
+    #publish<T extends Encodable>(transporter: SpiderMeshTransporter, topic: string | (new () => EventHub<T>), list: T[], remote_transporter_id?: string) {
         const event = typeof topic == 'string' ? topic : topic.name
-        const data: SpiderMeshEventWrapper<T[]> = { payload, node_id: this.#node_id }
-        return transporter.publish({
+        const e = {
             event,
-            remote_transporter_id,
-            data
-        })
+            metadata: { smnid: this.#node_id },
+            payload: list,
+            rti: remote_transporter_id
+        }
+        return transporter.publish<T[], SpiderMeshMetadata>(e)
     }
 
-    batch_publish<T extends Encodeable>({ payload, topic, node_id, local_transporter_id }: SpiderMeshBatchPublishPayload<T>) {
+    batch_publish<T extends Encodable>({ payload, topic, node_id, local_transporter_id }: SpiderMeshBatchPublishPayload<T>) {
         if (node_id) {
             const node = this.#linked_nodes.get(node_id)
             if (!node) return
@@ -652,7 +652,7 @@ export class SpiderMesh {
 
     }
 
-    publish<T extends Encodeable>({ payload, topic, node_id, local_transporter_id }: SpiderMeshPublishPayload<T>) {
+    publish<T extends Encodable>({ payload, topic, node_id, local_transporter_id }: SpiderMeshPublishPayload<T>) {
         return this.batch_publish({
             node_id,
             payload: [payload],
@@ -661,27 +661,19 @@ export class SpiderMesh {
         })
     }
 
-    listen<T extends Encodeable = Encodeable>(topic: string | { new(...args: any[]): T }) {
+    listen<T extends Encodable = Encodable>(topic: string | { new(...args: any[]): T }) {
         const topic_name = typeof topic == 'string' ? topic : topic.name
         return merge(
-            ...[...this.#transporters.values()].map(t => t.transporter.listen<T>(topic_name))
-        ).pipe(
-            map(({ data, received_transporter_id, sender_transporter_id }) => {
-                const items = data as { payload: T[], node_id: string }
-                try {
-                    return items.payload.map(data => {
-                        return {
-                            data,
-                            received_transporter_id,
-                            sender_transporter_id,
-                            sender_node_id: items.node_id
-                        }
-                    })
-                } catch (e) {
-                    return []
-                }
-            }),
-            mergeAll()
+            ...[...this.#transporters.values()].map(({ transporter }) => (
+                transporter.listen<T[], SpiderMeshMetadata>(topic_name).pipe(
+                    map(msg => msg.payload.map(data => ({
+                        ...msg,
+                        payload: data,
+                        node_id: msg.metadata!.smnid
+                    }))),
+                    mergeAll(),
+                )
+            ))
         )
     }
 }

@@ -3,14 +3,14 @@ import { NAMEPSACE } from "../const.js"
 import { ServiceMetadata } from "../../src/interfaces/SpiderMeshNode.js"
 import { SpiderMesh } from "../../src/SpiderMesh.js"
 
-export const serviceInstanceList = new ReplaySubject<{ instance: any, namespace: string, metadata: ServiceMetadata }>()
+export const $services = new ReplaySubject<{ instance: any, namespace: string, metadata: ServiceMetadata }>()
 
 
 
 export const NestJSExposeMicroservice = (factory: any, metadata: ServiceMetadata = {}, namespace: string = NAMEPSACE) => ({
     provide: Symbol(),
     inject: [factory],
-    useFactory: (instance: any) => serviceInstanceList.next({
+    useFactory: (instance: any) =>  $services.next({
         instance,
         namespace,
         metadata
@@ -35,7 +35,7 @@ export const Microservice = (namespace: string = NAMEPSACE, metadata: ServiceMet
             class C extends target {
                 constructor(...args: any[]) {
                     super(...args)
-                    serviceInstanceList.next({
+                    $services.next({
                         instance: this,
                         namespace,
                         metadata

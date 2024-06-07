@@ -1,19 +1,12 @@
-import { Observable } from "rxjs"
 
-export type PureData = string | number | boolean | null | Buffer | PureData[] | {
-    [key: string]: PureData
+export type Encodable = string | number | boolean | undefined | null | Buffer | Encodable[] | {
+    [key: string]: Encodable
 }
 
 
-
-
-export type Encodeable = PureData | Array<PureData | Encodeable> | {
-    [key: string]: PureData | Encodeable
-} | Observable<PureData>
-
 export const Encoder = {
 
-    encode: <T extends Encodeable>(content: T) => {
+    encode: <T extends Encodable>(content: T) => {
 
         const buffers: Buffer[] = []
 
@@ -67,7 +60,7 @@ export const Encoder = {
     ) => {
         const buffers: Buffer[] = []
         const length = raw.readUInt32LE(0)
-        if (length > raw.length || length < 0) return 
+        if (length > raw.length || length < 0) return
         let index = 4
         for (let i = 0; i < length; i++) {
             const blength = raw.readUint32LE(index)

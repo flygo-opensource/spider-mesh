@@ -1,7 +1,7 @@
 import { Observable } from 'rxjs'
 import { SpiderMeshTransporterEvent } from '../interfaces/SpiderMeshTransporter.js'
 import { SpiderMesh } from 'src/SpiderMesh.js'
-import { Encodeable } from 'src/Encoder.js'
+import { Encodable } from 'src/Encoder.js'
 
 
 const key = Symbol.for('SubscribeEvent')
@@ -13,12 +13,12 @@ export type EventMetadata = {
     buffer_ms?: number
 }
 
-export type EventHub<T extends Encodeable = Encodeable> = {
+export type EventHub<T extends Encodable = Encodable> = {
     publish: (data: T) => void,
     listen: () => Observable<SpiderMeshTransporterEvent<T>>
 }
 
-export const ListenEvent = <T extends Encodeable = Encodeable>(factory: { new(): EventHub<T> }) => (
+export const ListenEvent = <T extends Encodable = Encodable>(factory: { new(): EventHub<T> }) => (
     target: Object,
     method:string,
     descriptor: TypedPropertyDescriptor<(event: SpiderMeshTransporterEvent<T>, sm?: SpiderMesh) => any>
@@ -27,7 +27,7 @@ export const ListenEvent = <T extends Encodeable = Encodeable>(factory: { new():
     Object.defineProperty(descriptor.value, key, { value: { method, event } as EventMetadata })
 }
 
-export const ListenEventBatch = <T extends Encodeable = Encodeable>(factory: { new(): EventHub<T> }, buffer_ms: number) => (
+export const ListenEventBatch = <T extends Encodable = Encodable>(factory: { new(): EventHub<T> }, buffer_ms: number) => (
     target: Object,
     method:string,
     descriptor: TypedPropertyDescriptor<(event: Array<SpiderMeshTransporterEvent<T>>, sm?: SpiderMesh) => any>
@@ -53,7 +53,7 @@ export const listEventSubscribers = (target: any) => {
 
 
 
-export function createSpiderMeshEvent<T extends Encodeable = Encodeable>() {
+export function createSpiderMeshEvent<T extends Encodable = Encodable>() {
     return class { } as {
         new(): EventHub<T>
     }

@@ -1,11 +1,11 @@
 import { firstValueFrom, timer, from, mergeMap } from "rxjs"
-import { Microservice } from "../src/index.js"
+import { Microservice, SpiderMesh } from "../src/index.js"
 
 @Microservice()
 export class ExampleService {
     online = true
 
-    constructor() {
+    constructor(private sm: SpiderMesh) {
         console.log(`Example service running`)
     }
 
@@ -71,12 +71,11 @@ export class ExampleService {
             this.i = 0
             return a
         }
-        throw {e: 1}
+        throw { e: 1 }
     }
 
-    get_id(){
-        const id = process.argv[3]
-        console.log(`Call me `, {id})
-        return id 
+    async get_id() {
+        const $ = await this.sm.$metadata()
+        return $.node_id
     }
 }

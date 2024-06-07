@@ -1,23 +1,33 @@
 import { Observable } from "rxjs"
-import { Encodeable } from "src/Encoder.js"
+import { Encodable } from "../Encoder.js"
 
-export type PublishMetadata<T extends Encodeable = Encodeable> = {
+export type SpiderMeshTransporterEventMetadata = {
+    [key: string]: Encodable
+}
+
+export type SpiderMeshTransporterEvent<T extends Encodable = Encodable, Metadata = SpiderMeshTransporterEventMetadata> = {
+    id: string
+    topic: string
+    created_at: number
+    received_at: number
+    payload: T,
+    metadata: Metadata
+
+    /** Sender transporter id */
+    sti: string
+}
+
+export type PublishMetadata<T extends Encodable = Encodable, Metadata = SpiderMeshTransporterEventMetadata> = {
     event: string,
-    remote_transporter_id?: string
-    data: T
+    payload: T
+    metadata: Metadata
+
+    /** Receiver trasporter id */
+    rti?: string
 }
 
-export type SpiderMeshTransporterEvent<T extends Encodeable = Encodeable> = {
-    data: T,
-    received_transporter_id: string
-    sender_transporter_id: string
-}
 
-export type TcpNodeStatus = {
-    local_transporter_id: string
-    remote_transporter_id: string
-    online: boolean
-}
+export type TcpNodeStatus = { remote_transporter_id: string, online: boolean }
 
 export type SpiderMeshTransporter = {
 
@@ -25,8 +35,8 @@ export type SpiderMeshTransporter = {
 
     $nodes_status: Observable<TcpNodeStatus>
 
-    listen: <T extends Encodeable>(topic: string) => Observable<SpiderMeshTransporterEvent<T>>
-    publish<T extends Encodeable>(config: PublishMetadata<T>): Promise<void>
+    listen: <T extends Encodable, Metadata extends SpiderMeshTransporterEventMetadata>(topic: string) => Observable<SpiderMeshTransporterEvent<T, Metadata>>
+    publish<T extends Encodable, Metadata extends SpiderMeshTransporterEventMetadata>(config: PublishMetadata<T, Metadata>): Promise<void>
 }
 
 
