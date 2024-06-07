@@ -4,7 +4,7 @@ export type PureData = string | number | boolean | null | Buffer | PureData[] | 
     [key: string]: PureData
 }
 
- 
+
 
 
 export type Encodeable = PureData | Array<PureData | Encodeable> | {
@@ -16,9 +16,9 @@ export const Encoder = {
     encode: <T extends Encodeable>(content: T) => {
 
         const buffers: Buffer[] = []
-        
 
-        if (content == null || content == undefined) {
+
+        if (content == undefined) {
             const buffer = Buffer.alloc(4)
             buffer.writeInt32LE(-1)
             return buffer
@@ -35,7 +35,7 @@ export const Encoder = {
                 __$$__dataType: 'Set',
                 __$$__value: Array.from(originalObject.values()), // or with spread: __$$__value: [...originalObject]
             }
- 
+
 
             if (originalObject instanceof Buffer) {
                 buffers.push(originalObject)
@@ -67,7 +67,7 @@ export const Encoder = {
     ) => {
         const buffers: Buffer[] = []
         const length = raw.readUInt32LE(0)
-        if (length > raw.length || length < 0) return null
+        if (length > raw.length || length < 0) return 
         let index = 4
         for (let i = 0; i < length; i++) {
             const blength = raw.readUint32LE(index)
@@ -86,11 +86,11 @@ export const Encoder = {
                 if (value.__$$__dataType === 'Set') {
                     return new Set(value.__$$__value);
                 }
- 
+
 
                 if (value.__$$__dataType == 'Buffer') {
                     return buffers[value.__index]
-                } 
+                }
             }
 
             return value;

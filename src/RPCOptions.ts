@@ -1,7 +1,7 @@
 export type RPCOptions<T = any> = {
     $node_id: string
     $timeout: number
-    $nevermind: boolean
+    $forgot: boolean
     $fallback: T
     $retry: number
     $retry_delay: number,
@@ -11,10 +11,8 @@ export type RPCOptions<T = any> = {
 
 export const RPCOptionsList = new Set([
     '$node_id',
-    '$ip',
-    '$load_balance_mode',
     '$timeout',
-    '$nevermind',
+    '$forgot',
     '$fallback',
     '$retry',
     '$retry_delay',

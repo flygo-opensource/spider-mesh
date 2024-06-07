@@ -9,7 +9,7 @@ import { RemoteService } from './interfaces/RemoteService.js'
 import os from 'os'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, EMPTY, Observable, Subject, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, share, tap, timer } from 'rxjs'
+import { BehaviorSubject, EMPTY, Observable, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, first, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, retry, scan, share, takeWhile, tap, timeout, timer } from 'rxjs'
 import { readFileSync } from 'fs'
 import { serviceInstanceList } from './decorators/Microservice.js'
 import { sleep } from './helpers/sleep.js'
@@ -68,7 +68,7 @@ export class SpiderMesh {
 
     #node_id = randomUUID()
 
-    #requests = new Map<string, { rpc_node_id: string, $response: Subject<any> }>
+    #requests = new Map<string, { rpc_node_id: string, $response: Subscriber<any> }>
 
     #local_services = new Map<string, {
         instance: any,
@@ -140,21 +140,46 @@ export class SpiderMesh {
         const rpc_node_id = this.#caculate_rpc_node_id(service, options)
         if (!rpc_node_id) throw `SERVICE_NOT_RUNNING:${service}`
 
+        if (options.$forgot) {
+            this.publish<Pick<SpiderMeshRpcEvent, 'request'>>({
+                topic: rpc_node_id,
+                payload: {
+                    request: {
+                        args,
+                        method,
+                        request_id: '#',
+                        service
+                    }
+                }
+            })
+            return
+        }
 
+        const $ = new Observable($response => {
+            const request_id = randomUUID()
 
-        const request_id = randomUUID()
+            // Send RPC request here 
+            this.#requests.set(request_id, { $response, rpc_node_id })
 
+            // Send RPC request here 
+            this.publish<Pick<SpiderMeshRpcEvent, 'request'>>({
+                topic: rpc_node_id,
+                payload: {
+                    request: {
+                        args,
+                        method,
+                        request_id,
+                        service
+                    }
+                }
+            })
 
-        // Send RPC request here
-        const $response = new Subject<T>()
-        this.#requests.set(request_id, { $response, rpc_node_id })
-
-        const $ = merge(
-            !options.$timeout ? EMPTY : timer(options.$timeout).pipe(
-                map(() => { throw new Error('TIMEOUT') })
-            ),
-            $response
-        ).pipe(
+            return () => {
+                this.#requests.delete(request_id)
+            }
+        }).pipe(
+            retry({ count: options.$retry || 0, delay: options.$retry_delay || 1000 }),
+            options.$timeout ? timeout(options.$timeout) : tap(),
             catchError(err => {
                 if (options.$fallback) {
                     return of(options.$fallback)
@@ -164,25 +189,9 @@ export class SpiderMesh {
             share()
         )
 
-        $.subscribe({
-            complete: () => { },
-            error: () => { },
-            next: () => { }
-        })
+        $.subscribe({ error: () => { }, next: () => { } })
 
 
-        // Send RPC request here 
-        this.publish<Pick<SpiderMeshRpcEvent, 'request'>>({
-            topic: rpc_node_id,
-            payload: {
-                request: {
-                    args,
-                    method,
-                    request_id,
-                    service
-                }
-            }
-        })
 
         return Object.assign($, {
             then: async (success: Function, error: Function) => {
@@ -254,13 +263,9 @@ export class SpiderMesh {
             const me: SpiderMeshNodeMetadata = {
                 ...await this.$metadata(),
                 local_transporter_id: target.transporter.transporter_id,
-                remote_transporter_id: '#'
+                remote_transporter_id: '#OVERWRITE'
             }
-            await this.publish({
-                topic: '#join',
-                payload: me,
-                local_transporter_id
-            })
+            await this.#publish(target.transporter, '#join', [me], remote_transporter_id)
         }
     }
 
@@ -305,8 +310,11 @@ export class SpiderMesh {
             try {
                 const instance = this.#get_rpc_target(event.request)
 
+
+
                 try {
                     const value = await instance?.[event.request.method]?.(...event.request.args || [])
+                    if (event.request.request_id == '#') return
                     if (value instanceof Observable) {
                         value.subscribe({
                             complete: () => response({ completed: true }),
@@ -318,9 +326,11 @@ export class SpiderMesh {
                         response({ completed: true, data: { value } })
                     }
                 } catch (error) {
+                    if (event.request.request_id == '#') return
                     response({ error: error as PureData })
                 }
             } catch (error) {
+                if (event.request.request_id == '#') return
                 response({ error: error as any })
             }
         }
@@ -370,15 +380,21 @@ export class SpiderMesh {
 
         // Sync node status
         transporter.$nodes_status.pipe(
-            tap(node => !node.online && this.#on_node_offline(node)),
             groupBy(node => node.local_transporter_id),
             mergeMap(grouped => grouped.pipe(debounceTime(1000)).pipe(
+                scan((prev, current) => {
+                    if (!prev || (prev.online != current.online)) return current as TcpNodeStatus
+                    return undefined
+                }, undefined as (undefined | TcpNodeStatus)),
+                filter(Boolean),
                 map(node => node as TcpNodeStatus),
-                filter(node => node.online),
-                mergeMap(node => this.#self_introduce(
-                    transporter.transporter_id,
-                    node.remote_transporter_id
-                ), 1)
+                tap(node => {
+                    if (node.online) {
+                        this.#self_introduce(node.local_transporter_id, node.remote_transporter_id)
+                    } else {
+                        this.#on_node_offline(node)
+                    }
+                })
             ))
         )
             .subscribe()
@@ -390,7 +406,7 @@ export class SpiderMesh {
             }),
             debounceTime(1000),
             mergeMap(async () => {
-                const me = await this.$metadata()
+                this.#self_introduce(transporter.transporter_id)
             })
         ).subscribe()
     }
@@ -608,34 +624,30 @@ export class SpiderMesh {
         }
     }
 
-    async batch_publish<T extends Encodeable>({ payload, topic, node_id, local_transporter_id }: SpiderMeshBatchPublishPayload<T>) {
+    #publish<T extends Encodeable>(transporter: SpiderMeshTransporter, topic: string | (new () => EventHub<T>), payload: T[], remote_transporter_id?: string) {
         const event = typeof topic == 'string' ? topic : topic.name
         const data: SpiderMeshEventWrapper<T[]> = { payload, node_id: this.#node_id }
+        return transporter.publish({
+            event,
+            remote_transporter_id,
+            data
+        })
+    }
+
+    batch_publish<T extends Encodeable>({ payload, topic, node_id, local_transporter_id }: SpiderMeshBatchPublishPayload<T>) {
         if (node_id) {
             const node = this.#linked_nodes.get(node_id)
             if (!node) return
             const target = this.#transporters.get(node.local_transporter_id)
             if (!target) return
-            target.transporter.publish({
-                event,
-                remote_transporter_id: node.remote_transporter_id,
-                data
-            })
-            return
+            return this.#publish(target.transporter, topic, payload, node.remote_transporter_id)
         }
         if (local_transporter_id) {
             const target = this.#transporters.get(local_transporter_id)
-            target?.transporter?.publish({
-                event,
-                data
-            })
-            return
+            return target && this.#publish(target.transporter, topic, payload)
         }
         for (const { transporter } of this.#transporters.values()) {
-            transporter.publish({
-                event,
-                data
-            })
+            return this.#publish(transporter, topic, payload)
         }
 
     }
