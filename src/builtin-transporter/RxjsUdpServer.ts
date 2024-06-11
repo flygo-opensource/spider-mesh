@@ -1,8 +1,8 @@
 import { Socket, createSocket } from "dgram"
-import { Observable, Subject, from, mergeMap } from "rxjs"
+import { Observable, Subject, combineLatest, from, interval, map, mergeMap } from "rxjs"
 import { networkInterfaces } from 'os'
 import { createHmac } from "crypto"
-import { UDP_SECRET_KEY } from "../const.js"
+import { BROADCAST_INTERVAL, UDP_SECRET_KEY } from "../const.js"
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js"
 
 export type BroadcastMessage = {
@@ -68,7 +68,15 @@ export class RxjsUdpServer extends Observable<RxjsTcpSocket> {
                 }
             })
 
-            config.$tcp_server_port.subscribe(port => this.#broadcast(udp, port))
+            if (BROADCAST_INTERVAL) {
+                combineLatest([
+                    config.$tcp_server_port,
+                    interval(BROADCAST_INTERVAL)
+                ]).subscribe(([port]) => port && this.#broadcast(udp, port))
+            } else {
+                config.$tcp_server_port.subscribe(port => this.#broadcast(udp, port))
+            } 
+
         })
     }
 
