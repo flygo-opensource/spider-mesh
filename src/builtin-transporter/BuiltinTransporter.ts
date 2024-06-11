@@ -82,6 +82,7 @@ export class BuiltinTransporter implements SpiderMeshTransporter {
     async #sync_node(current_socket: RxjsTcpSocket, metadata: HelloMessage) {
 
         const host = metadata.host
+        if (!host || !metadata.listening) return
 
         for (const event of metadata.listening) {
             !this.#events_map.has(event) && this.#events_map.set(event, new Set());

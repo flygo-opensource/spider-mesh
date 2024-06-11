@@ -1,5 +1,5 @@
 import { Socket, createSocket } from "dgram"
-import { Observable, Subject, combineLatest, from, interval, map, mergeMap } from "rxjs"
+import { BehaviorSubject, Observable, Subject, combineLatest, filter, finalize, first, from, interval, map, mergeMap, takeWhile, tap } from "rxjs"
 import { networkInterfaces } from 'os'
 import { createHmac } from "crypto"
 import { BROADCAST_INTERVAL, UDP_SECRET_KEY } from "../const.js"
@@ -17,7 +17,7 @@ export type RxjsUdpBroadcasterConfig = {
     udp_address?: string,
     udp_port: number,
     transporter_id: string
-    $tcp_server_port: Subject<number>
+    $tcp_server_port: BehaviorSubject<number>
 }
 
 export class RxjsUdpServer extends Observable<RxjsTcpSocket> {
@@ -42,10 +42,11 @@ export class RxjsUdpServer extends Observable<RxjsTcpSocket> {
             udp.on('message', async (data, rinfo) => {
                 try {
                     const msg = JSON.parse(data.toString('utf-8')) as BroadcastMessage
-                    const sig = createHmac('SHA256', UDP_SECRET_KEY).update(`${msg.namespace}|${msg.transporter_id}|${msg.port}`).digest('base64')
-                    if (msg.sig != sig) return
                     if (msg.namespace != config.namespace) return
                     if (msg.transporter_id == config.transporter_id) return
+                    const sig = createHmac('SHA256', UDP_SECRET_KEY).update(`${msg.namespace}|${msg.transporter_id}|${msg.port}`).digest('base64')
+                    if (msg.sig != sig) return
+
 
                     const socket = await RxjsTcpSocket.connect({
                         ...msg,
@@ -60,6 +61,11 @@ export class RxjsUdpServer extends Observable<RxjsTcpSocket> {
                         } else {
                             nodes.add(msg.transporter_id)
                             o.next(socket)
+                            socket.$status.pipe(
+                                filter(s => s == 'closed' || s == 'error'),
+                                tap(s => nodes.delete(msg.transporter_id)),
+                                first()
+                            ).subscribe()
                         }
                     }
 
@@ -68,14 +74,14 @@ export class RxjsUdpServer extends Observable<RxjsTcpSocket> {
                 }
             })
 
+            config.$tcp_server_port.subscribe(port => this.#broadcast(udp, port))
+
             if (BROADCAST_INTERVAL) {
                 combineLatest([
                     config.$tcp_server_port,
                     interval(BROADCAST_INTERVAL)
                 ]).subscribe(([port]) => port && this.#broadcast(udp, port))
-            } else {
-                config.$tcp_server_port.subscribe(port => this.#broadcast(udp, port))
-            } 
+            }
 
         })
     }
