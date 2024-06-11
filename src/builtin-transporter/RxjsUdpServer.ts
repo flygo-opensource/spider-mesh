@@ -44,9 +44,9 @@ export class RxjsUdpServer extends Observable<RxjsTcpSocket> {
                     const msg = JSON.parse(data.toString('utf-8')) as BroadcastMessage
                     if (msg.namespace != config.namespace) return
                     if (msg.transporter_id == config.transporter_id) return
+                    if(nodes.has(msg.transporter_id)) return 
                     const sig = createHmac('SHA256', UDP_SECRET_KEY).update(`${msg.namespace}|${msg.transporter_id}|${msg.port}`).digest('base64')
                     if (msg.sig != sig) return
-
 
                     const socket = await RxjsTcpSocket.connect({
                         ...msg,
