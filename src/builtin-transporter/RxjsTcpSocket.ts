@@ -71,8 +71,8 @@ export class RxjsTcpSocket {
         decoder.on('data', (msg: Buffer) => {
             this.$incoming_data.next(msg)
         })
-        socket.on('data', data => decoder.write(data))
-        encoder.on('data', buffer => socket.writable && socket.write(buffer))
+        socket.on('data', data => decoder.writable && decoder.write(data))
+        encoder.on('data', buffer => socket.writable && socket.writable && socket.write(buffer))
 
         this.#$outgoing_data.pipe(
             takeUntil($error),
@@ -81,7 +81,7 @@ export class RxjsTcpSocket {
                 decoder.removeAllListeners()
                 encoder.removeAllListeners()
             }),
-            map(data => encoder.write(data), 1)
+            map(data => encoder.writable && encoder.write(data), 1)
         ).subscribe()
 
         return firstValueFrom($error)
@@ -92,7 +92,7 @@ export class RxjsTcpSocket {
         this.#$outgoing_data.next(data)
     }
 
-    close(){
+    close() {
         this.rawSocket?.end()
     }
 }

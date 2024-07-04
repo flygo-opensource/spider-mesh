@@ -1,4 +1,4 @@
-import { Subject, mergeMap } from "rxjs"
+import { EMPTY, Observable, Subject, catchError, finalize, mergeMap } from "rxjs"
 
 
 export function LimitConcurrentRunning<T>(limit: number) {
@@ -16,7 +16,11 @@ export function LimitConcurrentRunning<T>(limit: number) {
         bus.pipe(
             mergeMap(async ({ $, args, r, s }) => {
                 try {
-                    s(await fn.call($, ...args))
+                    const rs = await fn.call($, ...args)
+                    if (rs instanceof Observable) return await new Promise<void>(done => {
+                        s(rs.pipe(finalize(done)))
+                    })
+                    s(rs)
                 } catch (e) {
                     r(e)
                 }
