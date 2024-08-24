@@ -139,7 +139,17 @@ export class SpiderMesh {
     rpc<T = any>(service: string, method: string, args: any, options: Partial<RPCOptions> = {}) {
 
         const rpc_node_id = this.#caculate_rpc_node_id(service, options)
-        if (!rpc_node_id) throw `SERVICE_NOT_RUNNING:${service}`
+        if (!rpc_node_id) return new Observable<T>(o => o.error(
+            new Error(`SERVICE_NOT_RUNNING:${service}`, {
+                cause: {
+                    service,
+                    method,
+                    args,
+                    options
+                }
+
+            })
+        ))
 
         if (options.$forgot) {
             this.publish<Pick<SpiderMeshRpcEvent, 'request'>>({
