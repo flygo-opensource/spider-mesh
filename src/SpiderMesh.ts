@@ -10,8 +10,8 @@ import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, buffer
 import { sleep } from './helpers/sleep.js'
 import { Encodable } from './Encoder.js'
 import { NAMEPSACE } from './const.js'
-import { $services } from './decorators/Microservice.js' 
-import { randomUUID } from 'crypto'
+import { $services } from './decorators/Microservice.js'  
+import { randomUUID } from './helpers/randomUUID.js'
 
 
 type SpiderMeshMetadata = { smnid: string }

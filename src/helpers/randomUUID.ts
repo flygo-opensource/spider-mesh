@@ -1,16 +1,17 @@
-import crypto from 'crypto'
+import crypto from 'crypto';
 
-let randomUUID: () => string
+export const randomUUID = () => {
+    if (typeof process !== 'undefined' && process.versions != null && process.versions.node != null) {
+        return crypto.randomUUID()
+    }
 
-if (typeof process !== 'undefined' && process.versions != null && process.versions.node != null) {
-    // Node.js environment
-    randomUUID = crypto.randomUUID
-} else if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
-    // React Native environment
-    randomUUID = require('react-native-uuid').v4
-} else {
-    // Browser environment
-    randomUUID = window.crypto.randomUUID
+    if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
+        const rnuuid = require('react-native-uuid').default
+        const v4 = rnuuid.v4
+        return v4()
+       
+    }
+
+
+    return window.crypto.randomUUID()
 }
-
-export { randomUUID }
