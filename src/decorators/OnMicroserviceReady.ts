@@ -1,4 +1,4 @@
-import { SpiderMesh } from "src/SpiderMesh.js"
+import { SpiderMesh } from "../SpiderMesh.js"
 
 export const key = Symbol.for('OnMicroserviceReadyHook')
 

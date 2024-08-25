@@ -3,6 +3,10 @@ export type Encodable = string | number | boolean | undefined | null | Buffer | 
     [key: string]: Encodable
 }
 
+if(typeof Buffer == 'undefined'){
+    Buffer = require('buffer').Buffer
+}
+
 
 export const Encoder = {
 

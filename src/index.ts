@@ -1,17 +1,16 @@
 export * from './const.js'
-export { BuiltinTransporter } from './builtin-transporter/BuiltinTransporter.js'
 export { SpiderMesh } from './SpiderMesh.js'
 export { SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'
 export { SpiderMeshTransporter, SpiderMeshTransporterFactory } from './interfaces/SpiderMeshTransporter.js'
 export { RemoteService } from './interfaces/RemoteService.js'
 export { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 export { OnMicroserviceReady } from './decorators/OnMicroserviceReady.js'
-export {
-    Microservice,
-    NestJSExposeMicroservice,
-    NestJSLinkMicroservice,
-    NestJSLinkEvent
-} from './decorators/Microservice.js'
+export { Microservice } from './decorators/Microservice.js'
+export { NestJSExposeMicroservice } from './decorators/NestJSExposeMicroservice.js'
+export { NestJSLinkMicroservice } from './decorators/NestJSLinkMicroservice.js'
+export { NestJSLinkEvent } from './decorators/NestJSLinkEvent.js'
+export { NestJSInjectMetadata } from './decorators/NestJSInjectMetadata.js'
+export { Encodable, Encoder } from './Encoder.js'
 export {
     ListenEvent,
     EventDataType,

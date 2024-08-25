@@ -1,24 +1,26 @@
 import { randomUUID } from 'crypto'
 import { get } from 'http'
-import { networkInterfaces } from 'os'
 import { DeepProxy } from './decorators/DeepProxy.js'
 import { ServiceMetadata, SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'
 import { SpiderMeshTransporter, SpiderMeshTransporterEvent, TcpNodeStatus } from './interfaces/SpiderMeshTransporter.js'
 import { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 import { RemoteService } from './interfaces/RemoteService.js'
-import os from 'os'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, Observable, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, retry, scan, share, tap, timeout } from 'rxjs'
-import { readFileSync } from 'fs'
+import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, retry, scan, share, tap, timeout } from 'rxjs'
 import { sleep } from './helpers/sleep.js'
 import { Encodable } from './Encoder.js'
 import { NAMEPSACE } from './const.js'
-import { BuiltinTransporter } from './builtin-transporter/BuiltinTransporter.js'
 import { $services } from './decorators/Microservice.js'
 
 
 type SpiderMeshMetadata = { smnid: string }
+
+
+if (typeof Buffer == 'undefined') {
+    global.Buffer = require('buffer').Buffer
+}
+
 
 
 export type SpiderMeshRpcEvent = {
@@ -37,8 +39,6 @@ export type SpiderMeshRpcEvent = {
 }
 
 
-
-const PACKAGE_JSON = JSON.parse(readFileSync(`package.json`, 'utf8')) || {}
 
 export type SpiderMeshNamespace = string
 
@@ -65,7 +65,11 @@ type SpiderMeshEventWrapper<T extends Encodable = Encodable> = {
 type NodeId = string
 type RemoteTransporterID = string
 
+
+
 export class SpiderMesh {
+
+    public static $transporters = new ReplaySubject<SpiderMeshTransporter>()
 
     #node_id = randomUUID()
 
@@ -108,13 +112,20 @@ export class SpiderMesh {
         transporter: SpiderMeshTransporter
     }>()
 
-    constructor(using_default_transporter: boolean = true) {
-        if (using_default_transporter) {
-            const transporter = new BuiltinTransporter()
-            this.link_transporter(transporter)
-        }
+    #metadata: any = {}
+
+    constructor() {
+        SpiderMesh.$transporters.subscribe(
+            transporter => this.link_transporter(transporter)
+        )
     }
 
+    set_metadata(metadata: any, overwrite: boolean = false) {
+        this.#metadata = {
+            ...overwrite ? {} : this.#metadata,
+            ...metadata
+        }
+    }
 
     #caculate_rpc_node_id(service_name: string, options: Partial<RPCOptions> = {}) {
         const current = this.#remote_services.get(service_name)
@@ -127,7 +138,7 @@ export class SpiderMesh {
         const nodes = option_ip ? (
             current
                 .nodes
-                .filter(node => node.public_ip == option_ip || node.ip_addresses.includes(option_ip))
+                .filter(node => node.public_ip == option_ip)
         ) : current.nodes
         if (nodes.length == 0) return
 
@@ -225,12 +236,7 @@ export class SpiderMesh {
     }
 
     async $metadata() {
-        const ips = (
-            Object.values(networkInterfaces())
-                .flat(2)
-                .filter(a => a && !a.internal && a.address)
-                .map(a => a?.address as string)
-        )
+
         const services = [...this.#local_services.entries()].reduce(
             (p, [service_id, { metadata }]) => ({
                 ...p,
@@ -245,16 +251,12 @@ export class SpiderMesh {
         ]
 
         const metadata: Omit<SpiderMeshNodeMetadata, 'local_transporter_id' | 'remote_transporter_id'> = {
+            ... this.#metadata,
             node_id: this.#node_id,
-            name: PACKAGE_JSON?.name || 'UNKNOWN',
-            version: PACKAGE_JSON?.version || '1.0.0',
             path: process.cwd(),
             uptime: process.uptime(),
-            hostname: os.hostname(),
-            plaform: os.platform(),
             node_version: process.version,
             public_ip: await this.#public_ip,
-            ip_addresses: ips,
             last_online: Date.now(),
             online: true,
             services,
