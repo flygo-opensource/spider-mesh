@@ -15,13 +15,7 @@ import { randomUUID } from './helpers/randomUUID.js'
 
 
 type SpiderMeshMetadata = { smnid: string }
-
-
-if (typeof Buffer == 'undefined') {
-    global.Buffer = require('buffer').Buffer
-}
-
-
+ 
 
 export type SpiderMeshRpcEvent = {
     request: {
@@ -254,8 +248,8 @@ export class SpiderMesh {
         const metadata: Omit<SpiderMeshNodeMetadata, 'local_transporter_id' | 'remote_transporter_id'> = {
             ... this.#metadata,
             node_id: this.#node_id,
-            path: process.cwd(),
-            uptime: process.uptime(),
+            // path: process.cwd(),
+            // uptime: process.uptime(),
             node_version: process.version,
             // public_ip: await this.#public_ip,
             last_online: Date.now(),

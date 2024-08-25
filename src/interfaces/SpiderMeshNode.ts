@@ -8,8 +8,8 @@ export type SpiderMeshNodeMetadata = {
     remote_transporter_id: string
     // name: string
     // version: string,
-    path: string
-    uptime: number,
+    // path: string
+    // uptime: number,
     // plaform: string,
     // hostname: string,
     node_version: string

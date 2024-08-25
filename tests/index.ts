@@ -3,7 +3,7 @@ import { SpiderMesh } from '../src/SpiderMesh.js'
 import { ExampleService } from './ExampleService.js'
 import { before, it, describe } from 'node:test'
 import { strictEqual, deepStrictEqual, equal } from 'assert'
-import { RemoteService } from 'src/index.js'
+import { RemoteService } from '../src/index.js'
 
 if (process.argv[2] == 'a') {
     describe('Test RPC running service', {}, () => {
