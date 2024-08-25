@@ -1,5 +1,4 @@
-import { randomUUID } from 'crypto'
-import { get } from 'http'
+
 import { DeepProxy } from './decorators/DeepProxy.js'
 import { ServiceMetadata, SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'
 import { SpiderMeshTransporter, SpiderMeshTransporterEvent, TcpNodeStatus } from './interfaces/SpiderMeshTransporter.js'
@@ -11,7 +10,8 @@ import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, buffer
 import { sleep } from './helpers/sleep.js'
 import { Encodable } from './Encoder.js'
 import { NAMEPSACE } from './const.js'
-import { $services } from './decorators/Microservice.js'
+import { $services } from './decorators/Microservice.js' 
+import { randomUUID } from 'crypto'
 
 
 type SpiderMeshMetadata = { smnid: string }
@@ -86,21 +86,21 @@ export class SpiderMesh {
     }>
     #linked_nodes = new Map<string, SpiderMeshNode>()
 
-    #public_ip = new Promise<string | null>(async s => {
-        for (let i = 1; i <= 5; i++) {
-            const ip = await new Promise<string | null>(s => {
-                get('http://api.ipify.org', (res) => {
-                    res.setEncoding('utf8')
-                    let rawData = ''
-                    res.on('data', (chunk) => { rawData += chunk; })
-                    res.on('end', () => s(rawData))
-                }).on('error', () => s(null))
-            })
-            if (ip && ip != 'Bad Gateway') return s(ip)
-            await new Promise(s => setTimeout(s, 100))
-        }
-        return s(null)
-    })
+    // #public_ip = new Promise<string | null>(async s => {
+    //     for (let i = 1; i <= 5; i++) {
+    //         const ip = await new Promise<string | null>(s => {
+    //             get('http://api.ipify.org', (res) => {
+    //                 res.setEncoding('utf8')
+    //                 let rawData = ''
+    //                 res.on('data', (chunk) => { rawData += chunk; })
+    //                 res.on('end', () => s(rawData))
+    //             }).on('error', () => s(null))
+    //         })
+    //         if (ip && ip != 'Bad Gateway') return s(ip)
+    //         await new Promise(s => setTimeout(s, 100))
+    //     }
+    //     return s(null)
+    // })
 
     $nodes_monitor = new Subject<SpiderMeshNode>()
 
@@ -134,12 +134,13 @@ export class SpiderMesh {
             if (current.nodes.some(node => node.node_id == options.$node_id)) return options.$node_id
             return
         }
-        const option_ip = options.$ip
-        const nodes = option_ip ? (
-            current
-                .nodes
-                .filter(node => node.public_ip == option_ip)
-        ) : current.nodes
+        // const option_ip = options.$ip
+        // const nodes = option_ip ? (
+        //     current
+        //         .nodes
+        //         .filter(node => node.public_ip == option_ip)
+        // ) : current.nodes
+        const nodes = current.nodes 
         if (nodes.length == 0) return
 
         current.last_call_index = (current.last_call_index + 1) % nodes.length
@@ -256,7 +257,7 @@ export class SpiderMesh {
             path: process.cwd(),
             uptime: process.uptime(),
             node_version: process.version,
-            public_ip: await this.#public_ip,
+            // public_ip: await this.#public_ip,
             last_online: Date.now(),
             online: true,
             services,

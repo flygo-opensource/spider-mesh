@@ -21,3 +21,4 @@ export {
 } from './decorators/ListenEvent.js'
 export * from './interfaces/SpiderMeshTransporter.js'
 export { LimitConcurrentRunning } from './decorators/LimitConcurrentRunning.js'
+export { randomUUID } from './helpers/randomUUID.js'

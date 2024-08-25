@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/core",
   "type": "module",
-  "version": "1.0.131",
+  "version": "1.0.135",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
@@ -15,6 +15,7 @@
   ],
   "devDependencies": {
     "@types/node": "^18.16.0",
+    "@types/uuid": "^10.0.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.4"
   },
@@ -34,6 +35,11 @@
   "license": "ISC",
   "dependencies": {
     "frame-stream": "^4.0.0",
-    "rxjs": "^7.8.1"
+    "react-native-uuid": "^2.0.2",
+    "rxjs": "^7.8.1",
+    "uuid": "^10.0.0"
+  },
+  "browser":{
+    "crypto": false
   }
 }

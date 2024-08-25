@@ -32,6 +32,7 @@
     "out",
     "src/schema.ts",
     "bin",
-    "./build/**/*" 
+    "./build/**/*",
+    "tests"
   ]
 }

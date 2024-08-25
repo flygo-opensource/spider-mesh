@@ -1,5 +1,6 @@
-import { randomUUID } from "crypto"
+import { randomUUID } from "./helpers/randomUUID.js"
 
+ 
 export const NAMEPSACE = process.env.SPIDERMESH_NAMESPACE || 'default'
 export const NODE_ID = process.env.SPIDERMESH_NODE_ID || randomUUID()
 export const UDP_BROADCAST_ADDRESS = process.env.SPIDERMESH_UDP_BROADCAST_ADDRESS || ''
