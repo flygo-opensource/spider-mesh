@@ -9,7 +9,7 @@ export { Microservice } from './decorators/Microservice.js'
 export { NestJSExposeMicroservice } from './decorators/NestJSExposeMicroservice.js'
 export { NestJSLinkMicroservice } from './decorators/NestJSLinkMicroservice.js'
 export { NestJSLinkEvent } from './decorators/NestJSLinkEvent.js'
-export { NestJSInjectMetadata } from './decorators/NestJSInjectMetadata.js'
+export { CustomSpiderMesh } from './decorators/CustomSpiderMesh.js'
 export { Encodable, Encoder } from './Encoder.js'
 export {
     ListenEvent,

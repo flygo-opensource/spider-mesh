@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/core",
   "type": "module",
-  "version": "1.0.138",
+  "version": "1.0.140",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
@@ -34,6 +34,7 @@
   "author": "Duong Van Ba",
   "license": "ISC",
   "dependencies": {
+    "axios": "^1.7.5",
     "buffer": "^6.0.3",
     "frame-stream": "^4.0.0",
     "react-native-uuid": "^2.0.2",

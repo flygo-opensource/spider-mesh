@@ -10,12 +10,13 @@ import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, buffer
 import { sleep } from './helpers/sleep.js'
 import { Encodable } from './Encoder.js'
 import { NAMEPSACE } from './const.js'
-import { $services } from './decorators/Microservice.js'  
+import { $services } from './decorators/Microservice.js'
 import { randomUUID } from './helpers/randomUUID.js'
+import axios from 'axios'
 
 
 type SpiderMeshMetadata = { smnid: string }
- 
+
 
 export type SpiderMeshRpcEvent = {
     request: {
@@ -50,12 +51,19 @@ export type SpiderMeshBatchPublishPayload<T extends Encodable = Encodable> = {
     local_transporter_id?: string
 }
 
- 
+
 
 type NodeId = string
 type RemoteTransporterID = string
 
-
+const $public_ip = new Promise<string | undefined>(async resolve => {
+    try {
+        const { data } = await axios.get('https://api.ipify.org?format=json')
+        resolve(data.ip)
+    } catch (error) {
+        resolve(undefined)
+    }
+}) 
 
 export class SpiderMesh {
 
@@ -75,7 +83,7 @@ export class SpiderMesh {
         nodes: SpiderMeshNode[]
     }>
     #linked_nodes = new Map<string, SpiderMeshNode>()
- 
+
 
     $nodes_monitor = new Subject<SpiderMeshNode>()
 
@@ -87,20 +95,12 @@ export class SpiderMesh {
         transporter: SpiderMeshTransporter
     }>()
 
-    #metadata: any = {}
-
-    constructor() {
+    constructor(private metadata: any = {}) {
         SpiderMesh.$transporters.subscribe(
             transporter => this.link_transporter(transporter)
         )
     }
 
-    set_metadata(metadata: any, overwrite: boolean = false) {
-        this.#metadata = {
-            ...overwrite ? {} : this.#metadata,
-            ...metadata
-        }
-    }
 
     #caculate_rpc_node_id(service_name: string, options: Partial<RPCOptions> = {}) {
         const current = this.#remote_services.get(service_name)
@@ -109,13 +109,12 @@ export class SpiderMesh {
             if (current.nodes.some(node => node.node_id == options.$node_id)) return options.$node_id
             return
         }
-        // const option_ip = options.$ip
-        // const nodes = option_ip ? (
-        //     current
-        //         .nodes
-        //         .filter(node => node.public_ip == option_ip)
-        // ) : current.nodes
-        const nodes = current.nodes 
+        const option_ip = options.$ip
+        const nodes = option_ip ? (
+            current
+                .nodes
+                .filter(node => node.public_ip == option_ip)
+        ) : current.nodes 
         if (nodes.length == 0) return
 
         current.last_call_index = (current.last_call_index + 1) % nodes.length
@@ -227,12 +226,9 @@ export class SpiderMesh {
         ]
 
         const metadata: Omit<SpiderMeshNodeMetadata, 'local_transporter_id' | 'remote_transporter_id'> = {
-            ... this.#metadata,
+            metadata: this.metadata,
             node_id: this.#node_id,
-            // path: process.cwd(),
-            // uptime: process.uptime(),
             node_version: process.version,
-            // public_ip: await this.#public_ip,
             last_online: Date.now(),
             online: true,
             services,
@@ -240,6 +236,7 @@ export class SpiderMesh {
             linked: [...this.#linked_nodes.keys()],
             isolated_nodes,
             isolated: this.#$isolated.value,
+            public_ip: await $public_ip
         }
         return metadata
     }

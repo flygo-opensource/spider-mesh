@@ -14,7 +14,7 @@ export type SpiderMeshNodeMetadata = {
     // hostname: string,
     node_version: string
     namespace: string
-    // public_ip: string | null,
+    public_ip?: string,
     // ip_addresses: string[]
     last_online: number
     online: boolean
@@ -22,6 +22,7 @@ export type SpiderMeshNodeMetadata = {
     linked: string[]
     isolated_nodes: string[]
     isolated: boolean
+    metadata: ServiceMetadata
 }
 
 export type SpiderMeshNode = SpiderMeshNodeMetadata
