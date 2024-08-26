@@ -50,11 +50,7 @@ export type SpiderMeshBatchPublishPayload<T extends Encodable = Encodable> = {
     local_transporter_id?: string
 }
 
-type SpiderMeshEventWrapper<T extends Encodable = Encodable> = {
-    node_id: string
-    payload: T
-}
-
+ 
 
 type NodeId = string
 type RemoteTransporterID = string
@@ -79,22 +75,7 @@ export class SpiderMesh {
         nodes: SpiderMeshNode[]
     }>
     #linked_nodes = new Map<string, SpiderMeshNode>()
-
-    // #public_ip = new Promise<string | null>(async s => {
-    //     for (let i = 1; i <= 5; i++) {
-    //         const ip = await new Promise<string | null>(s => {
-    //             get('http://api.ipify.org', (res) => {
-    //                 res.setEncoding('utf8')
-    //                 let rawData = ''
-    //                 res.on('data', (chunk) => { rawData += chunk; })
-    //                 res.on('end', () => s(rawData))
-    //             }).on('error', () => s(null))
-    //         })
-    //         if (ip && ip != 'Bad Gateway') return s(ip)
-    //         await new Promise(s => setTimeout(s, 100))
-    //     }
-    //     return s(null)
-    // })
+ 
 
     $nodes_monitor = new Subject<SpiderMeshNode>()
 
