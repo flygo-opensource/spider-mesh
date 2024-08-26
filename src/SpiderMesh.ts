@@ -660,7 +660,8 @@ export class SpiderMesh {
 
     listen<T extends Encodable = Encodable>(topic: string | { new(...args: any[]): T }, transporter?: SpiderMeshTransporter) {
         const topic_name = typeof topic == 'string' ? topic : topic.name
-        return SpiderMesh.$transporters.pipe(
+        const source = transporter ? of(transporter) : SpiderMesh.$transporters
+        return source.pipe(
             mergeMap(transporter => transporter.listen<T[], SpiderMeshMetadata>(topic_name).pipe(
                 map(msg => msg.payload.map(data => ({
                     ...msg,
