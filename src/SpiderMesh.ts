@@ -1,12 +1,12 @@
 
 import { DeepProxy } from './decorators/DeepProxy.js'
-import { ServiceMetadata, SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'
+import { SpiderMeshNode, SpiderMeshNodeMetadata } from './interfaces/SpiderMeshNode.js'
 import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent, TcpNodeStatus } from './interfaces/SpiderMeshTransporter.js'
 import { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 import { RemoteService } from './interfaces/RemoteService.js'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, pipe, retry, scan, share, tap, throttleTime, timeout } from 'rxjs'
+import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, pipe, retry, scan, share, tap, timeout } from 'rxjs'
 import { sleep } from './helpers/sleep.js'
 import { Encodable } from './Encoder.js'
 import { NAMEPSACE } from './const.js'
@@ -121,7 +121,6 @@ export class SpiderMesh {
             // Sync with other nodes
             debounceTime(2000),
             mergeMap(async transporter_id => {
-                console.log(`Sync services list with ${transporter_id || 'all'}`)
                 await this.#self_introduce(transporter_id)
             }, 1)
         ).subscribe()
@@ -446,7 +445,6 @@ export class SpiderMesh {
     async #on_node_discovered(node: SpiderMeshNode) {
 
         if (node.node_id == this.#node_id) return
-        console.log({ node })
         const saved_node = this.#linked_nodes.get(node.node_id)
         if (saved_node && saved_node.last_online > node.last_online) return
         const peer_updated = node.linked.includes(this.#node_id)
