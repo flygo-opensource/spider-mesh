@@ -6,7 +6,7 @@ import { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 import { RemoteService } from './interfaces/RemoteService.js'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
 import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, pipe, retry, scan, share, tap, timeout } from 'rxjs'
+import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, pipe, retry, scan, share, tap, throttleTime, timeout } from 'rxjs'
 import { sleep } from './helpers/sleep.js'
 import { Encodable } from './Encoder.js'
 import { NAMEPSACE } from './const.js'
@@ -95,11 +95,35 @@ export class SpiderMesh {
     }>()
 
     constructor(private metadata: any = {}) {
-        SpiderMesh.$transporters.pipe(
-            mergeMap(async transporter => {
-                await this.#link_transporter(transporter)
-                await this.#self_introduce(transporter.transporter_id)
-            }),
+
+        merge(
+
+            // Link transporter
+            SpiderMesh.$transporters.pipe(
+                mergeMap(async transporter => {
+                    await this.#link_transporter(transporter)
+                    return transporter
+                }),
+                map(t => t.transporter_id)
+            ),
+
+            // Link local services
+            $services.pipe(
+                tap(({ instance, metadata }) => {
+                    const prototype = Object.getPrototypeOf(instance)
+                    const name = prototype.constructor.name
+                    this.#local_services.set(name, { instance, metadata })
+                }),
+                map(() => undefined)
+            )
+        ).pipe(
+
+            // Sync with other nodes
+            debounceTime(2000),
+            mergeMap(async transporter_id => {
+                console.log(`Sync services list with ${transporter_id || 'all'}`)
+                await this.#self_introduce(transporter_id)
+            }, 1)
         ).subscribe()
 
     }
@@ -397,13 +421,32 @@ export class SpiderMesh {
             ))
         ).subscribe()
 
-        $services.subscribe(service => this.#active_local_service(transporter, service.instance, service.metadata))
+
+        // Sync services with other nodes
+        $services.subscribe(({ instance }) => {
+
+            const prototype = Object.getPrototypeOf(instance)
+            const name = prototype.constructor.name
+
+            this.listen<SpiderMeshRpcEvent>(name, transporter).subscribe(evt => this.#node_event_handler(transporter, evt))
+
+
+            // Active event subscribers
+            const event_subscribers = listEventSubscribers(prototype)
+            for (const { event, method, buffer_ms } of event_subscribers) {
+                this.listen<SpiderMeshMetadata>(event, transporter).pipe(
+                    filter(() => !this.#$isolated.value),
+                    buffer_ms ? pipe(bufferTime(buffer_ms), filter(l => l.length > 0)) : pipe(map(item => [item]))
+                ).subscribe(e => instance[method]?.(e, this))
+            }
+        })
 
     }
 
     async #on_node_discovered(node: SpiderMeshNode) {
-        if (node.node_id == this.#node_id) return
 
+        if (node.node_id == this.#node_id) return
+        console.log({ node })
         const saved_node = this.#linked_nodes.get(node.node_id)
         if (saved_node && saved_node.last_online > node.last_online) return
         const peer_updated = node.linked.includes(this.#node_id)
@@ -569,26 +612,7 @@ export class SpiderMesh {
 
     }
 
-    async #active_local_service(transporter: SpiderMeshTransporter, instance: any, metadata: ServiceMetadata) {
 
-        const prototype = Object.getPrototypeOf(instance)
-        const name = prototype.constructor.name
-
-        this.#local_services.set(name, { instance, metadata })
-        this.listen<SpiderMeshRpcEvent>(name, transporter).subscribe(evt => this.#node_event_handler(transporter, evt))
-
-
-
-        // Active event subscribers
-        const event_subscribers = listEventSubscribers(prototype)
-        for (const { event, method, buffer_ms } of event_subscribers) {
-            this.listen<SpiderMeshMetadata>(event, transporter).pipe(
-                filter(() => !this.#$isolated.value),
-                buffer_ms ? pipe(bufferTime(buffer_ms), filter(l => l.length > 0)) : pipe(map(item => [item]))
-            ).subscribe(e => instance[method]?.(e, this))
-        }
-
-    }
 
     async #wait_service_online(service_name: string = 'all') {
 
