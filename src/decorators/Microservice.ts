@@ -13,7 +13,9 @@ export const Microservice = (namespace: string = NAMEPSACE, metadata: ServiceMet
                 constructor(...args: any[]) {
                     super(...args)
                     from(listBeforeMicroserviceOnlineMethods(this)).pipe(
-                        mergeMap(({ method }) => (this as any)[method](), 1),
+                        mergeMap(async ({ method }) => {
+                            await (this as any)[method]()
+                        }, 1),
                         toArray(),
                         tap(() => $services.next({
                             instance: this,
