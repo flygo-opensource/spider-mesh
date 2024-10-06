@@ -1,10 +1,10 @@
-import { ReplaySubject } from "rxjs"
+import { from, mergeMap, ReplaySubject, tap, toArray } from "rxjs"
 import { NAMEPSACE } from "../const.js"
 import { ServiceMetadata } from "../../src/interfaces/SpiderMeshNode.js"
+import { listBeforeMicroserviceOnlineMethods } from "./BeforeMicroserviceOnline.js"
 
 export const $services = new ReplaySubject<{ instance: any, namespace: string, metadata: ServiceMetadata }>()
 
- 
 
 export const Microservice = (namespace: string = NAMEPSACE, metadata: ServiceMetadata = {}) => {
     return (
@@ -12,11 +12,16 @@ export const Microservice = (namespace: string = NAMEPSACE, metadata: ServiceMet
             class C extends target {
                 constructor(...args: any[]) {
                     super(...args)
-                    $services.next({
-                        instance: this,
-                        namespace,
-                        metadata
-                    })
+                    from(listBeforeMicroserviceOnlineMethods(this)).pipe(
+                        mergeMap(({ method }) => (this as any)[method](), 1),
+                        toArray(),
+                        tap(() => $services.next({
+                            instance: this,
+                            namespace,
+                            metadata
+                        }))
+                    ).subscribe()
+
                 }
             }
             Object.defineProperty(C, 'name', { value: target.name })

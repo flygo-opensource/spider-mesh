@@ -1,11 +1,11 @@
-import { Observable, Subject, lastValueFrom, takeUntil, timer, toArray } from "rxjs";
+import { Observable } from "rxjs";
 import { RPCOptions } from "../RPCOptions.js";
 import { SpiderMeshNode } from "./SpiderMeshNode.js";
 
 
 export type RemoteService<T = { [key: string]: any }> = (
     {
-        $wait_service_online: () => Promise<void>,
+        $wait_service_online: (fn?: (nodes: SpiderMeshNode[]) => boolean | Promise<boolean>) => Promise<void>,
         $safe_mode: () => {
             [K in keyof T as (T[K] extends (...args: any) => any ? K : '')]: T[K] extends (...args: any) => any ? ((...args: Parameters<T[K]>) => [
                 Error | null,

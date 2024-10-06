@@ -1,19 +1,19 @@
 import { SpiderMesh } from "../SpiderMesh.js"
 
-export const key = Symbol.for('OnMicroserviceReadyHook')
+export const key = Symbol.for('BeforeMicroserviceOnline')
 
-export type OnMicroserviceReadyMetadata = { method: string }
+export type BeforeMicroserviceOnlineMetadata = { method: string }
 
-export const OnMicroserviceReady = () => <T>(
+export const BeforeMicroserviceOnline = () => <T>(
     target: Object,
     method: string | symbol,
     descriptor: TypedPropertyDescriptor<T | ((sm?: SpiderMesh) => Promise<void>)>
 ) => {
-    Object.defineProperty(descriptor.value, key, { value: { method } as OnMicroserviceReadyMetadata })
+    Object.defineProperty(descriptor.value, key, { value: { method } as BeforeMicroserviceOnlineMetadata })
 }
 
-export const listReadyHookMethods = (target: any) => {
-    const methods = [] as OnMicroserviceReadyMetadata[]
+export const listBeforeMicroserviceOnlineMethods = (target: any) => {
+    const methods = [] as BeforeMicroserviceOnlineMetadata[]
     for (let f = target; f != null; f = Object.getPrototypeOf(f)) {
         for (const method of Object.getOwnPropertyNames(f)) {
             f[method]?.[key] && methods.push(f[method]?.[key])

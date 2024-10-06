@@ -5,8 +5,7 @@ import { PublishMetadata, SpiderMeshTransporter, SpiderMeshTransporterEvent, Tcp
 import { RPCOptions, RPCOptionsList } from './RPCOptions.js'
 import { RemoteService } from './interfaces/RemoteService.js'
 import { EventHub, listEventSubscribers } from './decorators/ListenEvent.js'
-import { listReadyHookMethods } from './decorators/OnMicroserviceReady.js'
-import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, pipe, retry, scan, share, tap, timeout } from 'rxjs'
+import { BehaviorSubject, Observable, ReplaySubject, Subject, Subscriber, bufferTime, catchError, debounceTime, filter, firstValueFrom, from, groupBy, map, merge, mergeAll, mergeMap, of, pipe, retry, scan, share, tap, timeout, toArray } from 'rxjs'
 import { sleep } from './helpers/sleep.js'
 import { Encodable } from './Encoder.js'
 import { NAMEPSACE } from './const.js'
@@ -123,7 +122,7 @@ export class SpiderMesh {
             mergeMap(async transporter_id => {
                 await this.#self_introduce(transporter_id)
             }, 1)
-        ).subscribe()
+        ).subscribe() 
 
     }
 
@@ -540,7 +539,7 @@ export class SpiderMesh {
         return new Proxy({}, {
             get: (_, method: string) => {
                 if (method == '$wait_service_online') {
-                    return () => this.#wait_service_online(service_name)
+                    return (fn?: (nodes: SpiderMeshNode[]) => boolean | Promise<boolean>) => this.#wait_service_online(service_name, fn)
                 }
 
                 if (method == '$watch') return () => this.$nodes_monitor.pipe(
@@ -612,31 +611,24 @@ export class SpiderMesh {
 
 
 
-    async #wait_service_online(service_name: string = 'all') {
+    async #wait_service_online(service_name: string = 'all', fn: (nodes: SpiderMeshNode[]) => boolean | Promise<boolean> = nodes => nodes.length > 0) {
 
         while (true) {
             await sleep(1000)
             if (service_name == 'all') {
-                if ([...this.#remote_services.values()].every(e => e.nodes.length > 0)) {
-                    return true
-                }
+                const ok = await firstValueFrom(from(this.#remote_services.values()).pipe(
+                    mergeMap(async e => await fn(e.nodes)),
+                    toArray(),
+                    map(list => list.every(ok => ok))
+                ))
+                if (ok) return
             } else {
                 const nodes = this.#remote_services.get(service_name)?.nodes || []
-                if (nodes.length > 0) return
+                if (await fn(nodes)) return
             }
         }
     }
-
-    async #active_ready_hooks(instance: any) {
-
-        // Wait remote service ready
-        await this.#wait_service_online()
-
-        // Active ready hook
-        for (const { method } of listReadyHookMethods(Object.getPrototypeOf(instance))) {
-            instance[method]?.(this)
-        }
-    }
+ 
 
 
     publish<T extends Encodable>(
