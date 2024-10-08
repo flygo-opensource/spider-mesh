@@ -11,5 +11,5 @@ export const BeforeMicroserviceOnline = () => <T>(
         method
     ], target)
 };
-export const listBeforeMicroserviceOnlineMethods = (target: any) => Reflect.getMetadata(key, target) as string[]
+export const listBeforeMicroserviceOnlineMethods = (target: any) => Reflect.getMetadata(key, target) as string[] || []
 //# sourceMappingURL=BeforeMicroserviceOnline.js.map
