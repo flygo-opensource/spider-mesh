@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { PublishMetadata, SpiderMesh, SpiderMeshTransporter, SpiderMeshTransporterEvent, SpiderMeshTransporterEventMetadata, TcpNodeStatus } from "@spider-mesh/core";
-import { Observable, Subject, filter, finalize, first, map, merge, mergeMap, tap } from 'rxjs'
+import { Observable, Subject, filter, finalize, first, map, merge, mergeMap, switchMap, tap, throttleTime } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpServer } from "./RxjsUdpServer.js";
@@ -73,6 +73,11 @@ export class SpiderMeshTcpTransporter implements SpiderMeshTransporter {
             })
         ).subscribe()
 
+        this.#$rebroadcast.pipe(
+            throttleTime(2000, undefined, { leading: false, trailing: true }),
+            switchMap($ => this.#nodes_map.values()),
+            mergeMap(node => this.#tcp_hello(node.socket))
+        ).subscribe()
 
         SpiderMesh.$transporters.next(this)
 
@@ -167,20 +172,22 @@ export class SpiderMeshTcpTransporter implements SpiderMeshTransporter {
     }
 
     listen<T extends Encodable = Encodable, Metadata extends SpiderMeshTransporterEventMetadata = SpiderMeshTransporterEventMetadata>(topic: string) {
+        !this.#listeners.has(topic) && this.#listeners.set(topic, new Map())
+        this.#$rebroadcast.next()
         return new Observable<SpiderMeshTransporterEvent<T, Metadata>>(o => {
             this.#version = Date.now()
-            !this.#listeners.has(topic) && this.#listeners.set(topic, new Map())
             const id = randomUUID()
             this.#listeners.get(topic)?.set(
                 id,
                 (data) => o.next(data as SpiderMeshTransporterEvent<T, Metadata>)
             )
-            this.#$rebroadcast.next()
             return () => {
                 this.#version = Date.now()
                 this.#listeners.get(topic)?.delete(id)
-                this.#listeners.get(topic)?.size == 0 && this.#listeners.delete(topic)
-                this.#$rebroadcast.next()
+                if (this.#listeners.get(topic)?.size == 0) {
+                    this.#listeners.get(topic)?.size == 0 && this.#listeners.delete(topic)
+                    this.#$rebroadcast.next()
+                }
             }
         })
 
