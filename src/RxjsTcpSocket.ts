@@ -19,6 +19,7 @@ export class RxjsTcpSocket {
         return new Promise<RxjsTcpSocket | null>(async s => {
             for (let i = 0; i <= retry_times; i++) {
                 const socket = createConnection({ ...options, autoSelectFamily: true })
+                socket.on('error', () => { })
                 const connected = await firstValueFrom(merge(
                     fromEvent(socket, 'connect').pipe(map(() => true)),
                     fromEvent(socket, 'error').pipe(map(() => false)),
@@ -52,38 +53,41 @@ export class RxjsTcpSocket {
     }
 
     async #join_util_error(socket: Socket) {
-        const $error = merge(
+        const $error = firstValueFrom(merge(
             fromEvent(socket, 'error').pipe(map(() => 'error' as 'error')),
             fromEvent(socket, 'close').pipe(map(() => 'closed' as 'closed')),
             fromEvent(socket, 'timeout').pipe(map(() => 'error' as 'error')),
             fromEvent(socket, 'end').pipe(map(() => 'closed' as 'closed')),
         ).pipe(
             tap(status => this.$status.next(status))
-        )
+        ))
 
 
         this.rawSocket = socket
 
         const encoder = frame.encode()
         const decoder = frame.decode()
+        encoder.on('error', () => { })
+        decoder.on('error', () => { })
+        socket.on('error', () => { })
 
         decoder.on('data', (msg: Buffer) => {
             this.$incoming_data.next(msg)
         })
         socket.on('data', data => decoder.writable && decoder.write(data))
-        encoder.on('data', buffer => socket.writable && socket.writable && socket.write(buffer))
+        encoder.on('data', buffer => socket.writable && socket.write(buffer))
 
         this.#$outgoing_data.pipe(
             takeUntil($error),
             finalize(() => {
-                socket.removeAllListeners()
-                decoder.removeAllListeners()
-                encoder.removeAllListeners()
+                socket.end()
+                decoder.end()
+                encoder.end()
             }),
             map(data => encoder.writable && encoder.write(data), 1)
         ).subscribe()
 
-        return firstValueFrom($error)
+        return $error
     }
 
 

@@ -120,7 +120,8 @@ export class RxjsUdpServer extends Observable<RxjsTcpSocket> {
                 await udp.send(
                     Buffer.from(json),
                     udp_port,
-                    host
+                    host,
+                    e => {}
                 )
             }, 50)
 
