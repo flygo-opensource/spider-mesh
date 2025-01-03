@@ -12,6 +12,7 @@
     "baseUrl": ".",
     "moduleResolution": "NodeNext", 
     "strictPropertyInitialization": false ,
+    "allowImportingTsExtensions": false,
     "outDir": "./build",
     "incremental": false,
     "useDefineForClassFields": true,
@@ -32,7 +33,6 @@
     "out",
     "src/schema.ts",
     "bin",
-    "./build/**/*",
-    "tests"
+    "./build/**/*" 
   ]
 }

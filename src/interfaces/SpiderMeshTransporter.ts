@@ -1,43 +1,31 @@
 import { Observable } from "rxjs"
-import { Encodable } from "../Encoder.js"
 
-export type SpiderMeshTransporterEventMetadata = {
-    [key: string]: Encodable
+
+export type RpcOptions = {
+    service: string
+    method: string
+    args: any[]
+    node_id?: string
+    ip?: string
+    fallback?: any
+    timeout?: number
+    retry?: number
 }
 
-export type SpiderMeshTransporterEvent<T extends Encodable = Encodable, Metadata = SpiderMeshTransporterEventMetadata> = {
-    id: string
-    topic: string
-    created_at: number
-    received_at: number
-    payload: T,
-    metadata: Metadata
-
-    /** Sender transporter id */
-    sti: string
+export type PublishOptions<T> = {
+    event: string
+    data: T
 }
 
-export type PublishMetadata<T extends Encodable = Encodable, Metadata = SpiderMeshTransporterEventMetadata> = {
-    event: string,
-    payload: T
-    metadata: Metadata
-
-    /** Receiver trasporter id */
-    rti?: string
+export type SpiderMeshRpcTransporter = {
+    init: (options: { node_id: string }) => void
+    $requests: Observable<RpcOptions & { reply: (o: Observable<any> | Promise<any>) => void }>
+    rpc: <T>(options: RpcOptions) => Observable<T>
 }
 
-
-export type TcpNodeStatus = { remote_transporter_id: string, online: boolean }
-
-export type SpiderMeshTransporter = {
-
-    readonly transporter_id: string
-
-    $nodes_status: Observable<TcpNodeStatus>
-
-    listen: <T extends Encodable, Metadata extends SpiderMeshTransporterEventMetadata>(topic: string) => Observable<SpiderMeshTransporterEvent<T, Metadata>>
-    publish<T extends Encodable, Metadata extends SpiderMeshTransporterEventMetadata>(config: PublishMetadata<T, Metadata>): Promise<void>
+export type SpiderMeshPubsubTransporter = {
+    init: (options: { node_id: string }) => void
+    $nodes: Observable<{ node_id: string, status: 'online' | 'offline' }>
+    listen: <T>(topic: string) => Observable<T>
+    publish: <T>(options: PublishOptions<T>) => Promise<void>
 }
-
-
-export type SpiderMeshTransporterFactory = { new(...args: any[]): SpiderMeshTransporter }

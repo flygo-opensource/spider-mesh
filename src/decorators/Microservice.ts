@@ -1,12 +1,11 @@
 import { from, mergeMap, ReplaySubject, tap, toArray } from "rxjs"
 import { NAMEPSACE } from "../const.js"
-import { ServiceMetadata } from "../../src/interfaces/SpiderMeshNode.js"
 import { listBeforeMicroserviceOnlineMethods } from "./BeforeMicroserviceOnline.js"
 
-export const $services = new ReplaySubject<{ instance: any, namespace: string, metadata: ServiceMetadata }>()
+export const $services = new ReplaySubject<{ instance: any, namespace: string  }>()
 
 
-export const Microservice = (namespace: string = NAMEPSACE, metadata: ServiceMetadata = {}) => {
+export const Microservice = (namespace: string = NAMEPSACE ) => {
     return (
         (target: { new(...args: any[]): {} }) => {
             class C extends target {
@@ -19,8 +18,7 @@ export const Microservice = (namespace: string = NAMEPSACE, metadata: ServiceMet
                         toArray(),
                         tap(() => $services.next({
                             instance: this,
-                            namespace,
-                            metadata
+                            namespace 
                         }))
                     ).subscribe()
 

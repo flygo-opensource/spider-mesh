@@ -75,7 +75,7 @@ export class ExampleService {
     }
 
     async get_id() {
-        const $ = await this.sm.$metadata()
-        return $.node_id
+        // const $ = await this.sm.$metadata()
+        // return $.node_id
     }
 }
