@@ -1,222 +1,272 @@
 import { randomUUID } from "crypto";
-import { PublishMetadata, SpiderMesh, SpiderMeshTransporter, SpiderMeshTransporterEvent, SpiderMeshTransporterEventMetadata, TcpNodeStatus } from "@spider-mesh/core";
-import { Observable, Subject, filter, finalize, first, map, merge, mergeMap, switchMap, tap, throttleTime } from 'rxjs'
+import { SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter, PublishOptions, RpcOptions, ServiceOffline } from "@spider-mesh/core";
+import { BehaviorSubject, Observable, Subject, Subscriber, filter, lastValueFrom, map, merge, mergeMap, switchMap, tap, throttleTime } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpServer } from "./RxjsUdpServer.js";
 import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS, NAMEPSACE } from "./const.js"
-import { Encodable, Encoder } from "@spider-mesh/core";
+import { Encoder } from "./Encoder.js";
+
 
 type TcpNode = {
-    transporter_id: string
+    node_id: string
     host: string
     port: number
     listening: string[]
-    version: number,
-    peers: TcpNode[]
+    version: number
 }
 
 
 type HelloMessage = TcpNode
-
 type NodeID = string
-type ListenderID = string
-type ListenderCallback = (data: SpiderMeshTransporterEvent<any>) => any
 type EventID = string
-type NodeWithSocket = TcpNode & { socket: RxjsTcpSocket }
+type RpcRequest = RpcOptions & { id: string, r: string }
+type RpcResponse = {
+    id: string,
+    end?: true
+    data?: any
+    error?: any
+}
 
-export class SpiderMeshTcpTransporter implements SpiderMeshTransporter {
+export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter {
 
-    public readonly $nodes_status = new Subject<TcpNodeStatus>()
 
-    #version = Date.now()
-    #listeners = new Map<EventID, Map<ListenderID, ListenderCallback>>
-    #nodes_map = new Map<NodeID, NodeWithSocket>
-    #events_map = new Map<EventID, Set<NodeID>>()
-    #$rebroadcast = new Subject<void>()
-    public readonly transporter_id: string = randomUUID()
-    #$tcp = new RxjsTcpServer()
 
-    constructor() {
-        const $udp = new RxjsUdpServer({
-            $tcp_server_port: this.#$tcp.$port,
+    $requests = new Subject<RpcOptions & { reply: (o: Observable<any> | Promise<any>) => void }>()
+    $nodes = new Subject<{ node_id: string, status: "online" | "offline"; }>()
+
+    #$tcp_server: RxjsTcpServer
+    #$udp_server: RxjsUdpServer
+
+    #remote_nodes = new Map<NodeID, { metadata: TcpNode, socket: RxjsTcpSocket }>
+    #remote_listeners = new Map<EventID, Set<NodeID>>()
+
+    #local_listeners = new BehaviorSubject({
+        version: Date.now(),
+        map: new Map<EventID, Set<Subscriber<any>>>()
+    })
+
+    #$requests = new Map<string, Subscriber<any>>()
+
+    #node_id: string
+
+    init(options: { node_id: string; }) {
+
+        this.#node_id = options.node_id
+
+        this.#$tcp_server = new RxjsTcpServer()
+
+        this.#$udp_server = new RxjsUdpServer({
             namespace: NAMEPSACE,
-            udp_port: UDP_BROADCAST_PORT,
-            udp_address: UDP_BROADCAST_ADDRESS,
-            transporter_id: this.transporter_id
+            port: UDP_BROADCAST_PORT,
+            address: UDP_BROADCAST_ADDRESS,
+            node_id: options.node_id
         })
 
-        merge(this.#$tcp, $udp).pipe(
-            mergeMap(socket => {
-                const $ = socket.$incoming_data.pipe(
-                    map(buf => {
-                        try {
-                            return Encoder.decode<SpiderMeshTransporterEvent>(buf)
-                        } catch (e) { }
-                    }),
-                    filter(Boolean),
-                    mergeMap(async msg => {
-                        if (msg.topic == `#hello`) {
-                            const host = socket.rawSocket.remoteAddress
-                            host && await this.#sync_node(socket, {
-                                ...msg.payload as HelloMessage,
-                                host
-                            });
-                            return
-                        }
-                        const event: SpiderMeshTransporterEvent = { ...msg, received_at: Date.now() }
-                        this.#listeners.get(msg.topic)?.forEach(cb => cb(event));
-                    })
-                )
-                !socket.opened_by_remote_side && this.#tcp_hello(socket)
-                return $
-            })
-        ).subscribe()
+        lastValueFrom(merge(this.#$tcp_server, this.#$udp_server).pipe(
+            tap(socket => !socket.fromRemote && this.#hello(socket)),
+            map(socket => socket.$incoming_data.pipe(
+                map(buf => {
+                    try {
+                        return Encoder.decode<PublishOptions<any>>(buf)
+                    } catch (e) { }
+                }),
+                filter(Boolean),
+                mergeMap(async msg => { await this.#handle(socket, msg) })
+            ))
+        ))
 
-        this.#$rebroadcast.pipe(
+        this.#local_listeners.pipe(
             throttleTime(2000, undefined, { leading: false, trailing: true }),
-            switchMap($ => this.#nodes_map.values()),
-            mergeMap(node => this.#tcp_hello(node.socket))
+            switchMap($ => this.#remote_nodes.values()),
+            mergeMap(node => this.#hello(node.socket))
         ).subscribe()
 
-        SpiderMesh.$transporters.next(this)
-
+        this.#$udp_server.start()
+        this.#$tcp_server.$port.subscribe(
+            port => this.#$udp_server.broadcast(10000)
+        )
     }
 
 
 
+    async #handle(socket: RxjsTcpSocket, msg: PublishOptions<any>) {
 
-    async #sync_node(current_socket: RxjsTcpSocket, metadata: HelloMessage) {
+        if (msg.event.startsWith('#rpc:')) {
+            const options = msg.data as RpcRequest
+            this.$requests.next({
+                ...options,
+                reply: async response => {
 
-        const host = metadata.host
-        if (!host || !metadata.listening) return
+                    // Reply to remote server
+                    if (response instanceof Promise) {
+                        // Send #response
+                        try {
+                            const data: RpcResponse = {
+                                data: await response,
+                                id: options.id
+                            }
+                            this.publish({ event: options.r, data })
+                        } catch (error) {
+                            const data: RpcResponse = {
+                                error,
+                                id: options.id
+                            }
+                            this.publish({ event: options.r, data })
+                        }
+                    }
 
-        for (const event of metadata.listening) {
-            !this.#events_map.has(event) && this.#events_map.set(event, new Set());
-            this.#events_map.get(event)?.add(metadata.transporter_id);
+                    if (response instanceof Observable) {
+                        response.subscribe({
+                            complete: () => this.publish({ event: options.r, data: { id: options.id, end: true } }),
+                            error: error => this.publish({ event: options.r, data: { id: options.id, error } }),
+                            next: data => this.publish({ event: options.r, data: { id: options.id, data } }),
+                        })
+                    }
+                }
+            })
+            return
         }
 
-        const cached = this.#nodes_map.get(metadata.transporter_id)
-        if (cached && cached.version > 0) return;
+        if (msg.event == '#response') {
+            const { data, error, id, end } = msg.data as RpcResponse
+            const subscriber = this.#$requests.get(id)
+            if (subscriber) {
+                data != undefined && subscriber.next(data)
+                error && subscriber.error(error)
+                end && subscriber.complete()
+            }
+            return
+        }
 
+        if (msg.event == `#hello`) {
+            const host = socket.rawSocket.remoteAddress
+            host && await this.#link(socket, {
+                ...msg.data as HelloMessage,
+                host
+            });
+            return
+        }
 
-        const socket = current_socket.opened_by_remote_side ? (await RxjsTcpSocket.connect({
-            host,
+        this.#local_listeners.getValue().map.get(msg.event)?.forEach(o => o.next(msg));
+    }
+
+    async #link(csocket: RxjsTcpSocket, metadata: HelloMessage) {
+
+        const linked = this.#remote_nodes.get(metadata.node_id)
+
+        const socket = linked ? linked.socket : (csocket.fromRemote ? await RxjsTcpSocket.connect({
+            host: metadata.host,
             port: metadata.port,
             keepAlive: true,
             retry_delay_ms: 200,
             retry_times: 5
-        }) || current_socket) : current_socket;
+        }) || csocket : csocket)
 
-        const new_node = {
-            ...metadata,
-            host,
-            socket,
-            peers: metadata.peers.map(p => ({ ...p, peers: [] }))
-        };
-        this.#nodes_map.set(metadata.transporter_id, new_node);
-
-
-
-
-        const remote_info = new_node.peers.find(p => p.transporter_id == this.transporter_id);
-        const peer_updated = remote_info ? remote_info.version == this.#version : false;
-        !peer_updated && this.#tcp_hello(socket);
-
-        this.$nodes_status.next({
-            online: true,
-            remote_transporter_id: metadata.transporter_id,
-        });
-
-        socket.$status.pipe(
-            filter(status => status != 'ready'),
-            first(),
-            finalize(() => {
-                const node = this.#nodes_map.get(metadata.transporter_id);
-                node && node.listening.map(evt => {
-                    this.#events_map.get(evt)?.delete(metadata.transporter_id);
-                });
-                this.#nodes_map.delete(metadata.transporter_id);
-                this.$nodes_status.next({
-                    remote_transporter_id: metadata.transporter_id,
-                    online: false
-                });
-            })
-        ).subscribe();
-
-    }
-
-
-    async #tcp_hello(tcp_socket: RxjsTcpSocket) {
-        const port = this.#$tcp.$port.getValue()
-
-        const msg: SpiderMeshTransporterEvent<HelloMessage, { namespace: string }> = {
-            created_at: Date.now(),
-            id: randomUUID(),
-            metadata: {
-                namespace: NAMEPSACE,
-            },
-            topic: '#hello',
-            sti: this.transporter_id,
-            payload: {
-                host: '',
-                transporter_id: this.transporter_id,
-                port,
-                listening: ['#hello', ... this.#listeners.keys()],
-                peers: [... this.#nodes_map.values()].map(({ socket, ...node }) => node),
-                version: this.#version
-            },
-            received_at: 0
+        this.#remote_nodes.set(metadata.node_id, { metadata, socket })
+        for (const event of metadata.listening) {
+            const set = this.#remote_listeners.get(event) || new Set()
+            set.add(metadata.node_id)
+            this.#remote_listeners.set(event, set)
         }
-        tcp_socket.write(Encoder.encode(msg))
-    }
+        if (!linked) return
+        console.log({ new_node: metadata })
+        this.$nodes.next({ node_id: metadata.node_id, status: 'online' })
 
-    listen<T extends Encodable = Encodable, Metadata extends SpiderMeshTransporterEventMetadata = SpiderMeshTransporterEventMetadata>(topic: string) {
-        !this.#listeners.has(topic) && this.#listeners.set(topic, new Map())
-        this.#$rebroadcast.next()
-        return new Observable<SpiderMeshTransporterEvent<T, Metadata>>(o => {
-            this.#version = Date.now()
-            const id = randomUUID()
-            this.#listeners.get(topic)?.set(
-                id,
-                (data) => o.next(data as SpiderMeshTransporterEvent<T, Metadata>)
-            )
-            return () => {
-                this.#version = Date.now()
-                this.#listeners.get(topic)?.delete(id)
-                if (this.#listeners.get(topic)?.size == 0) {
-                    this.#listeners.get(topic)?.size == 0 && this.#listeners.delete(topic)
-                    this.#$rebroadcast.next()
+        socket.$status.subscribe({
+            complete: () => {
+                for (const event of metadata.listening) {
+                    const set = this.#remote_listeners.get(event) || new Set()
+                    set.delete(metadata.node_id)
+                    this.#remote_listeners.set(event, set)
                 }
+                this.$nodes.next({ node_id: metadata.node_id, status: 'offline' })
             }
         })
 
     }
 
 
-    async publish<T extends Encodable, Metadata extends SpiderMeshTransporterEventMetadata = SpiderMeshTransporterEventMetadata>({ payload, event, metadata, rti }: PublishMetadata<T, Metadata>) {
+    async #hello(tcp_socket: RxjsTcpSocket) {
 
-        const msg: SpiderMeshTransporterEvent<T, Metadata> = {
-            created_at: Date.now(),
-            id: randomUUID() as string,
-            metadata,
-            payload,
-            received_at: 0,
-            sti: this.transporter_id,
-            topic: event || rti || '#'
-        }
+        const port = this.#$tcp_server.$port.getValue()
 
-        const buffer = Encoder.encode(msg)
-
-        if (rti) {
-            await this.#nodes_map.get(rti)?.socket?.write(buffer)
-        } else {
-            for (const node_id of this.#events_map.get(event) || []) {
-                const node = this.#nodes_map.get(node_id)
-                await node?.socket?.write(buffer)
+        const { map, version } = this.#local_listeners.getValue()
+        const msg: PublishOptions<HelloMessage> = {
+            event: '#hello',
+            data: {
+                node_id: this.#node_id,
+                host: '',
+                port,
+                listening: ['#hello', this.#node_id, '__metadata__', ...map.keys()],
+                version
             }
-            return
+        }
+        tcp_socket.write(Encoder.encode(msg))
+    }
+
+    listen<T>(topic: string): Observable<T> {
+        return new Observable<T>(o => {
+            const { map } = this.#local_listeners.getValue()
+            const listeners = map.get(topic) || new Set()
+            listeners.add(o)
+            map.set(topic, listeners)
+            this.#local_listeners.next({
+                map,
+                version: Date.now()
+            })
+            return () => {
+                listeners.delete(o)
+                this.#local_listeners.next({
+                    map,
+                    version: Date.now()
+                })
+            }
+        })
+    }
+
+    async publish<T>(options: PublishOptions<T>) {
+        const buffer = Encoder.encode(options as any)
+        for (const node_id of this.#remote_listeners.get(options.event) || []) {
+            const node = this.#remote_nodes.get(node_id)
+            node?.socket?.write(buffer)
         }
     }
+
+    #indexes = new Map<string, number>()
+
+    #getRpcNode(options: RpcOptions) {
+        if (options.node_id) {
+            const node = this.#remote_nodes.get(options.node_id)
+            if (!node) throw new ServiceOffline('NODE_OFFLINE')
+            return node
+        }
+        const key = `${options.service}.${options.method}`
+        const nodes = this.#remote_listeners.get(options.service) || new Set()
+        for (let i = 1; i <= nodes.size; i++) {
+            const index = (this.#indexes.get(key) || 0 + i) % (nodes.size)
+            const node_id = [...nodes][index]
+            const node = this.#remote_nodes.get(node_id)
+            if (!node) continue
+            this.#indexes.set(key, index)
+        }
+        throw new ServiceOffline('NODE_OFFLINE')
+    }
+
+
+    rpc<T>(options: RpcOptions): Observable<T> {
+        const node = this.#getRpcNode(options)
+        const request: RpcRequest = {
+            id: randomUUID(),
+            ...options,
+            r: this.#node_id
+        }
+        const data = Encoder.encode(request)
+        return new Observable<T>(o => {
+            this.#$requests.set(request.id, o)
+            node.socket.write(data)
+        })
+    }
+
 
 } 

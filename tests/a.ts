@@ -1,10 +1,9 @@
-import { Microservice, SpiderMesh } from "@spider-mesh/core";
+import { randomUUID } from "crypto";
 import { SpiderMeshTcpTransporter } from "../src/SpiderMeshTcpTransporter.js";
-import { A } from "./serviceA.js";
 
 
+const t = new SpiderMeshTcpTransporter()
+t.init({ node_id: randomUUID() }) 
 
 
-const sm = new SpiderMesh()
-const tspt = new SpiderMeshTcpTransporter( ) 
-new A()
+setInterval(() => {}, 1000) 

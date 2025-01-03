@@ -10,8 +10,8 @@ export class RxjsTcpSocket {
     $status = new BehaviorSubject<'connecting' | 'ready' | 'closed' | 'error'>('connecting')
     rawSocket: Socket
 
-    private constructor(public readonly opened_by_remote_side: boolean) {
-        opened_by_remote_side && this.$status.next('ready')
+    private constructor(public readonly fromRemote: boolean) {
+        fromRemote && this.$status.next('ready')
     }
 
     static connect({ retry_times = 5, retry_delay_ms = 5000, ...options }: TcpNetConnectOpts & { retry_times?: number, retry_delay_ms?: number }) {
