@@ -7,9 +7,9 @@ export const BeforeMicroserviceOnline = () => <T>(
     target: Object,
     method: string | symbol 
 ) => {
-    Reflect.defineMetadata(key, [
-        ...Reflect.getMetadata(key, target) || [],
-        method
-    ], target)
+    // Reflect.defineMetadata(key, [
+    //     ...Reflect.getMetadata(key, target) || [],
+    //     method
+    // ], target)
 };
-export const listBeforeMicroserviceOnlineMethods = (target: any) => Reflect.getMetadata(key, target) as string[] || []
+export const listBeforeMicroserviceOnlineMethods = (target: any) => []//Reflect.getMetadata(key, target) as string[] || []
