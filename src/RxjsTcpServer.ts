@@ -1,5 +1,5 @@
 import { createServer } from "net"
-import { BehaviorSubject, Observable, Subject, firstValueFrom, fromEvent } from "rxjs"
+import { BehaviorSubject, Observable, Subject, firstValueFrom, from, fromEvent, lastValueFrom, of } from "rxjs"
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js"
 
 
@@ -20,8 +20,7 @@ export class RxjsTcpServer extends Observable<RxjsTcpSocket> {
                     if (!success) continue
                     this.$port.next(tcp_port)
                     server.on('connection', async socket => {
-                        const stable_socket = await RxjsTcpSocket.join(socket)
-                        o.next(stable_socket)
+                        o.next(new RxjsTcpSocket(socket))
                     })
                     const $error = fromEvent(server, 'error') as Observable<Error>
                     await firstValueFrom($error)

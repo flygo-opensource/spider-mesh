@@ -15,9 +15,10 @@
   ],
   "devDependencies": {
     "@spider-mesh/core": "^1.0.140",
-    "@types/node": "^22.7.9",
+    "@types/node": "^22.10.5",
     "bun": "^1.1.42",
     "ts-node": "^10.9.1",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
   "exports": {
@@ -29,7 +30,7 @@
     }
   },
   "scripts": {
-    "dev": "clear; node --loader ./loader.js  ",
+    "dev": "clear; node --import tsx ",
     "build": "tsc -v; rm -rf build && tsc -b tsconfig.json"
   },
   "author": "Duong Van Ba",

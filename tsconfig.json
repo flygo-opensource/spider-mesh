@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "strict": true,   
+    "strict": true,
     "module": "NodeNext",
     "declaration": true,
     "removeComments": true,
@@ -10,8 +10,8 @@
     "target": "ESNext",
     "sourceMap": true,
     "baseUrl": ".",
-    "moduleResolution": "NodeNext", 
-    "strictPropertyInitialization": false ,
+    "moduleResolution": "NodeNext",
+    "strictPropertyInitialization": false,
     "outDir": "./build",
     "incremental": false,
     "useDefineForClassFields": true,
@@ -25,13 +25,14 @@
     ],
     "esModuleInterop": true,
     "importHelpers": true,
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "skipLibCheck": true
   },
   "exclude": [
     "node_modules",
     "out",
     "src/schema.ts",
     "bin",
-    "./build/**/*" 
+    "./build/**/*"
   ]
 }
