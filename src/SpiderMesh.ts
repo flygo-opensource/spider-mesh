@@ -1,4 +1,4 @@
-import { BehaviorSubject, debounceTime, EMPTY, filter, firstValueFrom, from, interval, lastValueFrom, merge, mergeMap, Observable, of, Subject } from "rxjs"
+import { BehaviorSubject, debounceTime, filter, firstValueFrom, from, interval, lastValueFrom, merge, mergeMap, of, Subject } from "rxjs"
 import { PublishOptions, RpcOptions, SpiderMeshPubsubTransporter, SpiderMeshRpcTransporter } from "./interfaces/SpiderMeshTransporter.js";
 import { randomUUID } from "crypto";
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
@@ -35,7 +35,6 @@ export class SpiderMesh {
         if (!transporter) throw new ServiceOffline('SERVICE_OFFLINE')
         return transporter.rpc<T>(options)
     }
-
 
     linkRpcTransporter(t: SpiderMeshRpcTransporter) {
         this.#rpc_transporters.add(t)
@@ -200,7 +199,6 @@ export class SpiderMesh {
 
     }
 
-
     linkEvent<T>() {
         if (this.#pubsub_transporters.size == 0) throw new MissingPubsubTransporter('MISSING_PUBSUB_TRANSPORTER')
 
@@ -217,8 +215,5 @@ export class SpiderMesh {
             )
         }
     }
-
-
-
 
 }
