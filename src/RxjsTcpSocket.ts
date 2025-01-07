@@ -42,7 +42,6 @@ export class RxjsTcpSocket extends Subject<Buffer> {
         t.#fromRemote = true
         t.#remoteAddress = socket.remoteAddress
         t.#join(socket).subscribe({
-            next: v => console.log({ data: v }),
             error: e => t.error(e),
             complete: () => t.complete()
         })
@@ -61,7 +60,7 @@ export class RxjsTcpSocket extends Subject<Buffer> {
             fromEvent(socket, 'error').pipe(map(e => { throw e })),
             fromEvent(socket, 'close').pipe(map(() => 'CLOSED')),
             fromEvent(socket, 'timeout').pipe(map(e => { throw e })),
-            fromEvent(socket, 'end').pipe(map(() => 'CLOSED')),
+            fromEvent(socket, 'end').pipe(map(() => 'ENDED')),
             merge(
                 this.#$out.pipe(
                     map(data => encoder.writable && encoder.write(data))
