@@ -1,21 +1,23 @@
 import { randomUUID } from "crypto";
-import { SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter, PublishOptions, RpcOptions } from "./interfaces.js";
+import { SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter, PublishOptions, RpcOptions, SpiderMeshTransporterInitOptions } from "./interfaces.js";
 import { BehaviorSubject, Observable, Subject, Subscriber, filter, finalize, lastValueFrom, map, merge, mergeMap, switchMap, tap, throttleTime } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpServer } from "./RxjsUdpServer.js";
-import { UDP_BROADCAST_PORT, UDP_BROADCAST_ADDRESS, NAMEPSACE, UDP_SECRET_KEY } from "./const.js"
+import { UDP_BROADCAST_PORT, NAMEPSACE, UDP_SECRET_KEY } from "./const.js"
 import { Encoder } from "./Encoder.js";
 
 export class ServiceNotFound extends Error { }
 export class MissingPubsubTransporter extends Error { }
 export class ServiceOffline extends Error { }
 
+
 type TcpNode = {
     node_id: string
     host: string
     port: number
     listening: string[]
+    services: string[]
     version: number
 }
 
@@ -33,18 +35,16 @@ type RpcResponse = {
 
 export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter {
 
-
-
     $requests = new Subject<RpcOptions & { reply: (o: Observable<any> | Promise<any>) => void }>()
     $nodes = new Subject<{ node_id: string, status: "online" | "offline"; }>()
 
-    #$tcp_server: RxjsTcpServer
-    #$udp_server: RxjsUdpServer
+    #$tcpServer: RxjsTcpServer
+    #$udpServer: RxjsUdpServer
 
-    #remote_nodes = new Map<NodeID, { metadata: TcpNode, socket: RxjsTcpSocket }>
-    #remote_listeners = new Map<EventID, Set<NodeID>>()
+    #remoteNodes = new Map<NodeID, { metadata: TcpNode, socket: RxjsTcpSocket }>
+    #remoteListeners = new Map<EventID, Set<NodeID>>()
 
-    #local_listeners = new BehaviorSubject({
+    #localListeners = new BehaviorSubject({
         version: Date.now(),
         map: new Map<EventID, Set<Subscriber<any>>>()
     })
@@ -53,57 +53,52 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
     #node_id: string
 
-    init(options: { node_id: string; }) {
-
-        console.log({ init: options })
+    init(options: SpiderMeshTransporterInitOptions) {
 
         this.#node_id = options.node_id
 
-        this.#$tcp_server = new RxjsTcpServer()
+        this.#$tcpServer = new RxjsTcpServer()
 
-        this.#$udp_server = new RxjsUdpServer({
+        this.#$udpServer = new RxjsUdpServer({
             namespace: NAMEPSACE,
             port: UDP_BROADCAST_PORT,
             node_id: options.node_id,
             key: UDP_SECRET_KEY
         })
 
-        const $udpConnection = this.#$udp_server.pipe(
-            map(d => new RxjsTcpSocket(d))
+        const $udpConnection = this.#$udpServer.pipe(
+            tap(d => console.log(`[UDP] Connect to ${d.host}:${d.port}`)),
+            mergeMap(options => RxjsTcpSocket.connect(options)),
+            filter(Boolean)
         )
 
-        lastValueFrom(merge(this.#$tcp_server, $udpConnection).pipe(
-            tap(socket => !socket.fromRemote && this.#hello(socket)),
-            map(socket => socket.pipe(
+        lastValueFrom(merge(this.#$tcpServer, $udpConnection).pipe(
+            tap(socket => socket.subscribe(console)),
+            tap(socket => console.log(socket.fromRemote ? { socket_from: socket.remoteAddress } : { socket_to: socket.remoteAddress })),
+            tap(socket => !socket.fromRemote && setTimeout(() => this.#hello(socket, options.services), 2000)),
+            mergeMap(socket => socket.pipe(
                 map(buf => {
+                    console.log({ buf })
                     try {
                         return Encoder.decode<PublishOptions<any>>(buf)
                     } catch (e) { }
                 }),
                 filter(Boolean),
-                mergeMap(async msg => { await this.#handle(socket, msg) }),
-                finalize(() => {
-                    console.log(`Connection `)
-                })
+                mergeMap(async msg => { await this.#handle(socket, msg) })
             ))
         ))
 
-        this.#local_listeners.pipe(
+        this.#localListeners.pipe(
             throttleTime(2000, undefined, { leading: false, trailing: true }),
-            switchMap($ => this.#remote_nodes.values()),
-            mergeMap(node => this.#hello(node.socket))
+            switchMap(() => this.#remoteNodes.values()),
+            mergeMap(node => this.#hello(node.socket, options.services))
         ).subscribe()
 
-        this.#$tcp_server.$port.subscribe(
-            port => {
-                if (!port) return
-                console.log({ port })
-                this.#$udp_server.broadcast({ port })
-            }
-        )
+        this.#$tcpServer.$online.subscribe(status => {
+            if (!status) return
+            this.#$udpServer.broadcast(status)
+        })
     }
-
-
 
     async #handle(socket: RxjsTcpSocket, msg: PublishOptions<any>) {
 
@@ -164,26 +159,26 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             return
         }
 
-        this.#local_listeners.getValue().map.get(msg.event)?.forEach(o => o.next(msg));
+        this.#localListeners.getValue().map.get(msg.event)?.forEach(o => o.next(msg));
     }
 
     async #link(metadata: HelloMessage) {
 
-        const linked = this.#remote_nodes.get(metadata.node_id)
+        const linked = this.#remoteNodes.get(metadata.node_id)
         const { host } = metadata
 
-        const socket = linked ? linked.socket : new RxjsTcpSocket({
+        const socket = linked ? linked.socket : await RxjsTcpSocket.connect({
             host,
             port: metadata.port,
             keepAlive: true
         })
         if (!socket) return
 
-        this.#remote_nodes.set(metadata.node_id, { metadata, socket })
+        this.#remoteNodes.set(metadata.node_id, { metadata, socket })
         for (const event of metadata.listening) {
-            const set = this.#remote_listeners.get(event) || new Set()
+            const set = this.#remoteListeners.get(event) || new Set()
             set.add(metadata.node_id)
-            this.#remote_listeners.set(event, set)
+            this.#remoteListeners.set(event, set)
         }
         if (!linked) return
         console.log({ new_node: metadata })
@@ -192,9 +187,9 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
         socket.subscribe({
             complete: () => {
                 for (const event of metadata.listening) {
-                    const set = this.#remote_listeners.get(event) || new Set()
+                    const set = this.#remoteListeners.get(event) || new Set()
                     set.delete(metadata.node_id)
-                    this.#remote_listeners.set(event, set)
+                    this.#remoteListeners.set(event, set)
                 }
                 this.$nodes.next({ node_id: metadata.node_id, status: 'offline' })
                 console.log(`Node ${metadata.node_id} oflfine`)
@@ -203,15 +198,12 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
     }
 
+    async #hello(socket: RxjsTcpSocket, services: string[]) {
 
-    async #hello(tcp_socket: RxjsTcpSocket) {
-
-        const port = this.#$tcp_server.$port.getValue()
+        const port = this.#$tcpServer.port
         if (!port) return
 
-        console.log(`Say hello to ${tcp_socket.remoteAddress}`)
-
-        const { map, version } = this.#local_listeners.getValue()
+        const { map, version } = this.#localListeners.getValue()
         const msg: PublishOptions<HelloMessage> = {
             event: '#hello',
             data: {
@@ -219,25 +211,27 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
                 host: '',
                 port,
                 listening: ['#hello', this.#node_id, '__metadata__', ...map.keys()],
+                services,
                 version
             }
         }
-        tcp_socket.write(Encoder.encode(msg))
+        console.log(`Say hello to ${socket.remoteAddress}`,{msg})
+        socket.send(Encoder.encode(msg))
     }
 
     listen<T>(topic: string): Observable<T> {
         return new Observable<T>(o => {
-            const { map } = this.#local_listeners.getValue()
+            const { map } = this.#localListeners.getValue()
             const listeners = map.get(topic) || new Set()
             listeners.add(o)
             map.set(topic, listeners)
-            this.#local_listeners.next({
+            this.#localListeners.next({
                 map,
                 version: Date.now()
             })
             return () => {
                 listeners.delete(o)
-                this.#local_listeners.next({
+                this.#localListeners.next({
                     map,
                     version: Date.now()
                 })
@@ -247,9 +241,9 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
     async publish<T>(options: PublishOptions<T>) {
         const buffer = Encoder.encode(options as any)
-        for (const node_id of this.#remote_listeners.get(options.event) || []) {
-            const node = this.#remote_nodes.get(node_id)
-            node?.socket?.write(buffer)
+        for (const node_id of this.#remoteListeners.get(options.event) || []) {
+            const node = this.#remoteNodes.get(node_id)
+            node?.socket?.send(buffer)
         }
     }
 
@@ -257,16 +251,16 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
     #getRpcNode(options: RpcOptions) {
         if (options.node_id) {
-            const node = this.#remote_nodes.get(options.node_id)
+            const node = this.#remoteNodes.get(options.node_id)
             if (!node) throw new ServiceOffline('NODE_OFFLINE')
             return node
         }
         const key = `${options.service}.${options.method}`
-        const nodes = this.#remote_listeners.get(options.service) || new Set()
+        const nodes = this.#remoteListeners.get(options.service) || new Set()
         for (let i = 1; i <= nodes.size; i++) {
             const index = (this.#indexes.get(key) || 0 + i) % (nodes.size)
             const node_id = [...nodes][index]
-            const node = this.#remote_nodes.get(node_id)
+            const node = this.#remoteNodes.get(node_id)
             if (!node) continue
             this.#indexes.set(key, index)
         }
@@ -275,16 +269,20 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
 
     rpc<T>(options: RpcOptions): Observable<T> {
+
         const node = this.#getRpcNode(options)
+
         const request: RpcRequest = {
             id: randomUUID(),
             ...options,
             r: this.#node_id
         }
+
         const data = Encoder.encode(request)
+
         return new Observable<T>(o => {
             this.#$requests.set(request.id, o)
-            node.socket.write(data)
+            node.socket.send(data)
         })
     }
 

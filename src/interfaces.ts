@@ -18,14 +18,16 @@ export type PublishOptions<T> = {
 }
 
 export type SpiderMeshRpcTransporter = {
-    init: (options: { node_id: string }) => void
+    init: (options: SpiderMeshTransporterInitOptions) => void
     $requests: Observable<RpcOptions & { reply: (o: Observable<any> | Promise<any>) => void }>
     rpc: <T>(options: RpcOptions) => Observable<T>
 }
 
 export type SpiderMeshPubsubTransporter = {
-    init: (options: { node_id: string }) => void
+    init: (options: SpiderMeshTransporterInitOptions) => void
     $nodes: Observable<{ node_id: string, status: 'online' | 'offline' }>
     listen: <T>(topic: string) => Observable<T>
     publish: <T>(options: PublishOptions<T>) => Promise<void>
 }
+
+export type SpiderMeshTransporterInitOptions = {node_id:string, services:string[]}

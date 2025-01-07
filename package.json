@@ -30,7 +30,7 @@
     }
   },
   "scripts": {
-    "dev": "clear; node --import tsx ",
+    "dev": "clear; node --no-warnings --es-module-specifier-resolution=node --experimental-specifier-resolution=node --loader ts-node/esm ",
     "build": "tsc -v; rm -rf build && tsc -b tsconfig.json"
   },
   "author": "Duong Van Ba",

@@ -1,9 +1,9 @@
-import { TcpNetConnectOpts, createConnection, Socket } from "net"
-import { BehaviorSubject, EMPTY, Observable, Subject, Subscriber, catchError, filter, finalize, firstValueFrom, fromEvent, lastValueFrom, map, merge, mergeMap, of, range, retry, tap } from "rxjs"
+import { TcpNetConnectOpts, createConnection, Socket, connect } from "net"
+import { Subject, catchError, filter, finalize, firstValueFrom, fromEvent, map, merge, mergeMap, of, retry, tap } from "rxjs"
 import frame from 'frame-stream'
 
 
-export class RxjsTcpSocket extends Observable<Buffer> {
+export class RxjsTcpSocket extends Subject<Buffer> {
 
     #fromRemote = false
     #$out = new Subject<Buffer>
@@ -17,48 +17,55 @@ export class RxjsTcpSocket extends Observable<Buffer> {
         return this.#remoteAddress
     }
 
-    constructor(
-        private $: Socket | TcpNetConnectOpts
-    ) {
-        super(o => {
-            if ($ instanceof Socket) {
-                this.#fromRemote = true
-                firstValueFrom(of(0).pipe(
-                    mergeMap(() => this.#join($, o)),
-                    catchError(e => {
-                        o.complete()
-                        return of(null)
-                    })
-                ))
-            } else {
-                firstValueFrom(of(0).pipe(
-                    map(() => createConnection({
-                        ...$ as TcpNetConnectOpts,
-                        autoSelectFamily: true
-                    })),
-                    mergeMap(socket => this.#join(socket, o)),
-                    retry({ count: 10, delay: 100, resetOnSuccess: true }),
-                    catchError(e => {
-                        o.complete()
-                        return of(null)
-                    })
-                ), { defaultValue: [] })
-            }
-
-        })
+    static async connect(options: TcpNetConnectOpts) {
+        const t = new this()
+        t.#remoteAddress = options.host
+        t.#fromRemote = false
+        const connected = await new Promise<boolean>(s => firstValueFrom(of(0).pipe(
+            map(() => connect(
+                { ...options, autoSelectFamily: true, },
+                () => s(true))
+            ), 
+            mergeMap(socket => t.#join(socket)),
+            retry({ count: 10, delay: 100, resetOnSuccess: true }),
+            catchError(e => {
+                t.complete()
+                s(false)
+                return of(null)
+            }),
+        )))
+        return connected ? t : null
     }
 
-    async #join(socket: Socket, o: Subscriber<Buffer>) {
+    static from(socket: Socket) {
+        const t = new this()
+        t.#fromRemote = true
+        t.#remoteAddress = socket.remoteAddress
+        t.#join(socket).subscribe({
+            next: v => console.log({ data: v }),
+            error: e => t.error(e),
+            complete: () => t.complete()
+        })
+        return t
+    }
+
+    private constructor() {
+        super()
+    }
+
+    #join(socket: Socket) {
         const encoder = frame.encode()
         const decoder = frame.decode()
-        this.#remoteAddress = socket.remoteAddress
+
         return merge(
             fromEvent(socket, 'error').pipe(map(e => { throw e })),
             fromEvent(socket, 'close').pipe(map(() => 'CLOSED')),
             fromEvent(socket, 'timeout').pipe(map(e => { throw e })),
             fromEvent(socket, 'end').pipe(map(() => 'CLOSED')),
-            this.#$out.pipe(map(data => encoder.writable && encoder.write(data))),
             merge(
+                this.#$out.pipe(
+                    map(data => encoder.writable && encoder.write(data))
+                ),
                 fromEvent<Buffer>(encoder, 'data').pipe(
                     map(buffer => socket.writable && socket.write(buffer))
                 ),
@@ -66,7 +73,7 @@ export class RxjsTcpSocket extends Observable<Buffer> {
                     map(data => decoder.writable && decoder.write(data))
                 ),
                 fromEvent<Buffer>(decoder, 'data').pipe(
-                    map(data => o.next(data))
+                    map(data => this.next(data))
                 )
             ).pipe(
                 filter(() => false)
@@ -74,8 +81,7 @@ export class RxjsTcpSocket extends Observable<Buffer> {
         )
     }
 
-
-    write(data: Buffer) {
+    send(data: Buffer) {
         this.#$out.next(data)
     }
 
