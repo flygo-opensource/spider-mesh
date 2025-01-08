@@ -30,6 +30,10 @@ export class SpiderMesh {
         } as SpiderMeshNode
     }
 
+    getLocalServices(){
+        return this.#$local_services
+    }
+
     async rpc<T>(options: RpcOptions) {
         const transporter = this.#remote_services.get(options.service) || await this.waitServiceReady(options.service)
         if (!transporter) throw new ServiceOffline('SERVICE_OFFLINE')
@@ -216,4 +220,4 @@ export class SpiderMesh {
         }
     }
 
-}
+}  
