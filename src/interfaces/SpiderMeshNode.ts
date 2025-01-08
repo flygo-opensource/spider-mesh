@@ -4,5 +4,7 @@ export type SpiderMeshNode = {
     node_id: string
     ip: string
     hostname: string
-    services: string[]
+    services: {
+        [service: string]: object
+    }
 }

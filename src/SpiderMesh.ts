@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { RemoteService } from "./interfaces/RemoteService.js";
 import { SpiderMeshNode } from "./interfaces/SpiderMeshNode.js";
+import { $services } from "./decorators/Microservice.js";
 
 
 export class ServiceNotFound extends Error { }
@@ -23,6 +24,10 @@ export class SpiderMesh {
     public readonly node_id = randomUUID()
     public readonly METADATA_TOPIC = '__metadata__'
 
+    constructor() {
+        $services.subscribe(({ instance, name }) => this.exposeLocalService(name, instance))
+    }
+
     public get metadata() {
         return {
             node_id: this.node_id,
@@ -30,7 +35,7 @@ export class SpiderMesh {
         } as SpiderMeshNode
     }
 
-    getLocalServices(){
+    getLocalServices() {
         return this.#$local_services
     }
 
@@ -62,6 +67,7 @@ export class SpiderMesh {
             this.#remote_nodes.set(node.node_id, node)
         })
 
+
     }
 
     waitServiceReady(name: string, check: (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean = nodes => nodes.length > 0) {
@@ -70,24 +76,27 @@ export class SpiderMesh {
         return firstValueFrom(merge(of(0), interval(2000)).pipe(
             mergeMap(() => from([...this.#rpc_transporters.values()]).pipe(
                 mergeMap(async transporter => {
-                    const node = await firstValueFrom(transporter.rpc<SpiderMeshNode>({
-                        args: [],
-                        method: this.METADATA_TOPIC,
-                        service: name
-                    }))
-                    if (!node) return
-                    for (const [service, ready] of Object.entries(node.services)) {
-                        if (ready) {
-                            this.#remote_services.set(service, transporter)
+                    console.log(`Wait ${name} online`)
+                    try {
+                        const node = await firstValueFrom(transporter.rpc<SpiderMeshNode>({
+                            args: [],
+                            method: this.METADATA_TOPIC,
+                            service: name
+                        }))
+                        if (!node) return
+                        for (const [service, ready] of Object.entries(node.services)) {
+                            if (ready) {
+                                this.#remote_services.set(service, transporter)
+                            }
                         }
-                    }
-                    node && !this.#remote_nodes.has(node.node_id) && this.#$node.next({
-                        ...node,
-                        status: 'online'
-                    })
-                    this.#remote_nodes.set(node.node_id, node)
-                    const nodes = [... this.#remote_nodes.values()].filter(node => node.services.includes(name))
-                    if (check(nodes)) return transporter
+                        node && !this.#remote_nodes.has(node.node_id) && this.#$node.next({
+                            ...node,
+                            status: 'online'
+                        })
+                        this.#remote_nodes.set(node.node_id, node)
+                        const nodes = [... this.#remote_nodes.values()].filter(node => node.services[name])
+                        if (check(nodes)) return transporter
+                    } catch (e) { }
                 })
             ), 1),
             filter(Boolean)
@@ -144,15 +153,15 @@ export class SpiderMesh {
                 }
 
                 if ($ == '$nodes') {
-                    const nodes = [... this.#remote_nodes.values()].filter(node => node.services.includes(service))
+                    const nodes = [... this.#remote_nodes.values()].filter(node => node.services[service])
                     return nodes
                 }
 
-                if ($ == '$watch') return this.#$node.pipe(filter(n => n.services.includes(service)))
+                if ($ == '$watch') return this.#$node.pipe(filter(n => !!n.services[service]))
 
                 if ($.startsWith('__batch__')) {
                     const method = $.split('__batch__')?.[1]
-                    const nodes = [... this.#remote_nodes.values()].filter(node => node.services.includes(service))
+                    const nodes = [... this.#remote_nodes.values()].filter(node => node.services[service])
                     return (...args: any[]) => {
                         const o = new Subject()
                         from(nodes).pipe(
