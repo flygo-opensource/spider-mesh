@@ -27,7 +27,8 @@
     }
   },
   "scripts": {
-    "dev": "clear; node --no-warnings --es-module-specifier-resolution=node --experimental-specifier-resolution=node --loader ts-node/esm ",
+    "dev":"clear; npx tsx ",
+    "x": "clear; node --no-warnings --es-module-specifier-resolution=node --experimental-specifier-resolution=node --loader ts-node/esm ",
     "build": "tsc -v; rm -rf build && tsc -b tsconfig.json"
   },
   "author": "Duong Van Ba",

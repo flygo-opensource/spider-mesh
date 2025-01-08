@@ -80,7 +80,10 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             debounceTime(2000),
             map(() => [...this.#remoteNodes.values()]),
             mergeAll(),
-            tap(({ socket }) => this.#hello(socket))
+            tap(({ socket }) => {
+                console.log(`Broadcast`, sm.getLocalServices().getValue())
+                this.#hello(socket)
+            })
         ), { defaultValue: [] })
 
         sm.linkRpcTransporter(this)
@@ -211,10 +214,9 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
         const port = this.#$tcpServer.port
         if (!port) return
 
-        console.log(`Say hello to ${socket.remoteAddress || '?'} by ${socket.fromRemote ? 'incoming socket' : 'outgoing package'}`)
-
+        
         const services = [...Object.keys(this.sm.getLocalServices().getValue())]
-
+        
         const listening = [
             '#hello',
             this.sm.node_id,
@@ -222,7 +224,10 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             ...services,
             ...this.#localListeners.getValue().keys()
         ]
-
+        
+        console.log(`Say hello to ${socket.remoteAddress || '?'} by ${socket.fromRemote ? 'incoming socket' : 'outgoing package'}`,{
+            services
+        })
         const msg: PublishOptions<HelloMessage> = {
             event: '#hello',
             data: {

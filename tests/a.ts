@@ -1,10 +1,10 @@
 import { SpiderMeshTcpTransporter } from "../src/SpiderMeshTcpTransporter.js";
-import { SpiderMesh } from "@spider-mesh/core";
+import { Microservice, SpiderMesh } from "@spider-mesh/core";
+import { A } from "./serviceA.js";
 
 console.log(`Running`)
 const sm = new SpiderMesh()
-const t = new SpiderMeshTcpTransporter(sm)
-// t.init({ node_id: randomUUID(), services: [], events: ['Abc'] })
-
+new SpiderMeshTcpTransporter(sm)
+const a = new A()
 
 setInterval(() => { }, 1000) 
