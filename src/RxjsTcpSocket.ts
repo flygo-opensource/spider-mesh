@@ -33,6 +33,10 @@ export class RxjsTcpSocket extends Subject<Buffer> {
                 s(false)
                 return of(null)
             }),
+            finalize(() => {
+                t.complete()
+                s(false)
+            })
         )))
         return connected ? t : null
     }
