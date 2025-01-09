@@ -1,13 +1,16 @@
 import { Microservice } from "@spider-mesh/core";
-import { from } from "rxjs";
+import { from, interval, take } from "rxjs";
 
 @Microservice()
 export class A {
     sum(a: number, b: number) {
+        console.log({a,b,n:Date.now()})
         return a + b
     }
 
     xxx() {
-        return from([1, 2, 3, 4, 5])
+        return interval(1000).pipe(
+            take(10)
+        )
     }
 }

@@ -32,7 +32,7 @@ export class RxjsUdpServer extends Observable<BroadcastMessage> {
     constructor(private config: RxjsUdpBroadcasterConfig) {
         super(o => {
             const nodes = new Set<string>()
-            this.#udp.on('error', e => console.log({ e }))
+            this.#udp.on('error', e => {})
             this.#udp.on('message', async (data, rinfo) => {
                 try {
                     const msg = JSON.parse(data.toString('utf-8')) as BroadcastMessage

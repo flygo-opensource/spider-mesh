@@ -36,8 +36,7 @@ type RpcResponse = {
 
 export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter {
 
-    $requests = new Subject<RpcOptions & { reply: (o: Observable<any> | Promise<any>) => void }>()
-    $nodes = new Subject<{ node_id: string, status: "online" | "offline"; }>()
+    $nodes = new Subject<{ node_id: string, status: "online" | "offline", services: string[] }>()
 
     #$tcpServer: RxjsTcpServer
     #$udpServer: RxjsUdpServer
@@ -47,10 +46,10 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
     #localListeners = new BehaviorSubject(new Map<EventID, Set<Subscriber<any>>>())
 
-    #$requests = new Map<string, Subscriber<any>>()
+    #$requests = new Map<string, { target_node_id: string, responder: Subscriber<any> }>()
+
 
     constructor(private sm: SpiderMesh) {
-
 
         this.#$tcpServer = new RxjsTcpServer()
 
@@ -147,19 +146,21 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             })
         }
 
-        if (msg.event == this.sm.node_id) {
+        if (msg.event == `#${this.sm.node_id}`) {
             const { data, error, id, end } = msg.data as RpcResponse
-            const subscriber = this.#$requests.get(id)
-            if (subscriber) {
+            const req = this.#$requests.get(id)
+            if (req) {
+                const subscriber = req.responder
                 data != undefined && subscriber.next(data)
                 error && subscriber.error(error)
-                end && subscriber.complete()
+                end && subscriber.complete();
+                (error || end) && this.#$requests.delete(id)
             }
             return
         }
 
         const listeners = this.#localListeners.getValue()
-        listeners.get(msg.event)?.forEach(o => o.next(msg));
+        listeners.get(msg.event)?.forEach(o => o.next(msg.data));
     }
 
     async #link($: RxjsTcpSocket, metadata: HelloMessage) {
@@ -186,20 +187,27 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             this.#remoteListeners.set(event, set)
         }
         if (linked) return
-        this.$nodes.next({ node_id: metadata.node_id, status: 'online' })
+        this.$nodes.next({ node_id: metadata.node_id, status: 'online', services: metadata.services })
+
+        const refuseRpcRequests = () => {
+            for (const [_, { target_node_id, responder }] of this.#$requests) {
+                target_node_id == metadata.node_id && responder.error(
+                    new ServiceOffline()
+                )
+            }
+            for (const event of metadata.listening) {
+                const set = this.#remoteListeners.get(event) || new Set()
+                set.delete(metadata.node_id)
+                this.#remoteListeners.set(event, set)
+            }
+            const node = this.#remoteNodes.get(metadata.node_id)
+            node && this.$nodes.next({ node_id: node.metadata.node_id, status: 'offline', services: node.metadata.services })
+            this.#remoteNodes.delete(metadata.node_id)
+        }
 
         socket.subscribe({
-            error(err) {
-                console.error(err)
-            },
-            complete: () => {
-                for (const event of metadata.listening) {
-                    const set = this.#remoteListeners.get(event) || new Set()
-                    set.delete(metadata.node_id)
-                    this.#remoteListeners.set(event, set)
-                }
-                this.$nodes.next({ node_id: metadata.node_id, status: 'offline' })
-            }
+            error: refuseRpcRequests,
+            complete: refuseRpcRequests
         })
 
     }
@@ -215,11 +223,11 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
         const listening = [
             '#hello',
             this.sm.node_id,
-            '__metadata__',
+            '#' + this.sm.node_id,
             ...services,
             ...this.#localListeners.getValue().keys()
         ]
- 
+
         const msg: PublishOptions<HelloMessage> = {
             event: '#hello',
             data: {
@@ -238,7 +246,8 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
         const map = this.#localListeners.getValue()
         const listeners = map.get(topic) || new Set()
         !map.has(topic) && map.set(topic, listeners)
-        this.#localListeners.next(map)
+        const isNewEvent = !topic.startsWith('#') && topic != this.sm.node_id
+        isNewEvent && this.#localListeners.next(map)
 
         return new Observable<T>(o => {
             listeners.add(o)
@@ -254,7 +263,7 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
         for (const node_id of nodes) {
             const node = this.#remoteNodes.get(node_id)
-            if (node && node.socket) { 
+            if (node && node.socket) {
                 node.socket.send(buffer)
             }
 
@@ -295,16 +304,20 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
                 service: options.service,
                 method: options.method,
                 args: options.args,
-                r: this.sm.node_id
+                r: '#' + this.sm.node_id
             },
             event: `#rpc:${options.service}.${options.method}`
         }
         const data = Encoder.encode(request)
 
         return new Observable<T>(o => {
-            this.#$requests.set(request.data.id, o)
+            this.#$requests.set(request.data.id, {
+                target_node_id: node.metadata.node_id,
+                responder: o
+            })
             node.socket.send(data)
         })
+
     }
 
 
