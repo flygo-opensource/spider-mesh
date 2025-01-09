@@ -7,8 +7,10 @@ import { SpiderMeshTcpTransporter } from "../src/SpiderMeshTcpTransporter.js";
 const sm = new SpiderMesh()
 new SpiderMeshTcpTransporter(sm)
 const a = sm.linkRemoteService(A)
-console.log({ a })
-await a.$wait()
-console.log('Service online')
-const result = await a.sum(1, 2)
-console.log({ result })
+await a.$wait(nodes => {
+    console.log(`Total ${nodes.length} node`)
+    return nodes.length >= 2
+})
+console.log('Service online');
+const d = await a.__batch__sum(1, 2)
+console.log(JSON.stringify(d, null, 2))

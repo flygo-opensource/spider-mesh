@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter, SpiderMesh, PublishOptions, RpcOptions, SpiderMeshTransporterInitOptions } from "@spider-mesh/core";
-import { BehaviorSubject, Observable, Subject, Subscriber, debounceTime, filter, lastValueFrom, map, merge, mergeAll, mergeMap, tap } from 'rxjs'
+import { BehaviorSubject, Observable, Subject, Subscriber, debounceTime, filter, lastValueFrom, map, merge, mergeAll, mergeMap, tap, throwError } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpServer } from "./RxjsUdpServer.js";
@@ -11,6 +11,7 @@ import { Encoder } from "./Encoder.js";
 export class ServiceNotFound extends Error { }
 export class MissingPubsubTransporter extends Error { }
 export class ServiceOffline extends Error { }
+
 
 
 type TcpNode = {
@@ -80,10 +81,7 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             debounceTime(2000),
             map(() => [...this.#remoteNodes.values()]),
             mergeAll(),
-            tap(({ socket }) => {
-                console.log(`Broadcast`, sm.getLocalServices().getValue())
-                this.#hello(socket)
-            })
+            tap(({ socket }) => this.#hello(socket))
         ), { defaultValue: [] })
 
         sm.linkRpcTransporter(this)
@@ -107,6 +105,7 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
                     metadata.back && this.#hello(socket)
                     return
                 }
+
                 this.#handle(msg)
             })
         )
@@ -115,42 +114,40 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
     #handle(msg: PublishOptions<any>) {
 
         if (msg.event.startsWith('#rpc:')) {
-            const options = msg.data as RpcRequest
-            this.$requests.next({
-                ...options,
-                reply: async response => {
+            return setImmediate(async () => {
+                const options = msg.data as RpcRequest
+                const response = this.sm.handleRpc(options)
 
-                    // Reply to remote server
-                    if (response instanceof Promise) {
-                        // Send #response
-                        try {
-                            const data: RpcResponse = {
-                                data: await response,
-                                id: options.id
-                            }
-                            this.publish({ event: options.r, data })
-                        } catch (error) {
-                            const data: RpcResponse = {
-                                error,
-                                id: options.id
-                            }
-                            this.publish({ event: options.r, data })
-                        }
-                    }
 
-                    if (response instanceof Observable) {
-                        response.subscribe({
-                            complete: () => this.publish({ event: options.r, data: { id: options.id, end: true } }),
-                            error: error => this.publish({ event: options.r, data: { id: options.id, error } }),
-                            next: data => this.publish({ event: options.r, data: { id: options.id, data } }),
-                        })
-                    }
+                if (response instanceof Observable) {
+                    response.subscribe({
+                        complete: () => this.publish({ event: options.r, data: { id: options.id, end: true } }),
+                        error: error => this.publish({ event: options.r, data: { id: options.id, error } }),
+                        next: data => this.publish({ event: options.r, data: { id: options.id, data } }),
+                    })
+                    return
                 }
+
+                // Send #response
+                try {
+                    const data: RpcResponse = {
+                        data: await response,
+                        id: options.id,
+                        end: true
+                    }
+                    this.publish({ event: options.r, data })
+                } catch (error) {
+                    const data: RpcResponse = {
+                        error,
+                        id: options.id
+                    }
+                    this.publish({ event: options.r, data })
+                }
+                return
             })
-            return
         }
 
-        if (msg.event == '#response') {
+        if (msg.event == this.sm.node_id) {
             const { data, error, id, end } = msg.data as RpcResponse
             const subscriber = this.#$requests.get(id)
             if (subscriber) {
@@ -171,11 +168,11 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
         metadata.host = metadata.host || $.remoteAddress || ''
         if (!metadata.host) return
 
-        const socket = linked ? linked.socket : ($.fromRemote ? await RxjsTcpSocket.connect({
+        const socket = linked ? linked.socket : await RxjsTcpSocket.connect({
             host: metadata.host,
             port: metadata.port,
             keepAlive: true
-        }) || $ : $)
+        }) || $
 
         if (!socket) return
 
@@ -189,7 +186,6 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             this.#remoteListeners.set(event, set)
         }
         if (linked) return
-        console.log({ new_node: metadata.node_id })
         this.$nodes.next({ node_id: metadata.node_id, status: 'online' })
 
         socket.subscribe({
@@ -203,7 +199,6 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
                     this.#remoteListeners.set(event, set)
                 }
                 this.$nodes.next({ node_id: metadata.node_id, status: 'offline' })
-                console.log(`Node ${metadata.node_id} oflfine`)
             }
         })
 
@@ -214,9 +209,9 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
         const port = this.#$tcpServer.port
         if (!port) return
 
-        
+
         const services = [...Object.keys(this.sm.getLocalServices().getValue())]
-        
+
         const listening = [
             '#hello',
             this.sm.node_id,
@@ -224,10 +219,7 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             ...services,
             ...this.#localListeners.getValue().keys()
         ]
-        
-        console.log(`Say hello to ${socket.remoteAddress || '?'} by ${socket.fromRemote ? 'incoming socket' : 'outgoing package'}`,{
-            services
-        })
+ 
         const msg: PublishOptions<HelloMessage> = {
             event: '#hello',
             data: {
@@ -258,9 +250,14 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
     async publish<T>(options: PublishOptions<T>) {
         const buffer = Encoder.encode(options as any)
-        for (const node_id of this.#remoteListeners.get(options.event) || []) {
+        const nodes = this.#remoteListeners.get(options.event) || new Set()
+
+        for (const node_id of nodes) {
             const node = this.#remoteNodes.get(node_id)
-            node?.socket?.send(buffer)
+            if (node && node.socket) { 
+                node.socket.send(buffer)
+            }
+
         }
     }
 
@@ -269,36 +266,43 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
     #getRpcNode(options: RpcOptions) {
         if (options.node_id) {
             const node = this.#remoteNodes.get(options.node_id)
-            if (!node) throw new ServiceOffline('NODE_OFFLINE')
+            if (!node) throw new ServiceOffline()
             return node
         }
         const key = `${options.service}.${options.method}`
         const nodes = this.#remoteListeners.get(options.service) || new Set()
-        for (let i = 1; i <= nodes.size; i++) {
+        for (let i = 0; i < nodes.size; i++) {
             const index = (this.#indexes.get(key) || 0 + i) % (nodes.size)
             const node_id = [...nodes][index]
             const node = this.#remoteNodes.get(node_id)
             if (!node) continue
-            this.#indexes.set(key, index)
+            this.#indexes.set(key, index + 1)
+            return node
         }
-        throw new ServiceOffline('NODE_OFFLINE')
+
     }
 
 
     rpc<T>(options: RpcOptions): Observable<T> {
 
         const node = this.#getRpcNode(options)
+        if (!node) return throwError(new ServiceOffline())
 
-        const request: RpcRequest = {
-            id: randomUUID(),
-            ...options,
-            r: this.sm.node_id
+
+        const request: PublishOptions<RpcRequest> = {
+            data: {
+                id: randomUUID(),
+                service: options.service,
+                method: options.method,
+                args: options.args,
+                r: this.sm.node_id
+            },
+            event: `#rpc:${options.service}.${options.method}`
         }
-
         const data = Encoder.encode(request)
 
         return new Observable<T>(o => {
-            this.#$requests.set(request.id, o)
+            this.#$requests.set(request.data.id, o)
             node.socket.send(data)
         })
     }

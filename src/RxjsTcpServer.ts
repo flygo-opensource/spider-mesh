@@ -22,7 +22,6 @@ export class RxjsTcpServer extends Observable<RxjsTcpSocket> {
                         server.listen(port)
                     })
                     if (!success) continue
-                    console.log(`I'm TCP:${port}`)
                     server.on('connection', async socket => {
                         o.next(RxjsTcpSocket.from(socket))
                     })

@@ -49,14 +49,14 @@ export class RxjsUdpServer extends Observable<BroadcastMessage> {
                 }
             })
             try {
-                this.#udp.bind(UDP_BROADCAST_PORT)
+                this.#udp.bind(UDP_BROADCAST_PORT, '0.0.0.0', () => this.#udp.setBroadcast(true))
             } catch (e) {
                 console.error((e as Error).message)
             }
         })
     }
 
-    broadcast(options: Omit<BroadcastMessage, 'node_id' | 'namespace' | 'sig'|'host'>) {
+    broadcast(options: Omit<BroadcastMessage, 'node_id' | 'namespace' | 'sig' | 'host'>) {
         const { namespace } = this.config
         const broadcast_ips = ['255.255.255.255']
         const network_address = (
