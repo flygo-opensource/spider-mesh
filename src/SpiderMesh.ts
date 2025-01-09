@@ -1,4 +1,4 @@
-import { BehaviorSubject, debounceTime, filter, firstValueFrom, from, interval, lastValueFrom, merge, mergeMap, of, Subject } from "rxjs"
+import { BehaviorSubject, catchError, debounceTime, filter, firstValueFrom, from, interval, lastValueFrom, map, merge, mergeMap, Observable, of, share, Subject, throwError, toArray } from "rxjs"
 import { PublishOptions, RpcOptions, SpiderMeshPubsubTransporter, SpiderMeshRpcTransporter } from "./interfaces/SpiderMeshTransporter.js";
 import { randomUUID } from "crypto";
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
@@ -22,7 +22,7 @@ export class SpiderMesh {
     #$node = new Subject<SpiderMeshNode & { status: 'online' | 'offline' }>
 
     public readonly node_id = randomUUID()
-    public readonly METADATA_TOPIC = '__metadata__'
+    public readonly METADATA_TOPIC = '@@metadata@@'
 
     constructor() {
         $services.subscribe(({ instance, name }) => this.exposeLocalService(name, instance))
@@ -39,17 +39,28 @@ export class SpiderMesh {
         return this.#$local_services
     }
 
-    async rpc<T>(options: RpcOptions) {
-        const transporter = this.#remote_services.get(options.service) || await this.waitServiceReady(options.service)
-        if (!transporter) throw new ServiceOffline('SERVICE_OFFLINE')
-        return transporter.rpc<T>(options)
+    rpc<T>(options: RpcOptions) {
+        return of(0).pipe(
+            mergeMap(async () => this.#remote_services.get(options.service) || await this.waitServiceReady(options.service)),
+            mergeMap(transporter => {
+                if (!transporter) throw new ServiceOffline('SERVICE_OFFLINE')
+                return transporter.rpc<T>(options)
+            })
+        )
+    }
+
+    handleRpc(options: RpcOptions) {
+        if (options.method == this.METADATA_TOPIC) {
+            return Promise.resolve(this.metadata)
+        }
+        const instance = this.#$local_services.getValue()[options.service]
+        if (!instance) return throwError('SERVICE_NOT_FOUND')
+        if (typeof instance[options.method] != 'function') return throwError('ACTION_NOT_FOUND')
+        return instance[options.method](...options.args)
     }
 
     linkRpcTransporter(t: SpiderMeshRpcTransporter) {
         this.#rpc_transporters.add(t)
-        t.$requests.subscribe(({ reply, ...options }) => {
-            // handle rpc requests
-        })
     }
 
     linkPubsubTransporter(t: SpiderMeshPubsubTransporter) {
@@ -73,7 +84,7 @@ export class SpiderMesh {
     waitServiceReady(name: string, check: (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean = nodes => nodes.length > 0) {
 
         // Check via RPC
-        return firstValueFrom(merge(of(0), interval(2000)).pipe(
+        return firstValueFrom(merge(of(0), interval(1000)).pipe(
             mergeMap(() => from([...this.#rpc_transporters.values()]).pipe(
                 mergeMap(async transporter => {
                     console.log(`Wait ${name} online`)
@@ -163,22 +174,29 @@ export class SpiderMesh {
                     const method = $.split('__batch__')?.[1]
                     const nodes = [... this.#remote_nodes.values()].filter(node => node.services[service])
                     return (...args: any[]) => {
-                        const o = new Subject()
-                        from(nodes).pipe(
-                            mergeMap(async node => {
+                        const $ = from(nodes).pipe(
+                            mergeMap(node => (
+                                this.rpc({
+                                    args,
+                                    method,
+                                    service,
+                                    node_id: node.node_id
+                                }).pipe(
+                                    map(data => ({ node, data })),
+                                    catchError(e => of({ node, e }))
+                                )
+                            ))
+                        )
+                        return Object.assign($, {
+                            then: async (s: Function, r: Function) => {
                                 try {
-                                    const data = await firstValueFrom(await this.rpc({
-                                        args,
-                                        method,
-                                        service
-                                    }))
-                                    return { node, data }
-                                } catch (error) {
-                                    return { node, error }
+                                    const arr = await lastValueFrom($.pipe(toArray()), { defaultValue: [] })
+                                    s(arr)
+                                } catch (e) {
+                                    r(e)
                                 }
-                            })
-                        ).subscribe(o)
-                        return o
+                            }
+                        })
                     }
                 }
 
@@ -195,18 +213,23 @@ export class SpiderMesh {
                     })
                 }
 
-                return (options: RpcOptions) => new Proxy({}, {
-                    get: (_, method: string) => {
-                        return (...args: any[]) => this.rpc({
-                            ...options,
-                            args,
-                            method,
-                            service
-                        })
-                    }
-                })
+                return (...args: any[]) => {
+                    const response = this.rpc<Observable<any>>({
+                        args,
+                        method: $,
+                        service
+                    })
 
-                return null
+                    return Object.assign(response, {
+                        then: async (s: Function, r: Function) => {
+                            try {
+                                s(await firstValueFrom(response))
+                            } catch (e) {
+                                r(e)
+                            }
+                        }
+                    })
+                }
             }
         }) as RemoteService<T>
 

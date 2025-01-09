@@ -16,10 +16,11 @@ export type RemoteService<T = { [key: string]: any }> = (
             (...args: Parameters<T[key]>) => Observable<{
                 node: SpiderMeshNode,
                 data: Awaited<ReturnType<T[key]>>
-                error: any
+            } | {
+                node: SpiderMeshNode,
+                error: Error
             }>
         ) : T[key]
     }
 
 )
- 

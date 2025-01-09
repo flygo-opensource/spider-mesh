@@ -18,7 +18,6 @@ export type PublishOptions<T> = {
 }
 
 export type SpiderMeshRpcTransporter = {
-    $requests: Observable<RpcOptions & { reply: (o: Observable<any> | Promise<any>) => void }>
     rpc: <T>(options: RpcOptions) => Observable<T>
 }
 
