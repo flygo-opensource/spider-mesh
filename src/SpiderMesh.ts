@@ -1,4 +1,4 @@
-import { BehaviorSubject, catchError, debounceTime, filter, firstValueFrom, from, interval, lastValueFrom, map, merge, mergeMap, Observable, of, share, Subject, throwError, toArray } from "rxjs"
+import { BehaviorSubject, catchError, debounceTime, filter, firstValueFrom, from, interval, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, share, Subject, tap, throwError, timer, toArray } from "rxjs"
 import { PublishOptions, RpcOptions, SpiderMeshPubsubTransporter, SpiderMeshRpcTransporter } from "./interfaces/SpiderMeshTransporter.js";
 import { randomUUID } from "crypto";
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
@@ -11,6 +11,8 @@ export class ServiceNotFound extends Error { }
 export class MissingPubsubTransporter extends Error { }
 export class ServiceOffline extends Error { }
 
+export type HelloEvent = SpiderMeshNode & { back?: boolean }
+
 
 export class SpiderMesh {
 
@@ -18,8 +20,7 @@ export class SpiderMesh {
     #rpc_transporters = new Set<SpiderMeshRpcTransporter>()
     #$local_services = new BehaviorSubject<{ [name: string]: any }>({})
     #remote_services = new Map<string, SpiderMeshRpcTransporter>()
-    #remote_nodes = new Map<string, SpiderMeshNode>()
-    #$node = new Subject<SpiderMeshNode & { status: 'online' | 'offline' }>
+    #remote_nodes = new BehaviorSubject(new Map<string, SpiderMeshNode>())
 
     public readonly node_id = randomUUID()
     public readonly METADATA_TOPIC = '@@metadata@@'
@@ -65,53 +66,76 @@ export class SpiderMesh {
 
     linkPubsubTransporter(t: SpiderMeshPubsubTransporter) {
         this.#pubsub_transporters.add(t)
-        t.$nodes.subscribe(({ node_id, status }) => {
-            status == 'offline' && this.#remote_nodes.delete(node_id)
+        t.$nodes.subscribe(({ node_id, status, services }) => {
+            if (status == 'offline') {
+                const nodes = this.#remote_nodes.getValue()
+                nodes.delete(node_id)
+                this.#remote_nodes.next(nodes)
+            }
         })
-        this.#$local_services.pipe(debounceTime(1000)).subscribe(
-            () => t.publish<SpiderMeshNode>({
-                data: this.metadata,
-                event: this.METADATA_TOPIC
+        this.#$local_services.pipe(
+            debounceTime(1000),
+            map((v, i) => {
+                t.publish<HelloEvent>({
+                    data: {
+                        ...this.metadata,
+                        back: i == 0
+                    },
+                    event: this.METADATA_TOPIC
+                })
             })
-        )
-        t.listen<SpiderMeshNode>(this.METADATA_TOPIC).subscribe(node => {
-            this.#remote_nodes.set(node.node_id, node)
+        ).subscribe()
+
+        merge(
+            t.listen<HelloEvent>(this.METADATA_TOPIC),
+            t.listen<HelloEvent>(this.node_id)
+        ).subscribe(node => {
+            const nodes = this.#remote_nodes.getValue()
+            nodes.set(node.node_id, node)
+            this.#remote_nodes.next(nodes)
+            node.back && t.publish<HelloEvent>({
+                event: node.node_id,
+                data: this.metadata
+            })
         })
 
 
     }
 
-    waitServiceReady(name: string, check: (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean = nodes => nodes.length > 0) {
+    async waitServiceReady(name: string, check: (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean = nodes => nodes.length > 0, node_id?: string) {
 
-        // Check via RPC
-        return firstValueFrom(merge(of(0), interval(1000)).pipe(
-            mergeMap(() => from([...this.#rpc_transporters.values()]).pipe(
+        while (true) {
+            const transporter = await firstValueFrom(from([...this.#rpc_transporters.values()]).pipe(
                 mergeMap(async transporter => {
-                    console.log(`Wait ${name} online`)
                     try {
-                        const node = await firstValueFrom(transporter.rpc<SpiderMeshNode>({
-                            args: [],
-                            method: this.METADATA_TOPIC,
-                            service: name
-                        }))
+                        const node = await firstValueFrom(merge(
+                            transporter.rpc<SpiderMeshNode>({
+                                args: [],
+                                method: this.METADATA_TOPIC,
+                                service: name,
+                                node_id
+                            }).pipe(catchError(e => of(null))),
+                            timer(1000)
+                        ), { defaultValue: null })
                         if (!node) return
                         for (const [service, ready] of Object.entries(node.services)) {
                             if (ready) {
                                 this.#remote_services.set(service, transporter)
                             }
                         }
-                        node && !this.#remote_nodes.has(node.node_id) && this.#$node.next({
-                            ...node,
-                            status: 'online'
-                        })
-                        this.#remote_nodes.set(node.node_id, node)
-                        const nodes = [... this.#remote_nodes.values()].filter(node => node.services[name])
+                        const remoteNodes = this.#remote_nodes.getValue()
+                        node && !remoteNodes.has(node.node_id) && (
+                            remoteNodes.set(node.node_id, node),
+                            this.#remote_nodes.next(remoteNodes)
+                        )
+                        const nodes = [...remoteNodes.values()].filter(node => node.services[name])
                         if (check(nodes)) return transporter
                     } catch (e) { }
                 })
-            ), 1),
-            filter(Boolean)
-        ))
+            ))
+            if (transporter) return transporter
+            await firstValueFrom(timer(1000))
+        }
     }
 
     async exposeLocalService(name: string, instance: any) {
@@ -164,15 +188,17 @@ export class SpiderMesh {
                 }
 
                 if ($ == '$nodes') {
-                    const nodes = [... this.#remote_nodes.values()].filter(node => node.services[service])
+                    const nodes = [... this.#remote_nodes.getValue().values()].filter(node => node.services[service])
                     return nodes
                 }
 
-                if ($ == '$watch') return this.#$node.pipe(filter(n => !!n.services[service]))
+                if ($ == '$watch') return () => this.#remote_nodes.pipe(
+                    map(nodes => [...nodes.values()].filter(node => node.services[service]))
+                )
 
                 if ($.startsWith('__batch__')) {
                     const method = $.split('__batch__')?.[1]
-                    const nodes = [... this.#remote_nodes.values()].filter(node => node.services[service])
+                    const nodes = [... this.#remote_nodes.getValue().values()].filter(node => node.services[service])
                     return (...args: any[]) => {
                         const $ = from(nodes).pipe(
                             mergeMap(node => (

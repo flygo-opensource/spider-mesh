@@ -22,7 +22,7 @@ export type SpiderMeshRpcTransporter = {
 }
 
 export type SpiderMeshPubsubTransporter = {
-    $nodes: Observable<{ node_id: string, status: 'online' | 'offline' }>
+    $nodes: Observable<{ node_id: string, status: 'online' | 'offline', services: string[] }>
     listen: <T>(topic: string) => Observable<T>
     publish: <T>(options: PublishOptions<T>) => Promise<void>
 }
