@@ -17,8 +17,8 @@ const a = sm.linkRemoteService(A)
 
 while(true){
     await firstValueFrom(timer(1000))
-    const s = await a.sum(1, 2)
-    console.log({ sum: s })
+    const s = await a.who()
+    console.log({ from: s })
 }
 // console.log('Service online');
 // a.xxx().subscribe(console.log)

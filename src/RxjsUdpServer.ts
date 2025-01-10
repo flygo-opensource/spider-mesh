@@ -22,6 +22,7 @@ export type BroadcastMessage = {
 }
 
 
+
 export class RxjsUdpServer extends Observable<BroadcastMessage> {
 
     #udp = createSocket({
@@ -32,10 +33,13 @@ export class RxjsUdpServer extends Observable<BroadcastMessage> {
     constructor(private config: RxjsUdpBroadcasterConfig) {
         super(o => {
             const nodes = new Set<string>()
-            this.#udp.on('error', e => {})
+            this.#udp.on('error', e => {
+                console.log(e)
+            })
             this.#udp.on('message', async (data, rinfo) => {
                 try {
                     const msg = JSON.parse(data.toString('utf-8')) as BroadcastMessage
+                    console.log({msg})
                     if (msg.namespace != config.namespace) return
                     if (msg.node_id == config.node_id) return
                     if (nodes.has(msg.node_id)) return
@@ -45,7 +49,7 @@ export class RxjsUdpServer extends Observable<BroadcastMessage> {
                     const host = msg.host || rinfo.address
                     o.next({ ...msg, host })
                 } catch (e) {
-
+                    console.log(e)
                 }
             })
             try {
@@ -58,7 +62,7 @@ export class RxjsUdpServer extends Observable<BroadcastMessage> {
 
     broadcast(options: Omit<BroadcastMessage, 'node_id' | 'namespace' | 'sig' | 'host'>) {
         const { namespace } = this.config
-        const broadcast_ips = ['255.255.255.255']
+        const broadcast_ips = ['127.0.0.1', '255.255.255.255']
         const network_address = (
             Object.entries(networkInterfaces())
                 .filter(([i]) => !i.startsWith('lo'))
@@ -83,6 +87,7 @@ export class RxjsUdpServer extends Observable<BroadcastMessage> {
             port: options.port,
             sig: ''
         }
+        console.log({broadcast_ips, msg})
         const sig = createHmac('SHA256', UDP_SECRET_KEY).update(`${msg.namespace}|${msg.node_id}|${msg.port}`).digest('base64')
         const json = JSON.stringify({ ...msg, sig } as BroadcastMessage)
 
