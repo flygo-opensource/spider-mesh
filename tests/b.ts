@@ -1,7 +1,7 @@
 import { SpiderMesh } from "@spider-mesh/core";
 import { A } from "./serviceA.js";
 import { SpiderMeshTcpTransporter } from "../src/SpiderMeshTcpTransporter.js";
-import { interval } from "rxjs";
+import { firstValueFrom, interval, timer } from "rxjs";
 
 console.log(`Master`)
 
@@ -14,10 +14,12 @@ const a = sm.linkRemoteService(A)
 //     console.log(`Total ${nodes.length} node`)
 //     return nodes.length >= 1
 // })
-interval(1000).subscribe(async () => {
+
+while(true){
+    await firstValueFrom(timer(1000))
     const s = await a.sum(1, 2)
     console.log({ sum: s })
-})
+}
 // console.log('Service online');
 // a.xxx().subscribe(console.log)
 

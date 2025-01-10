@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter, SpiderMesh, PublishOptions, RpcOptions, SpiderMeshTransporterInitOptions } from "@spider-mesh/core";
-import { BehaviorSubject, Observable, Subject, Subscriber, debounceTime, filter, lastValueFrom, map, merge, mergeAll, mergeMap, tap, throwError } from 'rxjs'
+import { BehaviorSubject, Observable, Subject, Subscriber, debounceTime, filter, firstValueFrom, interval, lastValueFrom, map, merge, mergeAll, mergeMap, of, retry, retryWhen, tap, throwError, timer } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpServer } from "./RxjsUdpServer.js";
@@ -36,7 +36,7 @@ type RpcResponse = {
 
 export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter {
 
-    $nodes = new Subject<{ node_id: string, status: "online" | "offline", services: string[] }>()
+    $nodes = new Subject<{ node_id: string, status: "online" | "offline" }>()
 
     #$tcpServer: RxjsTcpServer
     #$udpServer: RxjsUdpServer
@@ -187,7 +187,7 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             this.#remoteListeners.set(event, set)
         }
         if (linked) return
-        this.$nodes.next({ node_id: metadata.node_id, status: 'online', services: metadata.services })
+        this.$nodes.next({ node_id: metadata.node_id, status: 'online' })
 
         const refuseRpcRequests = () => {
             for (const [_, { target_node_id, responder }] of this.#$requests) {
@@ -201,7 +201,7 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
                 this.#remoteListeners.set(event, set)
             }
             const node = this.#remoteNodes.get(metadata.node_id)
-            node && this.$nodes.next({ node_id: node.metadata.node_id, status: 'offline', services: node.metadata.services })
+            node && this.$nodes.next({ node_id: node.metadata.node_id, status: 'offline' })
             this.#remoteNodes.delete(metadata.node_id)
         }
 
@@ -272,32 +272,34 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
     #indexes = new Map<string, number>()
 
-    #getRpcNode(options: RpcOptions) {
+    async #getRpcNode(options: RpcOptions) {
         if (options.node_id) {
             const node = this.#remoteNodes.get(options.node_id)
             if (!node) throw new ServiceOffline()
             return node
         }
         const key = `${options.service}.${options.method}`
-        const nodes = this.#remoteListeners.get(options.service) || new Set()
-        for (let i = 0; i < nodes.size; i++) {
-            const index = (this.#indexes.get(key) || 0 + i) % (nodes.size)
-            const node_id = [...nodes][index]
-            const node = this.#remoteNodes.get(node_id)
-            if (!node) continue
-            this.#indexes.set(key, index + 1)
-            return node
+        while (true) {
+            const nodes = await firstValueFrom(merge(of(0), interval(1000)).pipe(
+                map(() => this.#remoteListeners.get(options.service)),
+                filter(Boolean),
+                filter(nodes => nodes.size > 0)
+            ))
+            for (let i = 0; i < nodes.size; i++) {
+                const index = (this.#indexes.get(key) || 0 + i) % (nodes.size)
+                const node_id = [...nodes][index]
+                const node = this.#remoteNodes.get(node_id)
+                if (!node) continue
+                this.#indexes.set(key, index + 1)
+                return node
+            }
+            await firstValueFrom(timer(1000))
         }
 
     }
 
 
     rpc<T>(options: RpcOptions): Observable<T> {
-
-        const node = this.#getRpcNode(options)
-        if (!node) return throwError(new ServiceOffline())
-
-
         const request: PublishOptions<RpcRequest> = {
             data: {
                 id: randomUUID(),
@@ -311,11 +313,15 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
         const data = Encoder.encode(request)
 
         return new Observable<T>(o => {
-            this.#$requests.set(request.data.id, {
-                target_node_id: node.metadata.node_id,
-                responder: o
+            setImmediate(async () => {
+                const node = await this.#getRpcNode(options)
+                this.#$requests.set(request.data.id, {
+                    target_node_id: node.metadata.node_id,
+                    responder: o
+                })
+                node.socket.send(data)
             })
-            node.socket.send(data)
+            return () => this.#$requests.delete(request.data.id)
         })
 
     }
