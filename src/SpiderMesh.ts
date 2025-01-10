@@ -1,4 +1,4 @@
-import { BehaviorSubject, catchError, debounceTime, filter, firstValueFrom, from, interval, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, share, Subject, tap, throwError, timer, toArray } from "rxjs"
+import { BehaviorSubject, catchError, debounceTime, delay, EMPTY, filter, firstValueFrom, from, interval, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, retry, retryWhen, share, Subject, tap, throwError, timer, toArray } from "rxjs"
 import { PublishOptions, RpcOptions, SpiderMeshPubsubTransporter, SpiderMeshRpcTransporter } from "./interfaces/SpiderMeshTransporter.js";
 import { randomUUID } from "crypto";
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
@@ -20,7 +20,7 @@ export class SpiderMesh {
     #rpc_transporters = new Set<SpiderMeshRpcTransporter>()
     #$local_services = new BehaviorSubject<{ [name: string]: any }>({})
     #remote_services = new Map<string, SpiderMeshRpcTransporter>()
-    #remote_nodes = new BehaviorSubject(new Map<string, SpiderMeshNode>())
+    #remote_nodes = new BehaviorSubject({ nodes: new Map<string, SpiderMeshNode>(), node: undefined as undefined | SpiderMeshNode })
 
     public readonly node_id = randomUUID()
     public readonly METADATA_TOPIC = '@@metadata@@'
@@ -66,11 +66,15 @@ export class SpiderMesh {
 
     linkPubsubTransporter(t: SpiderMeshPubsubTransporter) {
         this.#pubsub_transporters.add(t)
-        t.$nodes.subscribe(({ node_id, status, services }) => {
+        t.$nodes.subscribe(({ node_id, status }) => {
             if (status == 'offline') {
-                const nodes = this.#remote_nodes.getValue()
-                nodes.delete(node_id)
-                this.#remote_nodes.next(nodes)
+                const $ = this.#remote_nodes.getValue()
+                const node = $.nodes.get(node_id)
+                if (node) {
+                    $.nodes.delete(node_id)
+                    this.#remote_nodes.next({ nodes: $.nodes, node })
+                }
+
             }
         })
         this.#$local_services.pipe(
@@ -90,9 +94,9 @@ export class SpiderMesh {
             t.listen<HelloEvent>(this.METADATA_TOPIC),
             t.listen<HelloEvent>(this.node_id)
         ).subscribe(node => {
-            const nodes = this.#remote_nodes.getValue()
-            nodes.set(node.node_id, node)
-            this.#remote_nodes.next(nodes)
+            const $ = this.#remote_nodes.getValue()
+            $.nodes.set(node.node_id, node)
+            this.#remote_nodes.next({ nodes: $.nodes, node })
             node.back && t.publish<HelloEvent>({
                 event: node.node_id,
                 data: this.metadata
@@ -123,12 +127,12 @@ export class SpiderMesh {
                                 this.#remote_services.set(service, transporter)
                             }
                         }
-                        const remoteNodes = this.#remote_nodes.getValue()
-                        node && !remoteNodes.has(node.node_id) && (
-                            remoteNodes.set(node.node_id, node),
-                            this.#remote_nodes.next(remoteNodes)
+                        const $ = this.#remote_nodes.getValue()
+                        node && !$.nodes.has(node.node_id) && (
+                            $.nodes.set(node.node_id, node),
+                            this.#remote_nodes.next({ nodes: $.nodes, node })
                         )
-                        const nodes = [...remoteNodes.values()].filter(node => node.services[name])
+                        const nodes = [...$.nodes.values()].filter(node => node.services[name])
                         if (check(nodes)) return transporter
                     } catch (e) { }
                 })
@@ -188,17 +192,18 @@ export class SpiderMesh {
                 }
 
                 if ($ == '$nodes') {
-                    const nodes = [... this.#remote_nodes.getValue().values()].filter(node => node.services[service])
+                    const nodes = [... this.#remote_nodes.getValue().nodes.values()].filter(node => node.services[service])
                     return nodes
                 }
 
                 if ($ == '$watch') return () => this.#remote_nodes.pipe(
-                    map(nodes => [...nodes.values()].filter(node => node.services[service]))
+                    filter($ => $.node && $.node.services[service] ? true : false),
+                    map($ => [...$.nodes.values()])
                 )
 
                 if ($.startsWith('__batch__')) {
                     const method = $.split('__batch__')?.[1]
-                    const nodes = [... this.#remote_nodes.getValue().values()].filter(node => node.services[service])
+                    const nodes = [... this.#remote_nodes.getValue().nodes.values()].filter(node => node.services[service])
                     return (...args: any[]) => {
                         const $ = from(nodes).pipe(
                             mergeMap(node => (
