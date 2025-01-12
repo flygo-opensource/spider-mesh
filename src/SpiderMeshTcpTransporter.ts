@@ -1,11 +1,13 @@
 import { randomUUID } from "crypto";
-import { SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter, SpiderMesh, PublishOptions, RpcOptions, SpiderMeshTransporterInitOptions } from "@spider-mesh/core";
+import { SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter, SpiderMesh, PublishOptions, RpcOptions, SpiderMeshTransporterInitOptions, ServiceDiscovery } from "@spider-mesh/core";
 import { BehaviorSubject, Observable, Subject, Subscriber, debounceTime, filter, firstValueFrom, interval, lastValueFrom, map, merge, mergeAll, mergeMap, of, retry, retryWhen, tap, throwError, timer } from 'rxjs'
 import { RxjsTcpSocket } from "./RxjsTcpSocket.js";
 import { RxjsTcpServer } from "./RxjsTcpServer.js";
 import { RxjsUdpServer } from "./RxjsUdpServer.js";
 import { UDP_BROADCAST_PORT, NAMEPSACE, UDP_SECRET_KEY } from "./const.js"
 import { Encoder } from "./Encoder.js";
+import { ServiceDiscoveryMetadata } from "../../corev2/build/src/interfaces/ServiceDiscovery.js";
+import { hostname } from "os";
 
 
 export class ServiceNotFound extends Error { }
@@ -14,10 +16,7 @@ export class ServiceOffline extends Error { }
 
 
 
-type TcpNode = {
-    node_id: string
-    host: string
-    port: number
+type TcpNode = Omit<ServiceDiscoveryMetadata, 'status'> & {
     listening: string[]
     services: string[]
 }
@@ -34,9 +33,9 @@ type RpcResponse = {
     error?: any
 }
 
-export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter {
+export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, SpiderMeshPubsubTransporter, ServiceDiscovery {
 
-    $nodes = new Subject<{ node_id: string, status: "online" | "offline" }>()
+    $nodes = new Subject<ServiceDiscoveryMetadata>()
 
     #$tcpServer: RxjsTcpServer
     #$udpServer: RxjsUdpServer
@@ -85,6 +84,7 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
 
         sm.linkRpcTransporter(this)
         sm.linkPubsubTransporter(this)
+        sm.linkServiceDiscovery(this)
     }
 
 
@@ -99,7 +99,12 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             filter(Boolean),
             mergeMap(async msg => {
                 if (msg.event == `#hello`) {
-                    const metadata = msg.data as HelloMessage
+                    if (!socket.remoteAddress) return
+                    const metadata: HelloMessage = {
+                        ...msg.data as HelloMessage,
+                        hostname: socket.remoteAddress,
+                        ip: socket.remoteAddress
+                    }
                     await this.#link(socket, metadata)
                     metadata.back && this.#hello(socket)
                     return
@@ -166,11 +171,11 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
     async #link($: RxjsTcpSocket, metadata: HelloMessage) {
 
         const linked = this.#remoteNodes.get(metadata.node_id)
-        metadata.host = metadata.host || $.remoteAddress || ''
-        if (!metadata.host) return
+        metadata.hostname = metadata.hostname || $.remoteAddress || ''
+        if (!metadata.hostname) return
 
         const socket = linked ? linked.socket : await RxjsTcpSocket.connect({
-            host: metadata.host,
+            host: metadata.hostname,
             port: metadata.port,
             keepAlive: true
         }) || $
@@ -187,7 +192,7 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             this.#remoteListeners.set(event, set)
         }
         if (linked) return
-        this.$nodes.next({ node_id: metadata.node_id, status: 'online' })
+        this.$nodes.next({ ...metadata, status: 'online' })
 
         const refuseRpcRequests = () => {
             for (const [_, { target_node_id, responder }] of this.#$requests) {
@@ -201,7 +206,10 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
                 this.#remoteListeners.set(event, set)
             }
             const node = this.#remoteNodes.get(metadata.node_id)
-            node && this.$nodes.next({ node_id: node.metadata.node_id, status: 'offline' })
+            node && this.$nodes.next({
+                ...metadata,
+                status: 'offline'
+            })
             this.#remoteNodes.delete(metadata.node_id)
         }
 
@@ -232,11 +240,12 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
             event: '#hello',
             data: {
                 node_id: this.sm.node_id,
-                host: '',
+                hostname: '',
                 port,
                 listening,
                 services,
-                back
+                back,
+                ip: ''
             }
         }
         socket.send(Encoder.encode(msg))
@@ -273,8 +282,8 @@ export class SpiderMeshTcpTransporter implements SpiderMeshRpcTransporter, Spide
     #indexes = new Map<string, number>()
 
     async #getRpcNode(options: RpcOptions) {
-        if (options.node_id) {
-            const node = this.#remoteNodes.get(options.node_id)
+        if (options.routing) {
+            const node = this.#remoteNodes.get(options.routing.node_id)
             if (!node) throw new ServiceOffline()
             return node
         }
