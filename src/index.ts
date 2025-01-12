@@ -8,5 +8,5 @@ export { NestJSExposeMicroservice } from './decorators/NestJSExposeMicroservice.
 export { NestJSLinkMicroservice } from './decorators/NestJSLinkMicroservice.js'
 export { NestJSLinkEvent } from './decorators/NestJSLinkEvent.js'
 export { LimitConcurrentRunning } from './decorators/LimitConcurrentRunning.js'
-export { randomUUID } from './helpers/randomUUID.js' 
- 
+export { randomUUID } from './helpers/randomUUID.js'
+export { ServiceDiscovery } from './interfaces/ServiceDiscovery.js'
