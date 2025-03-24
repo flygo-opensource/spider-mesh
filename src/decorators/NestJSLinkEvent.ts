@@ -1,7 +1,7 @@
 import { SpiderMesh } from "../SpiderMesh.js";
 
-export const NestJSLinkEvent = (factory: any, publish_buffer_ms?: number) => ({
+export const NestJSLinkEvent = (factory: any) => ({
     provide: factory,
     inject: [SpiderMesh],
-    useFactory: (sm: SpiderMesh) => sm.linkEvent()
+    useFactory: (sm: SpiderMesh) => sm.event(factory)
 })

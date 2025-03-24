@@ -1,14 +1,14 @@
 import { Observable, Subject } from "rxjs";
-import { RpcOptions } from "./SpiderMeshTransporter.js";
 import { SpiderMeshNode } from "./SpiderMeshNode.js";
+import { RpcOptions } from "./RpcTransporter.js";
 
 
 export type RemoteService<T = { [key: string]: any }> = (
     {
-        $wait: (fn?: (nodes: SpiderMeshNode[]) => boolean | Promise<boolean>) => Promise<void>,
-        $set: (options: RpcOptions) => RemoteService<T>,
-        $nodes: SpiderMeshNode[],
-        $watch: () => Subject<SpiderMeshNode & { status: 'online' | 'offline' }>
+        wait$: (fn?: (nodes: SpiderMeshNode[]) => boolean | Promise<boolean>) => Promise<void>,
+        set: (options: Partial<RpcOptions>) => RemoteService<T>,
+        nodes: SpiderMeshNode[],
+        watch$: () => Subject<void>
     } & {
         [K in keyof T as (T[K] extends (...args: any) => any ? K : '')]: T[K] extends (...args: any) => any ? ((...args: Parameters<T[K]>) => ReturnType<T[K]> extends (Observable<any> | Promise<Observable<any>>) ? Awaited<ReturnType<T[K]>> : Promise<Awaited<ReturnType<T[K]>>>) : null
     } & {
