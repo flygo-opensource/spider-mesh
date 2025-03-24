@@ -1,6 +1,8 @@
-import { Microservice } from "@spider-mesh/core";
+import { LimitConcurrency, Microservice, MicroserviceException } from "@spider-mesh/core";
 import { randomUUID } from "crypto";
-import { from, interval, take } from "rxjs";
+import { from, interval, take, tap, map, firstValueFrom, timer } from "rxjs";
+import { Observable } from "rxjs/internal/Observable";
+import { range } from "rxjs/internal/observable/range";
 
 
 const UUID = randomUUID().split('-').pop()
@@ -12,13 +14,51 @@ export class A {
         return a + b
     }
 
+    async asyncSUm(a: number, b: number) {
+        await firstValueFrom(timer(1000))
+        return a + b
+    }
+
     who() {
         return { UUID }
     }
 
+
     xxx() {
         return interval(1000).pipe(
-            take(10)
+            tap(n => console.log({ n })),
+            map((n, i) => {
+                const str = {
+                    n,
+                    v: new Array(1 + n).fill(0).map(a => `a`)
+                }
+                return str
+            }),
+            take(4)
         )
     }
+
+    async interator() {
+        return interval(1000).pipe(
+            tap(n => console.log({ n })),
+            map((n, i) => {
+                const str = {
+                    n,
+                    v: new Array(1 + n).fill(0).map(a => `a`)
+                }
+                return str
+            }),
+            take(4)
+        )
+    }
+
+    @LimitConcurrency(1)
+    async limitTest(a: number) {
+        return interval(1000).pipe(
+            take(a),
+            tap(v => console.log({ a, v: v + 1 })),
+            map(v => ({ a, v: v + 1 }))
+        )
+    }
+
 }

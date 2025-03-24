@@ -1,4 +1,3 @@
-
 export type Encodable = string | number | boolean | undefined | null | Buffer | Encodable[] | {
     [key: string]: Encodable | undefined
 }
@@ -9,17 +8,17 @@ if (typeof Buffer == 'undefined') {
 
 
 export const Encoder = {
-
-    encode: <T extends Encodable>(content: T) => {
-
-        const buffers: Buffer[] = []
-
-
-        if (content == undefined) {
+    encode: <T extends Encodable>(e: T) => {
+        if (e == undefined) {
             const buffer = Buffer.alloc(4)
             buffer.writeInt32LE(-1)
             return buffer
         }
+        const content = e instanceof Error ? {
+            code: (e as any).code || e.message || 'UNKNOWN',
+            stack: e.stack,
+            name: e.name
+        } : e
 
         function replacer(this: any, key: string, value: any) {
             const originalObject = this[key]
@@ -33,51 +32,15 @@ export const Encoder = {
                 __$$__value: Array.from(originalObject.values()), // or with spread: __$$__value: [...originalObject]
             }
 
-
-            if (originalObject instanceof Buffer) {
-                buffers.push(originalObject)
-                return {
-                    __$$__dataType: 'Buffer',
-                    __index: buffers.length - 1
-                }
-            }
-
             return value
         }
-        const metadata = JSON.stringify(content, replacer)
-
-        const buffers_count = Buffer.alloc(4)
-        buffers_count.writeUInt32LE(buffers.length, 0)
-
-        const buffers_list = buffers.map(b => {
-            const length = Buffer.alloc(4)
-            length.writeUInt32LE(b.length)
-            return [length, b]
-        }).flat(2)
-        const data = Buffer.from(metadata, 'utf-8')
-        const buffer = Buffer.concat([
-            buffers_count,
-            ...buffers_list,
-            data
-        ] as any)
-        return buffer
+        return Buffer.from(JSON.stringify(content, replacer))
     },
 
     decode: <T>(
         raw: Buffer
     ) => {
-        const buffers: Buffer[] = []
-        const length = raw.readUInt32LE(0)
-        if (length > raw.length || length < 0) return
-        let index = 4
-        for (let i = 0; i < length; i++) {
-            const blength = raw.readUint32LE(index)
-            index += 4
-            const buff = raw.slice(index, index + blength)
-            buffers.push(buff)
-            index += blength
-        }
-        const metadata = raw.toString('utf-8', index)
+        if (raw.length == 4 && raw.readInt32LE() == -1) return undefined
         function receiver(this: any, key: string, value: any) {
             if (typeof value === 'object' && value !== null) {
                 if (value.__$$__dataType === 'Map') {
@@ -87,15 +50,10 @@ export const Encoder = {
                 if (value.__$$__dataType === 'Set') {
                     return new Set(value.__$$__value);
                 }
-
-
-                if (value.__$$__dataType == 'Buffer') {
-                    return buffers[value.__index]
-                }
             }
 
             return value;
         }
-        return JSON.parse(metadata, receiver) as T
+        return JSON.parse(raw.toString('utf8'), receiver) as T
     }
 } 

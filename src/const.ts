@@ -1,5 +1,6 @@
-export const NAMEPSACE = process.env.SPIDERMESH_NAMESPACE || 'default'
-export const UDP_BROADCAST_ADDRESS = process.env.SPIDERMESH_UDP_BROADCAST_ADDRESS || ''
-export const UDP_BROADCAST_PORT = Number(process.env.SPIDERMESH_UDP_BROADCAST_PORT || 10000)
-export const UDP_SECRET_KEY = process.env.SPIDERMESH_UDP_BROADCAST_PORT || 'default-spider-mesh-secret-key'
-export const BROADCAST_INTERVAL =Number( process.env.SPIDERMESH_BROADCAST_INTERVAL || 0)
+export const SPIDERMESH_UDP_BROADCAST_ADDRESS = process.env.SPIDERMESH_UDP_BROADCAST_ADDRESS || ''
+export const SPIDERMESH_UDP_BROADCAST_PORT = Number(process.env.SPIDERMESH_UDP_BROADCAST_PORT || 20000)
+
+export const SPIDERMESH_TLS_KEY_PATH = process.env.SPIDERMESH_TLS_KEY_PATH
+export const SPIDERMESH_TLS_CERT_PATH = process.env.SPIDERMESH_TLS_CERT_PATH
+export const SPIDERMESH_TLS_CA_PATH = process.env.SPIDERMESH_TLS_CA_PATH

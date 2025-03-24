@@ -1,10 +1,13 @@
-import { SpiderMeshTcpTransporter } from "../src/SpiderMeshTcpTransporter.js";
-import { Microservice, SpiderMesh } from "@spider-mesh/core";
+import { SpiderMesh } from "@spider-mesh/core";
 import { A } from "./serviceA.js";
+import { Rpc } from "../src/Rpc.js";
+import { Mdns } from "../src/Mdns.js";
 
 console.log(`Worker`)
 const sm = new SpiderMesh()
-new SpiderMeshTcpTransporter(sm)
+new Rpc(sm)
+new Mdns(sm)
 const a = new A()
+
 
 setInterval(() => { }, 1000) 

@@ -14,9 +14,10 @@
     "yarn.lock"
   ],
   "devDependencies": {
+    "@spider-mesh/core": "^1.0.152",
     "@types/node": "^22.10.5",
-    "ts-node": "^10.9.1",
-    "typescript": "^5.7.2"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
   },
   "exports": {
     ".": {
@@ -27,15 +28,18 @@
     }
   },
   "scripts": {
-    "dev":"clear; npx tsx ",
+    "dev": "clear; npx tsx ",
     "x": "clear; node --no-warnings --es-module-specifier-resolution=node --experimental-specifier-resolution=node --loader ts-node/esm ",
     "build": "tsc -v; rm -rf build && tsc -b tsconfig.json"
   },
   "author": "Duong Van Ba",
   "license": "ISC",
   "dependencies": {
+    "@grpc/grpc-js": "^1.12.6",
+    "@grpc/proto-loader": "^0.7.13",
+    "@types/msgpack": "^0.0.34",
     "frame-stream": "^4.0.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.2"
   }
 }
