@@ -12,7 +12,7 @@ type NodeId = string
 
 const TransporterIndexName = 'http2pubsub'
 
-export class Pubsub implements PubsubTransporter { 
+export class Pubsub implements PubsubTransporter {
 
     public readonly metadata$ = new ReplaySubject<{ [name: string]: string | number | boolean; }>;
     #nodes = new Map<string, ClientHttp2Session>()
@@ -38,7 +38,6 @@ export class Pubsub implements PubsubTransporter {
         })
         server.on('request', (req, res) => {
             const event = req.headers[':path']?.split('/')?.[2]
-            console.log({ event })
             if (!event) return
             const buffers = [] as Buffer[]
             req.on('data', b => buffers.push(b as Buffer))
@@ -61,7 +60,7 @@ export class Pubsub implements PubsubTransporter {
     }
 
     link(node: SpiderMeshNode) {
-        if (!this.#nodes.has(node.node_id)) {
+        if (!this.#nodes.has(node.node_id) && node.online) {
             const connection = this.#connect(node)
             if (!connection) return
             this.#nodes.set(node.node_id, connection)
@@ -72,8 +71,13 @@ export class Pubsub implements PubsubTransporter {
 
         for (const topic of node.topics) {
             const set = this.#topics.get(topic) || new Set<string>()
-            set.add(node.node_id)
-            this.#topics.set(topic, set)
+            if (node.online) {
+                set.add(node.node_id)
+                this.#topics.set(topic, set)
+            } else {
+                set.delete(node.node_id)
+                set.size == 0 && this.#topics.delete(topic)
+            }
         }
     }
 

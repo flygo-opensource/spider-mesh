@@ -22,7 +22,7 @@ export class Mdns implements DiscoveryTransporter {
     #localAddress = new Set(Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean))
     #broadcastAddress = [
         '255.255.255.255',
-        ...SPIDERMESH_UDP_BROADCAST_ADDRESS.split(',').map(e => {
+        ...(SPIDERMESH_UDP_BROADCAST_ADDRESS || '').split(',').map(e => {
             const ppps = e.trim().split('.')
             if (ppps.length == 4) return e.trim()
             if (ppps.length == 3) return new Array(255).fill(0).map(h => {
@@ -33,7 +33,7 @@ export class Mdns implements DiscoveryTransporter {
     ]
 
     constructor(private sm: SpiderMesh) {
-      
+        console.log({ iam: sm.node_id })
         this.#udp4.bind(SPIDERMESH_UDP_BROADCAST_PORT, '0.0.0.0', () => {
             this.#udp4.setBroadcast(true)
             this.#udp4.on('message', (raw: Buffer, r) => {
@@ -54,6 +54,7 @@ export class Mdns implements DiscoveryTransporter {
                 }
 
                 // Process
+                console.log(`Found node ${e.node_id}`)
                 sm.sync({ ...e, online: true })
             })
             sm.add(this)

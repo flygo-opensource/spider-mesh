@@ -1,8 +1,6 @@
 import { LimitConcurrency, Microservice, MicroserviceException } from "@spider-mesh/core";
 import { randomUUID } from "crypto";
-import { from, interval, take, tap, map, firstValueFrom, timer } from "rxjs";
-import { Observable } from "rxjs/internal/Observable";
-import { range } from "rxjs/internal/observable/range";
+import { interval, take, tap, map, firstValueFrom, timer } from "rxjs";
 
 
 const UUID = randomUUID().split('-').pop()
@@ -11,6 +9,7 @@ const UUID = randomUUID().split('-').pop()
 export class A {
     sum(a: number, b: number) {
         console.log({ a, b, n: Date.now() })
+        throw new MicroserviceException({ a: 'str' + (a + b), code: 'INVAILD_KEYWORD' })
         return a + b
     }
 

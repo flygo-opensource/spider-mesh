@@ -7,7 +7,7 @@ console.log(`Worker`)
 const sm = new SpiderMesh()
 new Rpc(sm)
 new Mdns(sm)
-const a = new A()
+new A()
 
 
 setInterval(() => { }, 1000) 

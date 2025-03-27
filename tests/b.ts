@@ -1,10 +1,17 @@
-import { SpiderMesh } from "@spider-mesh/core";
+import { MicroserviceException, SpiderMesh } from "@spider-mesh/core";
 import { A } from "./serviceA.js"; 
 import { lastValueFrom } from "rxjs/internal/lastValueFrom";
 import { tap } from "rxjs";
 import { Mdns } from "../src/Mdns.js";
 import { Rpc } from "../src/Rpc.js";
+import path from "path";
+import { fileURLToPath } from "url";
 
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+console.log(`${path.basename(__dirname)}/${path.basename(__filename)}`);
 
 console.log(`Master`)
 
@@ -20,24 +27,25 @@ service.watch$().subscribe(() => {
 await service.wait$()
 console.log('Ready')
 
-// await service.wait$(n => {
-//     console.log({nodes: n.length })
-//     return n.length == 3
-// })
+ 
 
 // console.log('Running')
 // service.__batch__sum(1,2).subscribe(n => {
 //     console.log({n})
 // })
-
-// setInterval(async () => {
-//     try{
-//         const res = await service.sum(1,2)
-//         console.log({res})
-//     }catch(e){
-//         console.error(e)
-//     }
-// }, 2000)
+let i = 1
+setInterval(async () => {
+    try{
+        const res = await service.sum(1,i++)
+        console.log({res})
+    }catch(e){
+        if(e instanceof MicroserviceException){
+            e.stack = 'VKL'
+            console.error('???', e)
+        } 
+        console.error({e})
+    }
+}, 2000)
 
 // service.set({ fallback: -1 }).xxx().subscribe(console.log)
 // service.set({ fallback: -1 }).xxx().subscribe(console.log)
@@ -46,10 +54,10 @@ console.log('Ready')
 //  service.xxx().subscribe(console.log) 
 
 
-for (let i = 1; i <= 3; i++) {
-    lastValueFrom(
-        service.limitTest(i).pipe(
-            tap(console.log)
-        )
-    )
-}
+// for (let i = 1; i <= 3; i++) {
+//     lastValueFrom(
+//         service.limitTest(i).pipe(
+//             tap(console.log)
+//         )
+//     )
+// }

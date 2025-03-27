@@ -20,7 +20,7 @@ export const Encoder = {
             name: e.name
         } : e
 
-        function replacer(this: any, key: string, value: any) {
+        function replacer(this: any, key: string, value: any) { 
             const originalObject = this[key]
             if (originalObject instanceof Map) return {
                 __$$__dataType: 'Map',
