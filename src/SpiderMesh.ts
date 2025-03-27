@@ -1,5 +1,4 @@
 import { BehaviorSubject, catchError, distinctUntilKeyChanged, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeMap, Observable, of, retry, tap, timer, toArray } from "rxjs"
-import { randomUUID } from "crypto";
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { RemoteService } from "./interfaces/RemoteService.js";
 import { SpiderMeshNode } from "./interfaces/SpiderMeshNode.js";
@@ -11,20 +10,19 @@ import { MicroserviceException } from "./helpers/MicroserviceException.js";
 import { MicroserviceOfflineException } from "./helpers/MicroserviceOfflineException.js";
 import { services$ } from "./decorators/Microservice.js";
 import { networkInterfaces } from "os";
-
+import { randomUUID } from "./helpers/randomUUID.js";
+import { MicroserviceNotFound } from "./helpers/MicroserviceNotFound.js";
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 
 
 export class SpiderMesh {
 
-    public readonly METADATA_TOPIC = '@@metadata@@'
     public readonly node_id = randomUUID()
     public readonly namespace = NAMEPSACE
 
-
     public readonly metadata$ = new BehaviorSubject<SpiderMeshNode>({
-        ips: Object.values(networkInterfaces()).flat(2).filter(a => !a?.internal && !a?.address).map(a => a?.address!),
+        ips: Object.values(networkInterfaces()).flat(2).filter(a => !a?.internal && !!a?.address).map(a => a?.address!),
         host: '',
         namespace: this.namespace,
         node_id: this.node_id,
@@ -44,7 +42,6 @@ export class SpiderMesh {
 
 
     constructor() {
-        const key = Symbol.for('metadatakey')
         services$.pipe(
             filter(list => Object.keys(list).length > 0),
             mergeMap(async services => {
@@ -73,6 +70,7 @@ export class SpiderMesh {
                 return EMPTY
             })
         ).subscribe()
+
     }
 
     async sync(node: SpiderMeshNode & { host: string }) {
@@ -109,12 +107,12 @@ export class SpiderMesh {
 
 
     rpc<T>(options: RpcOptions) {
-        const started_at = Date.now()
         return of(0).pipe(
             mergeMap(async () => {
                 await this.wait(options.service)
                 const list = [...this.#transporters.rpc.values()]
                 const transporters = list.length <= 1 ? [...this.#transporters.rpc.values()].filter(transporter => transporter.check(options.service).length > 0) : list
+
                 const transporter = transporters[transporters.length == 1 ? 0 : Date.now() % transporters.length]
                 if (!transporter) throw new MicroserviceOfflineException()
                 return transporter.rpc<T>(options)
@@ -132,7 +130,7 @@ export class SpiderMesh {
             catchError(e => {
                 if (options.fallback != undefined) return of(options.fallback)
                 if (e.code) {
-                    const error = new MicroserviceException(e.code, e.metadata)
+                    const error = new MicroserviceException(e)
                     error.stack = e.stack
                     console.error(error.stack)
                     throw error
@@ -146,8 +144,8 @@ export class SpiderMesh {
     lpc(options: RpcOptions) {
         const service = services$.value[options.service]
         const instance = service?.instance
-        if (!instance) throw new MicroserviceException('Microservice not found')
-        if (typeof instance[options.method] != 'function') throw new MicroserviceException('Micro method not found')
+        if (!instance) throw new MicroserviceNotFound()
+        if (typeof instance[options.method] != 'function') throw new MicroserviceNotFound()
         return instance[options.method](...options.args)
     }
 
@@ -201,8 +199,23 @@ export class SpiderMesh {
         if ((instance as PubsubTransporter).publish) {
             const t = instance as PubsubTransporter
             if (this.#transporters.pubsub.has(t)) return
+
+            const subscription = t.metadata$.subscribe(metadata => {
+                const { transporters, ...rest } = this.metadata$.value
+                this.metadata$.next({
+                    ...rest,
+                    transporters: {
+                        ...transporters,
+                        ...metadata
+                    },
+                    version: Date.now()
+                })
+            })
             this.#transporters.pubsub.add(t)
-            return () => this.#transporters.pubsub.delete(t)
+            return () => {
+                subscription.unsubscribe()
+                this.#transporters.pubsub.delete(t)
+            }
         }
     }
 
@@ -217,6 +230,7 @@ export class SpiderMesh {
 
 
     wait(name: string, check: (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean = nodes => Object.keys(nodes).length > 0) {
+
         return firstValueFrom(this.metadata$.pipe(
             mergeMap(async e => {
                 const nodes = this.#get_nodes(name)
@@ -277,17 +291,20 @@ export class SpiderMesh {
 
                 if ($ == 'nodes') return this.#get_nodes(service)
 
-                if ($ == 'watch$') return () => this.metadata$.pipe(
-                    map(() => {
-                        const nodes = this.#get_nodes(service)
-                        const token = nodes.sort((a, b) => a.version - b.version).map(e => `${e.node_id}|${e.version}`).join('|')
-                        return {
-                            nodes,
-                            token
-                        }
-                    }),
-                    distinctUntilKeyChanged('token')
-                )
+                if ($ == 'watch$') return () => {
+
+                    return this.metadata$.pipe(
+                        map(m => {
+                            const nodes = this.#get_nodes(service)
+                            const token = nodes.sort((a, b) => a.version - b.version).map(e => `${e.node_id}|${e.version}`).join('|')
+                            return {
+                                nodes,
+                                token
+                            }
+                        }),
+                        distinctUntilKeyChanged('token')
+                    )
+                }
 
                 if ($.startsWith('__batch__')) {
                     const method = $.split('__batch__')?.[1]
