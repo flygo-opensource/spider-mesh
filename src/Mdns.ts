@@ -1,24 +1,26 @@
 import { createSocket } from "dgram";
-import { SpiderMesh, SpiderMeshNode, DiscoveryTransporter } from "@spider-mesh/core";
+import { SpiderMeshDiscover,  SpiderMeshDiscoveryRegistry } from "@spider-mesh/core";
 import { networkInterfaces } from "os";
-import { SPIDERMESH_UDP_BROADCAST_ADDRESS, SPIDERMESH_UDP_BROADCAST_PORT } from "./const.js";
+import { SPIDERMESH_NAMESPACE, SPIDERMESH_UDP_BROADCAST_ADDRESS, SPIDERMESH_UDP_BROADCAST_PORT } from "./const.js";
+import { Subject } from "rxjs/internal/Subject";
+import { randomUUID } from "crypto";
 
 
-export type HelloEvent<T = {}> = T & {
+export type MdnsMessage<T = any> = {
     namespace: string
     sender_id: string
-    node_id: string
     host: string
+    data: T
 }
 
 
-export class Mdns implements DiscoveryTransporter {
 
-    #udp4 = createSocket({
-        type: 'udp4',
-        reuseAddr: true
-    })
 
+export class Mdns extends Subject<any> implements SpiderMeshDiscover {
+
+
+    #udp4 = createSocket({ type: 'udp4' })
+    #id = randomUUID()
     #localAddress = new Set(Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean))
     #broadcastAddress = [
         '255.255.255.255',
@@ -32,43 +34,40 @@ export class Mdns implements DiscoveryTransporter {
         }).flat(2)
     ]
 
-    constructor(private sm: SpiderMesh) {
-        console.log({ iam: sm.node_id })
+    constructor() {
+        super()
         this.#udp4.bind(SPIDERMESH_UDP_BROADCAST_PORT, '0.0.0.0', () => {
             this.#udp4.setBroadcast(true)
             this.#udp4.on('message', (raw: Buffer, r) => {
-                const e = JSON.parse(raw.toString()) as HelloEvent<SpiderMeshNode>
+                const e = JSON.parse(raw.toString()) as MdnsMessage 
                 e.host = r.address
                 const is_remote = !this.#localAddress.has(r.address)
-                if (e.sender_id == this.sm.node_id) return
-                if (e.namespace != this.sm.namespace) return
+                if (e.sender_id == this.#id) return
+                if (e.namespace != SPIDERMESH_NAMESPACE) return
 
                 // From remote
                 if (is_remote) {
-                    const payload: HelloEvent = {
-                        ...e,
+                    const payload: MdnsMessage = {
                         host: r.address,
-                        sender_id: this.sm.node_id
+                        sender_id: this.#id,
+                        namespace: SPIDERMESH_NAMESPACE,
+                        data: e.data
                     }
                     this.#udp4.send(JSON.stringify(payload), SPIDERMESH_UDP_BROADCAST_PORT, '255.255.255.255')
                 }
-
-                // Process
-                console.log(`Found node ${e.node_id}`)
-                sm.sync({ ...e, online: true })
+                // Process 
+                this.next(e.data)
             })
-            sm.add(this)
+            SpiderMeshDiscoveryRegistry.register(this)
         })
-
     }
 
-    broadcast<T>(payload: T, ip?: string) {
-        const e: HelloEvent<T> = {
-            ...payload,
-            host: '',
-            namespace: this.sm.namespace,
-            node_id: this.sm.node_id,
-            sender_id: this.sm.node_id
+    broadcast(data: any, ip?: string) {
+        const e: MdnsMessage  = {
+            data,
+            namespace: SPIDERMESH_NAMESPACE,
+            sender_id: this.#id,
+            host: ''
         }
         const msg = JSON.stringify(e)
         if (ip) {
@@ -80,4 +79,4 @@ export class Mdns implements DiscoveryTransporter {
             }
         }
     }
-} 
+}

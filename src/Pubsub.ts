@@ -1,4 +1,4 @@
-import { SpiderMesh, SpiderMeshNode, type PubsubTransporter } from "@spider-mesh/core";
+import { SpiderMesh, SpiderMeshNode, type PubsubTransporter, SpiderMeshDiscoveryRegistry } from "@spider-mesh/core";
 import { Subject } from "rxjs";
 import { ReplaySubject } from 'rxjs'
 import { AddressInfo } from "net";
@@ -10,11 +10,20 @@ export const isSecure = SPIDERMESH_UDP_BROADCAST_PORT && SPIDERMESH_TLS_CERT_PAT
 
 type NodeId = string
 
-const TransporterIndexName = 'http2pubsub'
+export type PubsubMessage<T = any>= {
+    namespace: string
+    node_id: string
+    sender_id: string
+    topic: string
+    data: T 
+}
 
 export class Pubsub implements PubsubTransporter {
 
+    public readonly type: 'pubsub' = 'pubsub'
     public readonly metadata$ = new ReplaySubject<{ [name: string]: string | number | boolean; }>;
+
+    #broadcaster = SpiderMeshDiscoveryRegistry.create<PubsubMessage>('http2pubsub')
     #nodes = new Map<string, ClientHttp2Session>()
     #subscriptions = new Map<string, Subject<any>>()
     #topics = new Map<string, Set<NodeId>>()
@@ -31,10 +40,8 @@ export class Pubsub implements PubsubTransporter {
         })
         server.listen(0, '0.0.0.0', 0, () => {
             const address = server.address() as AddressInfo
-            this.metadata$.next({
-                [TransporterIndexName]: address.port
-            })
-            sm.add(this)
+           
+            sm.linkTransporter(this)
         })
         server.on('request', (req, res) => {
             const event = req.headers[':path']?.split('/')?.[2]
@@ -49,11 +56,10 @@ export class Pubsub implements PubsubTransporter {
             })
         })
 
-
     }
 
     #connect(node: SpiderMeshNode) {
-        const port = node.transporters[TransporterIndexName]
+        const port = 123
         if (isNaN(Number(port))) return
         const url = `${isSecure ? 'https' : 'http'}://${node.host}:${port}`
         return http2.connect(url)
@@ -83,7 +89,17 @@ export class Pubsub implements PubsubTransporter {
 
     listen<T>(topic: string) {
         const $ = this.#subscriptions.get(topic) || new Subject<any>()
-        !this.#subscriptions.has(topic) && this.#subscriptions.set(topic, $)
+        if (!this.#subscriptions.has(topic)) {
+            this.#subscriptions.set(topic, $)
+
+            this.#broadcaster.send({
+                data:null,
+                namespace:'',
+                node_id:'',
+                sender_id:'',
+                topic:''
+            })
+        }
         return $ as Subject<T>
     }
 

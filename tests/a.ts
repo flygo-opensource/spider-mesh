@@ -6,7 +6,7 @@ import { Mdns } from "../src/Mdns.js";
 console.log(`Worker`)
 const sm = new SpiderMesh()
 new Rpc(sm)
-new Mdns(sm)
+new Mdns()
 new A()
 
 
