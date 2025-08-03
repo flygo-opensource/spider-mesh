@@ -1,9 +1,8 @@
-import { BehaviorSubject, catchError, distinctUntilKeyChanged, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeMap, Observable, of, retry, tap, timer, toArray } from "rxjs"
+import { BehaviorSubject, catchError, distinctUntilKeyChanged, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, retry, tap, throwError, timer, toArray } from "rxjs"
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { RemoteService } from "./interfaces/RemoteService.js";
 import { SpiderMeshNode } from "./interfaces/SpiderMeshNode.js";
 import { NAMEPSACE } from "./const.js";
-import { DiscoveryTransporter } from "./interfaces/DiscoveryTransporter.js";
 import { PubsubTransporter } from "./interfaces/PubsubTransporter.js";
 import { RpcTransporter, RpcOptions } from "./interfaces/RpcTransporter.js";
 import { MicroserviceException } from "./helpers/MicroserviceException.js";
@@ -12,6 +11,7 @@ import { services$ } from "./decorators/Microservice.js";
 import { networkInterfaces } from "os";
 import { randomUUID } from "./helpers/randomUUID.js";
 import { MicroserviceNotFound } from "./helpers/MicroserviceNotFound.js";
+import { DiscoveryTransporter } from "./interfaces/DiscoveryTransporter.js";
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 
@@ -20,8 +20,11 @@ export class SpiderMesh {
 
     public readonly node_id = randomUUID()
     public readonly namespace = NAMEPSACE
+    #rpcs = new Map<string, RpcTransporter>()
+    #pubsubs = new BehaviorSubject(new Map<string, PubsubTransporter>())
+    #discovers = new Map<string, DiscoveryTransporter>()
 
-    public readonly metadata$ = new BehaviorSubject<SpiderMeshNode>({
+    #metadata$ = new BehaviorSubject<SpiderMeshNode>({
         ips: Object.values(networkInterfaces()).flat(2).filter(a => !a?.internal && !!a?.address).map(a => a?.address!),
         host: '',
         namespace: this.namespace,
@@ -33,12 +36,8 @@ export class SpiderMesh {
         version: 0
     })
 
-
-    #transporters = {
-        rpc: new Set<RpcTransporter>,
-        pubsub: new Set<PubsubTransporter>,
-        discovery: new Set<DiscoveryTransporter>
-    }
+    #nodes$ = new BehaviorSubject(new Map<string, SpiderMeshNode>())
+    #services = new Map<string, Set<string>>()
 
 
     constructor() {
@@ -55,7 +54,7 @@ export class SpiderMesh {
             }),
             tap(services => {
                 const metadata = {
-                    ... this.metadata$.value,
+                    ... this.#metadata$.value,
                     services: Object.entries(services).reduce((p, [name, v]) => {
                         return {
                             ...p,
@@ -64,7 +63,7 @@ export class SpiderMesh {
                     }, {} as { [name: string]: any }),
                     version: Date.now()
                 }
-                this.metadata$.next(metadata)
+                this.#metadata$.next(metadata)
             }),
             catchError(e => {
                 return EMPTY
@@ -73,49 +72,27 @@ export class SpiderMesh {
 
     }
 
-    async sync(node: SpiderMeshNode & { host: string }) {
 
-        for (const t of this.#transporters.rpc) {
-            t.link?.(node)
-        }
-
-        for (const t of this.#transporters.pubsub) {
-            t.link?.(node)
-        }
-
-        // Update metadata
-        const { [node.node_id]: old, ...nodes } = this.metadata$.value.nodes || {}
-        this.metadata$.next({
-            ... this.metadata$.value,
-            nodes: node.online ? {
-                ... this.metadata$.value.nodes,
-                [node.node_id]: node.version
-            } : {
-                ...nodes
-            }
-        })
-
-        // Say hello if is new node
-        if (node.nodes[this.node_id] != this.metadata$.value.version) {
-            for (const t of this.#transporters.discovery) {
-                t.broadcast(this.metadata$.value, node.host)
-            }
-        }
-
-
-    }
-
-
-    rpc<T>(options: RpcOptions) {
+    callRemoteService<T>(options: RpcOptions) {
         return of(0).pipe(
             mergeMap(async () => {
-                await this.wait(options.service)
-                const list = [...this.#transporters.rpc.values()]
-                const transporters = list.length <= 1 ? [...this.#transporters.rpc.values()].filter(transporter => transporter.check(options.service).length > 0) : list
-
-                const transporter = transporters[transporters.length == 1 ? 0 : Date.now() % transporters.length]
-                if (!transporter) throw new MicroserviceOfflineException()
-                return transporter.rpc<T>(options)
+                while (true) {
+                    const ids = this.#services.get(options.service) || new Set<string>
+                    if (options.node_id && !ids.has(options.node_id)) throw new MicroserviceOfflineException()
+                    const nodes = [...ids].map(id => this.#nodes$.value.get(id)!).filter(Boolean)
+                    if (nodes.length == 0) {
+                        await this.waitServiceOnline(options.service)
+                        continue
+                    }
+                    const node = nodes[0]
+                    this.#services.set(options.service, new Set(
+                        ...[...ids].slice(1),
+                        node.node_id
+                    ))
+                    const transporter = this.#rpcs.get(`${node.transporters.rpc}`)
+                    if (!transporter) throw new MicroserviceOfflineException()
+                    return transporter.rpc<T>(options, node)
+                }
             }),
             mergeMap($ => $),
             retry({
@@ -123,16 +100,14 @@ export class SpiderMesh {
                     if (e instanceof MicroserviceOfflineException || e.message == MicroserviceOfflineException.code) {
                         if (options.retry && count < options.retry) return timer(1000)
                     }
-
                     throw e
                 }
             }),
             catchError(e => {
-                if (options.fallback != undefined) return of(options.fallback)
+                if (options.fallback != undefined) return of(options.fallback as any as T)
                 if (e.code) {
                     const error = new MicroserviceException(e)
                     error.stack = e.stack
-                    console.error(error.stack)
                     throw error
                 }
                 throw e
@@ -140,120 +115,121 @@ export class SpiderMesh {
         )
     }
 
+    linkTransporter(
+        transporter: RpcTransporter | PubsubTransporter | DiscoveryTransporter,
+        metadata: { [key: string]: string | number | boolean }
+    ) {
 
-    lpc(options: RpcOptions) {
-        const service = services$.value[options.service]
-        const instance = service?.instance
-        if (!instance) throw new MicroserviceNotFound()
-        if (typeof instance[options.method] != 'function') throw new MicroserviceNotFound()
-        return instance[options.method](...options.args)
-    }
+        this.#metadata$.next({
+            ... this.#metadata$.value,
+            transporters: {
+                ... this.#metadata$.value.transporters,
+                [transporter.name]: metadata
+            }
+        })
 
-    add(instance: RpcTransporter | DiscoveryTransporter | PubsubTransporter) {
+        if (transporter.name.startsWith('rpc-')) {
+            const rpc = transporter as RpcTransporter
+            if (this.#rpcs.has(rpc.name)) return
+            this.#rpcs.set(rpc.name, rpc)
+            return merge(
 
-        // Is RpcTransporter
-        if ((instance as RpcTransporter).rpc) {
-            const transporter = instance as RpcTransporter
-            if (this.#transporters.rpc.has(transporter)) return
-            const subscription = merge(
-                transporter.metadata$.pipe(
-                    tap(metadata => {
-                        const { transporters, ...rest } = this.metadata$.getValue()
-                        this.metadata$.next({
-                            ...rest,
-                            transporters: {
-                                ...transporters,
-                                ...metadata
-                            },
-                            version: Date.now()
-                        })
+                // rpc handler
+                rpc.requests$.pipe(
+                    map(({ callback, ...request }) => {
+                        try {
+                            const service = services$.value[request.service]
+                            const instance = service?.instance
+                            if (!instance) return callback(throwError(() => new MicroserviceNotFound()))
+                            const response = instance[request.method](...request.args)
+                            callback(response)
+                        } catch (err) {
+                            callback(throwError(() => err))
+                        }
                     }),
                     finalize(() => {
-                        this.#transporters.rpc.delete(transporter)
+                        this.#rpcs.delete(rpc.name)
+                    })
+                ),
+
+                // offline handler
+                rpc.offline$.pipe(
+                    map(node_id => this.#nodes$.getValue().get(node_id)),
+                    filter(Boolean),
+                    tap(node => {
+                        for (const service of Object.values(node.services)) {
+                            const nodes = this.#services.get(service)
+                            if (nodes) {
+                                nodes.delete(node.node_id)
+                                this.#services.set(service, nodes)
+                            }
+
+                        }
                     })
                 )
             ).subscribe()
-            this.#transporters.rpc.add(transporter)
-            return () => subscription.unsubscribe()
         }
-
-
-        // Is DiscoveryTransporter
-        if ((instance as DiscoveryTransporter).broadcast) {
-            const t = instance as DiscoveryTransporter
-            if (this.#transporters.discovery.has(t)) return
-            const subscription = this.metadata$.pipe(
-                distinctUntilKeyChanged('version'),
-                tap(() => {
-                    const metadata = this.metadata$.value
-                    t.broadcast(metadata)
-                }),
-                finalize(() => this.#transporters.discovery.delete(t))
-            ).subscribe()
-            this.#transporters.discovery.add(t)
-            return () => subscription.unsubscribe()
-        }
-
 
         // Is PubsubTransporter
-        if ((instance as PubsubTransporter).publish) {
-            const t = instance as PubsubTransporter
-            if (this.#transporters.pubsub.has(t)) return
-
-            const subscription = t.metadata$.subscribe(metadata => {
-                const { transporters, ...rest } = this.metadata$.value
-                this.metadata$.next({
-                    ...rest,
-                    transporters: {
-                        ...transporters,
-                        ...metadata
-                    },
-                    version: Date.now()
-                })
-            })
-            this.#transporters.pubsub.add(t)
-            return () => {
-                subscription.unsubscribe()
-                this.#transporters.pubsub.delete(t)
-            }
+        if (transporter.name.startsWith('pubsub-')) {
+            const pubsub = transporter as PubsubTransporter
+            const transporters = this.#pubsubs.getValue()
+            transporters.set(pubsub.name, pubsub)
+            this.#pubsubs.next(transporters)
+            return new Observable(() => {
+                return () => {
+                    transporters.delete(pubsub.name)
+                    this.#pubsubs.next(transporters)
+                }
+            }).subscribe()
         }
+
+        // Is discover transporter
+        if (transporter.name.startsWith('discover-')) {
+            const discover = transporter as DiscoveryTransporter
+            this.#discovers.set(discover.name, discover)
+            return discover.pipe(
+                tap(node => {
+                    const nodes = this.#nodes$.getValue()
+                    console.log(`Please check after all rpc inited`)
+                    // Detect working RPC channel  
+                    const rpc = Object.keys(node.transporters).find(id => this.#rpcs.has(id))
+                    const mapped = {
+                        ...node,
+                        transporters: {
+                            ...node.transporters,
+                            ...rpc ? { rpc } : {}
+                        }
+                    }
+                    nodes.set(node.node_id, mapped)
+
+                    // Set services
+                    rpc && Object.keys(node.services || {}).forEach(service => {
+                        const ids = this.#services.get(service) || new Set()
+                        this.#services.set(service, new Set([...ids, node.node_id]))
+                    })
+                    this.#nodes$.next(nodes)
+                }),
+                finalize(() => this.#discovers.delete(discover.name))
+            ).subscribe()
+        }
+
     }
 
-    #get_nodes(service_name: string) {
-        const transporters = [...this.#transporters.rpc.values()]
-        const nodes = transporters.map(t => t.check(service_name)).flat(2).reduce(
-            (p, c) => ({ ...p, [c.node_id]: c })
-            , {} as { [node_id: string]: SpiderMeshNode }
-        )
-        return Object.values(nodes)
+    #getNodes(name: string) {
+        return [... this.#nodes$.getValue().values()].filter(node => !!node.services[name])
     }
 
 
-    wait(name: string, check: (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean = nodes => Object.keys(nodes).length > 0) {
-
-        return firstValueFrom(this.metadata$.pipe(
-            mergeMap(async e => {
-                const nodes = this.#get_nodes(name)
-                if (await check(nodes)) return true
-            }),
+    waitServiceOnline(name: string, check: (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean = nodes => nodes.length > 0) {
+        return firstValueFrom(this.#nodes$.pipe(
+            map(() => this.#getNodes(name)),
+            mergeMap(async nodes => check(nodes)),
             filter(Boolean)
         ))
     }
 
-    async expose(name: string, instance: any) {
-        const hooks = listBeforeMicroserviceOnlineMethods(instance)
-        for (const method of hooks) await instance[method]
-        services$.next({
-            ...services$.value,
-            [name]: {
-                instance,
-                metadata: {},
-                name
-            }
-        })
-    }
-
-    service<T>(factory: { new(...args: any[]): T }) {
+    linkRemoteService<T>(factory: { new(...args: any[]): T }) {
 
         const service = factory.name
 
@@ -280,39 +256,39 @@ export class SpiderMesh {
             'onApplicationShutdown'
         ])
 
-        return new Proxy({}, {
+        const target = new Proxy({}, {
             get: (_, $: string) => {
 
                 if (omitProperties.has($)) return null
 
                 if ($ == 'wait$') {
-                    return (fn?: (nodes: SpiderMeshNode[]) => boolean | Promise<boolean>) => this.wait(service, fn)
+                    return (fn?: (nodes: SpiderMeshNode[]) => boolean | Promise<boolean>) => this.waitServiceOnline(service, fn)
                 }
 
-                if ($ == 'nodes') return this.#get_nodes(service)
+                if ($ == 'nodes') return this.#getNodes(service)
 
                 if ($ == 'watch$') return () => {
-
-                    return this.metadata$.pipe(
+                    return this.#nodes$.pipe(
                         map(m => {
-                            const nodes = this.#get_nodes(service)
+                            const nodes = this.#getNodes(service)
                             const token = nodes.sort((a, b) => a.version - b.version).map(e => `${e.node_id}|${e.version}`).join('|')
                             return {
                                 nodes,
                                 token
                             }
                         }),
-                        distinctUntilKeyChanged('token')
+                        distinctUntilKeyChanged('token'),
+                        map(a => a.nodes)
                     )
                 }
 
-                if ($.startsWith('__batch__')) {
+                if ($.startsWith('batch__')) {
                     const method = $.split('__batch__')?.[1]
-                    const nodes = this.#get_nodes(service)
+                    const nodes = this.#getNodes(service)
                     return (...args: any[]) => {
                         const $ = from(nodes).pipe(
                             mergeMap(node => (
-                                this.rpc({
+                                this.callRemoteService({
                                     args,
                                     method,
                                     service,
@@ -339,7 +315,7 @@ export class SpiderMesh {
                 if ($ == 'set') {
                     return (options: RpcOptions) => new Proxy({}, {
                         get: (_, method: string) => {
-                            return (...args: any[]) => this.rpc({
+                            return (...args: any[]) => this.callRemoteService({
                                 ...options,
                                 args,
                                 method,
@@ -350,7 +326,7 @@ export class SpiderMesh {
                 }
 
                 return (...args: any[]) => {
-                    const response = this.rpc<Observable<any>>({
+                    const response = this.callRemoteService<Observable<any>>({
                         args,
                         method: $,
                         service
@@ -369,24 +345,45 @@ export class SpiderMesh {
             }
         }) as RemoteService<T>
 
+        return new Proxy<RemoteService<T>>(target, {
+            get(target, p) {
+                if (p == 'then') return target
+                return (target as any)[p]
+            },
+        })
+
     }
 
-    event<T>(factory: { new(...args: any[]): T }) {
+    linkEvent<T>(factory: { new(...args: any[]): T }) {
         const topic = factory.name
 
         return {
             publish: (data: T) => lastValueFrom(
-                from(this.#transporters.pubsub).pipe(
+                from(this.#pubsubs.getValue().values()).pipe(
                     mergeMap(t => t.publish(topic, data))
                 ), { defaultValue: undefined as any as void }
             ),
             listen: () => {
-                return from(this.#transporters.pubsub).pipe(
-                    mergeMap(t => t.listen<T>(topic)
-                    )
+                return this.#pubsubs.pipe(
+                    map(list => [...list.values()]),
+                    mergeAll(),
+                    mergeMap(t => t.listen<T>(topic))
                 )
             }
         }
+    }
+
+    async exposeLocalService(name: string, instance: any) {
+        const hooks = listBeforeMicroserviceOnlineMethods(instance)
+        for (const method of hooks) await instance[method]
+        services$.next({
+            ...services$.value,
+            [name]: {
+                instance,
+                metadata: {},
+                name
+            }
+        })
     }
 
 }  

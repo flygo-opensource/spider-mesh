@@ -1,11 +1,7 @@
-import { Observable, ReplaySubject } from "rxjs"
-import { SpiderMeshNode } from "./SpiderMeshNode.js"
+import { Observable } from "rxjs"
 
 export type PubsubTransporter = {
-    metadata$: ReplaySubject<{
-        [name: string]: string | number | boolean
-    }>
-    link?: (node: SpiderMeshNode) => any
+    name: `pubsub-${string}` 
     publish: <T>(topic: string, data: T) => Promise<void>
     listen: <T>(topic: string) => Observable<T>
 }

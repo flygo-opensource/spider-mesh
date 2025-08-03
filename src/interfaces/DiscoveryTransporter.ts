@@ -1,6 +1,7 @@
-import { Observable } from "rxjs"
+import { Subject } from "rxjs"
 import { SpiderMeshNode } from "./SpiderMeshNode.js"
 
-export type DiscoveryTransporter = {
-    broadcast: (metadata: SpiderMeshNode, host?: string) => any
+export type DiscoveryTransporter = Subject<SpiderMeshNode> & {
+    name: `discover-${string}` 
+    broadcast: <T>(data: T, ip?: string) => any
 }

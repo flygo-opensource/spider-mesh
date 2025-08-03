@@ -7,7 +7,7 @@ export type SpiderMeshNode = {
     version: number
     node_id: string
     transporters: {
-        [method: string]: string | number | boolean
+        [name: string]: any
     }
     online?: boolean
     topics: string[]
