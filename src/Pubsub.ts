@@ -40,9 +40,9 @@ export class Pubsub implements PubsubTransporter {
         })
         server.listen(0, '0.0.0.0', 0, () => {
             const address = server.address() as AddressInfo
-           
             sm.linkTransporter(this)
         })
+
         server.on('request', (req, res) => {
             const event = req.headers[':path']?.split('/')?.[2]
             if (!event) return

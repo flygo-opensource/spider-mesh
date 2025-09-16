@@ -13,10 +13,9 @@ export type RequestHeaders = {
     ':authority': string,
     smnid: string
 }
+ 
 
-
-
-export class Rpc implements RpcTransporter {
+export class Rpc extends RpcTransporter {
 
     public readonly type: "rpc" = 'rpc'
     public readonly requests$ = new Subject<{ req: RpcOptions; res: (o: any | Promise<any> | Observable<any>) => void }>()
@@ -180,8 +179,7 @@ export class Rpc implements RpcTransporter {
             return connection
         }
         throw new MicroserviceOfflineException()
-    }
-
+    } 
 
     rpc<T>(r: RpcOptions) {
         const header$ = new BehaviorSubject<undefined | {
@@ -271,9 +269,6 @@ export class Rpc implements RpcTransporter {
             })
         )
 
-    }
-
-
-
+    } 
 
 } 
