@@ -1,28 +1,30 @@
 import { BehaviorSubject, Observable, Subject } from "rxjs"
 import { SpiderMeshNode } from "./SpiderMeshNode.js"
+import { NodesMap } from "src/SpiderMesh.js"
 
 export type RpcRoutingOptions = { [key: string]: string | number | boolean }
 
 
-export type RpcOptions = {
+export type RpcOptions<T> = {
     service: string
     method: string
     args: any[]
-    fallback?: any
+    fallback?: T
     timeout?: number
     retry?: number
     node_id?: string
     ip?: string
 }
 
-
-
-export type RpcTransporter = {
-    name: `rpc-${string}`
-    offline$: Observable<string>
-    requests$: Observable<RpcOptions & {
+export type RpcEvent = Partial<{
+    rpc: RpcOptions<any> & {
         callback: (o: any | Promise<any> | Observable<any>) => void
-    }>
-    rpc: <T>(r: RpcOptions, node: SpiderMeshNode) => Observable<T | undefined>
+    }
+    offline: string
+    metadata: Record<string, string | boolean | number>
+}>
+
+export class RpcTransporter extends Observable<RpcEvent> {
+    rpc: <T>(r: RpcOptions<T>, context: SpiderMeshNode[]) => Observable<T>
 }
 

@@ -1,7 +1,7 @@
 import { Subject } from "rxjs"
 import { SpiderMeshNode } from "./SpiderMeshNode.js"
 
-export type DiscoveryTransporter = Subject<SpiderMeshNode> & {
-    name: `discover-${string}` 
-    broadcast: <T>(data: T, ip?: string) => any
+
+export class DiscoveryTransporter extends Subject<SpiderMeshNode> {
+    broadcast: (data: SpiderMeshNode, target?: string) => Promise<void>
 }

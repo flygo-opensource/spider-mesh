@@ -6,7 +6,7 @@ import { RpcOptions } from "./RpcTransporter.js";
 export type RemoteService<T = { [key: string]: any }> = (
     {
         wait$: (fn?: (nodes: SpiderMeshNode[]) => boolean | Promise<boolean>) => Promise<void>,
-        set: (options: Partial<RpcOptions>) => RemoteService<T>,
+        set: (options: Partial<RpcOptions<T>>) => RemoteService<T>,
         nodes: SpiderMeshNode[],
         watch$: () => Subject<void>
     } & {
