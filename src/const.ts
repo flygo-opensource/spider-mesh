@@ -1,1 +1,0 @@
-export const NAMEPSACE = process.env.SPIDERMESH_NAMESPACE || 'default'

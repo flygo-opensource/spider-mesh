@@ -1,5 +1,4 @@
 import { BehaviorSubject, ReplaySubject } from "rxjs"
-import { NAMEPSACE } from "../const.js"
 import { SpiderMeshNode } from "../interfaces/SpiderMeshNode.js"
 
 export const services$ = new BehaviorSubject<{
@@ -10,10 +9,14 @@ export const services$ = new BehaviorSubject<{
     }
 }>({})
 
+export type MicroserviceMetadata = {
+    version: string
+    id?: string
+}
 
 export const MicroserviceList: SpiderMeshNode['services'] = {}
 
-export const Microservice = (metadata: object = {}) => {
+export const Microservice = (metadata: MicroserviceMetadata) => {
     return (
         (target: { new(...args: any[]): {} }) => {
             class C extends target {
@@ -38,3 +41,4 @@ export const Microservice = (metadata: object = {}) => {
 
     ) as any
 }
+ 

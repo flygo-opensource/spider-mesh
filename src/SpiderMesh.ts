@@ -1,8 +1,7 @@
-import { BehaviorSubject, catchError, distinctUntilKeyChanged, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, retry, Subject, tap, throwError, timer, toArray } from "rxjs"
+import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, retry, tap, throwError, timer, toArray } from "rxjs"
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { RemoteService } from "./interfaces/RemoteService.js";
 import { SpiderMeshNode } from "./interfaces/SpiderMeshNode.js";
-import { NAMEPSACE } from "./const.js";
 import { PubsubTransporter } from "./interfaces/PubsubTransporter.js";
 import { RpcTransporter, RpcOptions } from "./interfaces/RpcTransporter.js";
 import { MicroserviceException } from "./helpers/MicroserviceException.js";
@@ -12,6 +11,7 @@ import { networkInterfaces } from "os";
 import { randomUUID } from "./helpers/randomUUID.js";
 import { MicroserviceNotFound } from "./helpers/MicroserviceNotFound.js";
 import { DiscoveryTransporter } from "./interfaces/DiscoveryTransporter.js";
+import { SPIDERMESH_NAMESPACE } from "const.js";
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 export type ServiceChecker = (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean
@@ -24,8 +24,6 @@ export type NodesMap = {
 export class SpiderMesh {
 
     public readonly node_id = randomUUID()
-    public readonly namespace = NAMEPSACE
-
 
     #rpcs = new Map<string, RpcTransporter>()
     #pubsubs = new BehaviorSubject(new Map<string, PubsubTransporter>())
@@ -34,7 +32,7 @@ export class SpiderMesh {
     #metadata$ = new BehaviorSubject<SpiderMeshNode>({
         ips: Object.values(networkInterfaces()).flat(2).filter(a => !a?.internal && !!a?.address).map(a => a?.address!),
         host: '',
-        namespace: this.namespace,
+        namespace: SPIDERMESH_NAMESPACE,
         node_id: this.node_id,
         services: {},
         topics: [],
@@ -50,8 +48,11 @@ export class SpiderMesh {
 
     // Phân phối đều các node
     #services = new Map<string, {
-        index: number,
-        nodes: Array<{ id: string, transporter: string }>
+        index: number
+        nodes: Array<{
+            id: string
+            transporter: string
+        }>
     }>()
 
     constructor() {
@@ -79,27 +80,26 @@ export class SpiderMesh {
                 }
                 this.#metadata$.next(metadata)
             }),
-            catchError(e => {
-                return EMPTY
-            })
+            catchError(e => EMPTY)
         ).subscribe()
 
+    }
+
+    #selectTarget<T>(options: RpcOptions<T>) {
+        const nodes = this.#getRpcNodes(options)
+        const target = this.#services.get(options.service)
+        if (!target) return null
+        target.index = (target.index + 1) % target.nodes.length
+        return nodes[target.index]
     }
 
     callRemoteService<T>(options: RpcOptions<T>) {
         return of(0).pipe(
             mergeMap(async () => {
                 await this.waitServiceOnline(options.service)
-                const targets = this.#getRpcNodes(options)
-                const metadata = this.#services.get(options.service)
-                if (!metadata) throw new MicroserviceNotFound() // Không tìm thấy service
-                const target = targets[metadata.index || 0] // Lấy node đầu tiên
+                const target = await this.#selectTarget(options)
                 if (!target) throw new MicroserviceOfflineException()
-                if (targets.length > 1 && metadata) {
-                    // Cập nhật lại index
-                    metadata.index = (metadata.index || 0 + 1) % metadata.nodes.length
-                }
-                return target.transporter.rpc<T>(options, targets.map(a => a.node))
+                return target.transporter.rpc<T>(options, target.node)
             }),
             mergeMap($ => $),
             retry({
@@ -135,7 +135,7 @@ export class SpiderMesh {
             this.#rpcs.set(transporter_name, rpc)
 
             // sync unknown transporter method
-            for (const [service, nodes] of this.#services) {
+            for (const [service, { nodes }] of this.#services) {
                 for (const node of nodes) {
                     if (node.transporter == '?') {
                         const metadata = this.#nodes$.value.nodes.get(node.id)
@@ -147,7 +147,7 @@ export class SpiderMesh {
             }
 
             return merge(
-                // RPC handler
+                // Metadata handler
                 rpc.pipe(
                     map(a => a.metadata),
                     filter(Boolean),
@@ -337,7 +337,7 @@ export class SpiderMesh {
                     const nodes = this.#getRpcNodes({ service })
                     return (...args: any[]) => {
                         const $ = from(nodes).pipe(
-                            mergeMap(node => (
+                            mergeMap(({ node }) => (
                                 this.callRemoteService({
                                     args,
                                     method,

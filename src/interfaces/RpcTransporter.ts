@@ -1,6 +1,5 @@
-import { BehaviorSubject, Observable, Subject } from "rxjs"
+import { Observable } from "rxjs"
 import { SpiderMeshNode } from "./SpiderMeshNode.js"
-import { NodesMap } from "src/SpiderMesh.js"
 
 export type RpcRoutingOptions = { [key: string]: string | number | boolean }
 
@@ -25,6 +24,7 @@ export type RpcEvent = Partial<{
 }>
 
 export class RpcTransporter extends Observable<RpcEvent> {
-    rpc: <T>(r: RpcOptions<T>, context: SpiderMeshNode[]) => Observable<T>
+    selfLoadBalancing?: boolean = false
+    rpc: <T>(r: RpcOptions<T>, node?: SpiderMeshNode) => Observable<T>
 }
 
