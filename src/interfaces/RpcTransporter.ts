@@ -4,7 +4,7 @@ import { SpiderMeshNode } from "./SpiderMeshNode.js"
 export type RpcRoutingOptions = { [key: string]: string | number | boolean }
 
 
-export type RpcOptions<T> = {
+export type RpcOptions<T = any> = {
     service: string
     method: string
     args: any[]
@@ -19,12 +19,16 @@ export type RpcEvent = Partial<{
     rpc: RpcOptions<any> & {
         callback: (o: any | Promise<any> | Observable<any>) => void
     }
+    online: string
     offline: string
     metadata: Record<string, string | boolean | number>
 }>
 
-export class RpcTransporter extends Observable<RpcEvent> {
-    selfLoadBalancing?: boolean = false
-    rpc: <T>(r: RpcOptions<T>, node?: SpiderMeshNode) => Observable<T>
+export abstract class RpcTransporter {
+    abstract link(nodes$: Observable<{
+        nodes: Map<string, SpiderMeshNode>,
+        last_updated_node_id: string
+    }>): Observable<RpcEvent>
+    abstract rpc<T>(r: RpcOptions<T>, node: SpiderMeshNode, force: boolean): Observable<T>
 }
 

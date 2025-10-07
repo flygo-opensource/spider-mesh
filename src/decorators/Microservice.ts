@@ -8,15 +8,11 @@ export const services$ = new BehaviorSubject<{
         metadata: object | (() => Promise<object>)
     }
 }>({})
-
-export type MicroserviceMetadata = {
-    version: string
-    id?: string
-}
+ 
 
 export const MicroserviceList: SpiderMeshNode['services'] = {}
 
-export const Microservice = (metadata: MicroserviceMetadata) => {
+export const Microservice = (metadata: any = {}) => {
     return (
         (target: { new(...args: any[]): {} }) => {
             class C extends target {
