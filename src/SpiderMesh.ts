@@ -9,9 +9,9 @@ import { MicroserviceOfflineException } from "./helpers/MicroserviceOfflineExcep
 import { services$ } from "./decorators/Microservice.js";
 import { networkInterfaces } from "os";
 import { MicroserviceNotFound } from "./helpers/MicroserviceNotFound.js";
-import { DiscoveryTransporter } from "./interfaces/DiscoveryTransporter.js";
-import { SPIDERMESH_NAMESPACE } from "const.js";
+import { DiscoveryTransporter } from "./interfaces/DiscoveryTransporter.js"; 
 import { MicroserviceRpcTimeout } from "./helpers/MicroserviceRpcTimeout.js";
+import { SPIDERMESH_NAMESPACE } from "../const.js";
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 export type ServiceChecker = (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean
