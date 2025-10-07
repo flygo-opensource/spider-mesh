@@ -1,28 +1,30 @@
 import { createSocket } from "dgram";
-import { SpiderMeshDiscover,  SpiderMeshDiscoveryRegistry } from "@spider-mesh/core";
+import { DiscoveryTransporter, SpiderMesh, SpiderMeshNode } from "@spider-mesh/core";
 import { networkInterfaces } from "os";
-import { SPIDERMESH_NAMESPACE, SPIDERMESH_UDP_BROADCAST_ADDRESS, SPIDERMESH_UDP_BROADCAST_PORT } from "./const.js";
-import { Subject } from "rxjs/internal/Subject";
-import { randomUUID } from "crypto";
+import { SPIDERMESH_UDP_BROADCAST_ADDRESS, SPIDERMESH_UDP_BROADCAST_PORT } from "./const.js";
+import { filter, map, Observable } from "rxjs";
+import { Subject, merge, firstValueFrom } from "rxjs";
+import { debounceTime } from "rxjs/operators";
+import { ReplaySubject } from "rxjs/internal/ReplaySubject";
 
 
-export type MdnsMessage<T = any> = {
-    namespace: string
-    sender_id: string
-    host: string
-    data: T
+export type MdnsMessage = {
+    hi: boolean
+    node: SpiderMeshNode
+    sender_id: string,
+    seq: number
 }
 
 
 
 
-export class Mdns extends Subject<any> implements SpiderMeshDiscover {
+export class Mdns extends DiscoveryTransporter {
 
-
-    #udp4 = createSocket({ type: 'udp4' })
-    #id = randomUUID()
-    #localAddress = new Set(Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean))
-    #broadcastAddress = [
+    #seq = 0
+    #localAddress = new Set(
+        Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
+    )
+    #broadcastAddress = new Set([
         '255.255.255.255',
         ...(SPIDERMESH_UDP_BROADCAST_ADDRESS || '').split(',').map(e => {
             const ppps = e.trim().split('.')
@@ -32,50 +34,92 @@ export class Mdns extends Subject<any> implements SpiderMeshDiscover {
             })
             return []
         }).flat(2)
-    ]
+    ])
+    #bus = new Subject<{ data: MdnsMessage, port: number, ip: string }>()
+    #ready = new ReplaySubject(1)
 
-    constructor() {
+    constructor(private sm: SpiderMesh) {
         super()
-        this.#udp4.bind(SPIDERMESH_UDP_BROADCAST_PORT, '0.0.0.0', () => {
-            this.#udp4.setBroadcast(true)
-            this.#udp4.on('message', (raw: Buffer, r) => {
-                const e = JSON.parse(raw.toString()) as MdnsMessage 
-                e.host = r.address
-                const is_remote = !this.#localAddress.has(r.address)
-                if (e.sender_id == this.#id) return
-                if (e.namespace != SPIDERMESH_NAMESPACE) return
-
-                // From remote
-                if (is_remote) {
-                    const payload: MdnsMessage = {
-                        host: r.address,
-                        sender_id: this.#id,
-                        namespace: SPIDERMESH_NAMESPACE,
-                        data: e.data
-                    }
-                    this.#udp4.send(JSON.stringify(payload), SPIDERMESH_UDP_BROADCAST_PORT, '255.255.255.255')
-                }
-                // Process 
-                this.next(e.data)
-            })
-            SpiderMeshDiscoveryRegistry.register(this)
-        })
+        sm.linkTransporter(this)
+        console.log(`I'm node ${sm.node_id}`)
     }
 
-    broadcast(data: any, ip?: string) {
-        const e: MdnsMessage  = {
-            data,
-            namespace: SPIDERMESH_NAMESPACE,
-            sender_id: this.#id,
-            host: ''
+    link(metadata$: Observable<SpiderMeshNode>) {
+        return merge(
+            new Observable<SpiderMeshNode>(o => {
+                const udp4 = createSocket({
+                    type: 'udp4',
+                    reuseAddr: true
+                })
+
+                udp4.on('message', async (raw: Buffer, r) => {
+                    try {
+                        const { node, hi, sender_id, seq } = JSON.parse(raw.toString()) as MdnsMessage
+                        if (node.node_id == this.sm.node_id) return
+                        if (sender_id == this.sm.node_id) return
+                        if (node.namespace != this.sm.namespace) return
+                        node.host = node.host || r.address
+                        const is_remote = !this.#localAddress.has(r.address)
+                        if (is_remote && !this.#broadcastAddress.has(r.address)) return
+
+                        // From remote
+                        is_remote && await this.#broadcast(node, hi, '255.255.255.255')
+
+                        // Process 
+                        o.next(node)
+                        hi && await this.#broadcast(await firstValueFrom(metadata$), false, node.host)
+                    } catch (e) {
+                        console.log(e)
+                    }
+                })
+
+                udp4.on('listening', () => {
+                    console.log(`mDNS listening on port `, SPIDERMESH_UDP_BROADCAST_PORT)
+                    udp4.setBroadcast(true)
+                    const subscription = this.#bus.subscribe(({ data, port, ip }) => {
+                        const msg = JSON.stringify(data)
+                        udp4.send(msg, 0, msg.length, port, ip)
+                    })
+                    o.add(subscription)
+                    this.#ready.next(true)
+                })
+                udp4.on('error', (e) => {
+                    throw e
+                })
+                udp4.bind(SPIDERMESH_UDP_BROADCAST_PORT, '0.0.0.0')
+
+
+                return () => udp4.close()
+            }),
+
+
+            // Sync metadata
+            metadata$.pipe(
+                debounceTime(1000),
+                map((metadata, index) => {
+                    this.#broadcast(metadata, index == 0)
+                    return null
+                }),
+                filter(Boolean)
+            )
+        )
+    }
+
+    async #broadcast(node: SpiderMeshNode, hi: boolean, target?: string) {
+        await firstValueFrom(this.#ready)
+        const seq = this.#seq++;
+        const data: MdnsMessage = {
+            sender_id: this.sm.node_id,
+            node,
+            hi,
+            seq
         }
-        const msg = JSON.stringify(e)
-        if (ip) {
-            const target = this.#localAddress.has(ip) ? '255.255.255.255' : ip
-            this.#udp4.send(msg, SPIDERMESH_UDP_BROADCAST_PORT, target)
+        if (target) {
+            const ip = this.#localAddress.has(target) ? '255.255.255.255' : target
+            this.#bus.next({ data, port: SPIDERMESH_UDP_BROADCAST_PORT, ip })
         } else {
             for (const ip of this.#broadcastAddress) {
-                this.#udp4.send(msg, SPIDERMESH_UDP_BROADCAST_PORT, ip)
+                this.#bus.next({ data, port: SPIDERMESH_UDP_BROADCAST_PORT, ip })
             }
         }
     }

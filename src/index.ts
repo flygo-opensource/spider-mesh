@@ -1,2 +1,2 @@
-export { Rpc } from './Rpc.js'
-export { Pubsub } from './Pubsub.js'
+export { Http2Rpc } from './Http2Rpc.js'
+export { Http2Pubsub } from './Http2Pubsub.js'

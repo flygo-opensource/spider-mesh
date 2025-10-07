@@ -7,9 +7,9 @@ const UUID = randomUUID().split('-').pop()
 
 @Microservice()
 export class A {
-    sum(a: number, b: number) {
-        console.log({ a, b, n: Date.now() })
-        throw new MicroserviceException({ a: 'str' + (a + b), code: 'INVAILD_KEYWORD' })
+      sum(a: number, b: number) {
+        console.log({ a, b, n: Date.now() })  
+        // throw new MicroserviceException({ a: 'str' + (a + b), code: 'INVAILD_KEYWORD' })
         return a + b
     }
 
@@ -23,7 +23,7 @@ export class A {
     }
 
 
-    xxx() {
+     xxx() {
         return interval(1000).pipe(
             tap(n => console.log({ n })),
             map((n, i) => {
