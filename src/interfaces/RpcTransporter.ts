@@ -25,10 +25,13 @@ export type RpcEvent = Partial<{
 }>
 
 export abstract class RpcTransporter {
-    abstract link(nodes$: Observable<{
-        nodes: Map<string, SpiderMeshNode>,
-        last_updated_node_id: string
-    }>): Observable<RpcEvent>
+    abstract link(
+        metadata: Observable<SpiderMeshNode>,
+        nodes$: Observable<{
+            nodes: Map<string, SpiderMeshNode>,
+            last_updated_node_id: string
+        }>
+    ): Observable<RpcEvent>
     abstract rpc<T>(r: RpcOptions<T>, node: SpiderMeshNode, force: boolean): Observable<T>
 }
 

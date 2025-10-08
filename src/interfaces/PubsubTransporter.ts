@@ -1,5 +1,6 @@
 import { Observable } from "rxjs"
 import { NodesMap } from "src/SpiderMesh.js"
+import { SpiderMeshNode } from "./SpiderMeshNode.js"
 
 
 export type PubsubTransporterEvent = {
@@ -8,7 +9,7 @@ export type PubsubTransporterEvent = {
 
 
 export abstract class PubsubTransporter {
-    abstract link(nodes$:  Observable<NodesMap>): Observable<PubsubTransporterEvent>
+    abstract link(metadata: Observable<SpiderMeshNode>, nodes$: Observable<NodesMap>): Observable<PubsubTransporterEvent>
     abstract publish<T>(topic: string, data: T): Promise<void>
     abstract listen<T>(topic: string): Observable<T>
 }

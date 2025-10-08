@@ -9,7 +9,7 @@ import { MicroserviceOfflineException } from "./helpers/MicroserviceOfflineExcep
 import { services$ } from "./decorators/Microservice.js";
 import { networkInterfaces } from "os";
 import { MicroserviceNotFound } from "./helpers/MicroserviceNotFound.js";
-import { DiscoveryTransporter } from "./interfaces/DiscoveryTransporter.js"; 
+import { DiscoveryTransporter } from "./interfaces/DiscoveryTransporter.js";
 import { MicroserviceRpcTimeout } from "./helpers/MicroserviceRpcTimeout.js";
 import { SPIDERMESH_NAMESPACE } from "../const.js";
 
@@ -90,7 +90,7 @@ export class SpiderMesh {
         if (!filters.service) return null
 
         if (filters.node_id) {
-            const node = this.#nodes.value.nodes.get(filters.node_id) 
+            const node = this.#nodes.value.nodes.get(filters.node_id)
             if (!node) return null
             if (!node.services[filters.service]) return null
             if (!node.rpc) return null
@@ -117,7 +117,7 @@ export class SpiderMesh {
         return nodes[state.index++ % nodes.length]
     }
 
-    callRemoteService<T>(options: RpcOptions<T>) { 
+    callRemoteService<T>(options: RpcOptions<T>) {
         return of(0).pipe(
             mergeMap(async () => {
                 await this.waitServiceOnline(options.service)
@@ -164,7 +164,7 @@ export class SpiderMesh {
             this.#rpcs.set(transporter_name, rpc)
 
 
-            return transporter.link(this.#nodes).pipe(
+            return transporter.link(this.#metadata$, this.#nodes).pipe(
                 map(e => {
                     const rpc = e.rpc
                     if (rpc) {
@@ -246,7 +246,7 @@ export class SpiderMesh {
             transporters.set(transporter_name, transporter)
             this.#pubsubs.next(transporters)
 
-            return transporter.link(this.#nodes).pipe(
+            return transporter.link(this.#metadata$, this.#nodes).pipe(
                 map(a => a.metadata),
                 filter(Boolean),
                 tap(metadata => {
