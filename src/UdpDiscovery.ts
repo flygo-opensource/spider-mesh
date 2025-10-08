@@ -17,7 +17,7 @@ export type MdnsMessage = {
 
 
 
-export class Mdns extends DiscoveryTransporter {
+export class UdpDiscovery extends DiscoveryTransporter {
 
     #localAddress = new Set(
         Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
@@ -27,8 +27,8 @@ export class Mdns extends DiscoveryTransporter {
         ...(SPIDERMESH_UDP_BROADCAST_ADDRESS || '').split(',').map(e => {
             const ppps = e.trim().split('.')
             if (ppps.length == 4) return e.trim()
-            if (ppps.length == 3) return new Array(255).fill(0).map(h => {
-                return `${e.trim()}.${h}`
+            if (ppps.length == 3) return new Array(256).fill(0).map((h, index) => {
+                return `${e.trim()}.${index}`
             })
             return []
         }).flat(2)
