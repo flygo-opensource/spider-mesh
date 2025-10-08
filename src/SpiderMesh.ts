@@ -1,4 +1,4 @@
-import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, mergeAll, mergeMap, Observable, of, retry, tap, throwError, timeout, timer } from "rxjs"
+import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, mergeAll, mergeMap, Observable, of, ReplaySubject, retry, tap, throwError, timeout, timer } from "rxjs"
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { RemoteService } from "./interfaces/RemoteService.js";
 import { SpiderMeshNode } from "./interfaces/SpiderMeshNode.js";
@@ -54,6 +54,11 @@ export class SpiderMesh {
         }>()
     )
 
+    static #transporters$ = new ReplaySubject<RpcTransporter | PubsubTransporter | DiscoveryTransporter>()
+    static linkTransporter(t: RpcTransporter | PubsubTransporter | DiscoveryTransporter) {
+        SpiderMesh.#transporters$.next(t)
+    }
+
     constructor() {
         services$.pipe(
             filter(list => Object.keys(list).length > 0),
@@ -82,6 +87,9 @@ export class SpiderMesh {
             catchError(e => EMPTY)
         ).subscribe()
 
+        SpiderMesh.#transporters$.pipe(
+            tap(t => this.linkTransporter(t))
+        ).subscribe()
 
     }
 
