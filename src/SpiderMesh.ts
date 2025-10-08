@@ -47,12 +47,13 @@ export class SpiderMesh {
         last_updated_node_id: ''
     })
 
-    #services$ = new BehaviorSubject(
-        new Map<string, {
+    #services$ = new BehaviorSubject({
+        services: new Map<string, {
             index: number
             nodes: string[]
-        }>()
-    )
+        }>(),
+        last_updated_services: new Set<string>()
+    })
 
     static #transporters$ = new ReplaySubject<RpcTransporter | PubsubTransporter | DiscoveryTransporter>()
     static linkTransporter(t: RpcTransporter | PubsubTransporter | DiscoveryTransporter) {
@@ -107,7 +108,7 @@ export class SpiderMesh {
             return { node, transporter }
         }
 
-        const state = this.#services$.value.get(filters.service)
+        const state = this.#services$.value.services.get(filters.service)
         if (!state || state.nodes.length == 0) return null
 
 
@@ -192,8 +193,8 @@ export class SpiderMesh {
                         const node = this.#nodes.value.nodes.get(online)
                         if (node) {
                             node.rpc = transporter_name
+                            const services = this.#services$.value.services
                             for (const service of Object.keys(node.services || {})) {
-                                const services = this.#services$.value
                                 const target = services.get(service) || { index: 0, nodes: [] }
                                 services.set(service, {
                                     index: target.index,
@@ -202,8 +203,11 @@ export class SpiderMesh {
                                         node.node_id
                                     ]
                                 })
-                                this.#services$.next(services)
                             }
+                            this.#services$.next({
+                                services,
+                                last_updated_services: new Set(Object.keys(node.services || {}))
+                            })
                         }
                     }
 
@@ -220,13 +224,16 @@ export class SpiderMesh {
                             this.#nodes.next({ nodes, last_updated_node_id: node.node_id })
 
                             // Update services
+                            const services = this.#services$.value.services
                             for (const service of Object.values(node.services)) {
-                                const services = this.#services$.value
                                 const target = services.get(service) || { index: 0, nodes: [] }
                                 const nodes = target.nodes.filter(id => id != node.node_id)
                                 nodes.length == 0 ? services.delete(service) : services.set(service, { ...target, nodes })
-                                this.#services$.next(services)
                             }
+                            this.#services$.next({
+                                services,
+                                last_updated_services: new Set(Object.keys(node.services || {}))
+                            })
                         }
                     }
 
@@ -301,7 +308,7 @@ export class SpiderMesh {
     waitServiceOnline(service: string, check: ServiceChecker = (nodes => nodes.length > 0)) {
         return firstValueFrom(this.#services$.pipe(
             map(() => {
-                const targets = this.#services$.value.get(service)?.nodes || []
+                const targets = this.#services$.value.services.get(service)?.nodes || []
                 const nodes = targets.map(id => this.#nodes.value.nodes.get(id)!).filter(Boolean)
                 return nodes
             }),
@@ -338,7 +345,7 @@ export class SpiderMesh {
         ])
 
         const listRpcNodes = () => {
-            const targets = this.#services$.value.get(service)
+            const targets = this.#services$.value.services.get(service)
             if (!targets || targets.nodes.length == 0) return []
             return targets.nodes.map(id => {
                 const node = this.#nodes.value.nodes.get(id)
@@ -358,7 +365,12 @@ export class SpiderMesh {
 
                 if ($ == 'watch$') return (fn: ServiceChecker = (nodes => nodes.length > 0)) => {
                     return this.#services$.pipe(
-                        map(services => services.get(service)?.nodes || []),
+                        filter((e, index) => {
+                            if (index == 0) return true
+                            if(e.last_updated_services.has(service)) return true
+                            return false  
+                        }),
+                        map(e => e.services.get(service)?.nodes || []),
                         map(targets => targets.map(id => this.#nodes.value.nodes.get(id)!).filter(Boolean))
                     )
                 }
