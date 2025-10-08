@@ -6,7 +6,7 @@
       "dependencies": {
         "@grpc/grpc-js": "^1.12.6",
         "@grpc/proto-loader": "^0.7.13",
-        "@spider-mesh/core": "2.0.2",
+        "@spider-mesh/core": "2.0.4",
         "@types/msgpack": "^0.0.34",
         "msgpackr": "^1.11.5",
         "reflect-metadata": "^0.2.2",
@@ -67,7 +67,7 @@
 
     "@protobufjs/utf8": ["@protobufjs/utf8@1.1.0", "", {}, "sha512-Vvn3zZrhQZkkBE8LSuW3em98c0FwgO4nxzv6OdSxPKJIEKY2bGbHn+mhGIPerzI4twdxaP8/0+06HBpwf345Lw=="],
 
-    "@spider-mesh/core": ["@spider-mesh/core@2.0.2", "", { "dependencies": { "buffer": "^6.0.3", "react-native-uuid": "^2.0.2", "rxjs": "^7.8.2", "uuid": "^10.0.0" } }, "sha512-E2aJnIhNoTJ9ff6VoogdPid7hNCmuK3s9pui2JoMUYmRlznALiZbyebaLISoSKt1X8V4Z0SxKkg/rTfPeWVktA=="],
+    "@spider-mesh/core": ["@spider-mesh/core@2.0.4", "", { "dependencies": { "buffer": "^6.0.3", "react-native-uuid": "^2.0.2", "rxjs": "^7.8.2", "uuid": "^10.0.0" } }, "sha512-4D9fKzZpHlPa/Z6m0I7yCeUA+7QO2j86iI1eAv1F8ZsyqfsC0l2gE5LIucLJQH63g+hpNQEqTSS7tQNgukBlxw=="],
 
     "@tsconfig/node10": ["@tsconfig/node10@1.0.11", "", {}, "sha512-DcRjDCujK/kCk/cUe8Xz8ZSpm8mS3mNNpta+jGCA6USEDfktlNvm1+IuZ9eTcDbNk41BHwpHHeW+N1lKCz4zOw=="],
 
