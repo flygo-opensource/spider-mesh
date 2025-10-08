@@ -11,6 +11,7 @@ export type MdnsMessage = {
     hi: boolean
     node: SpiderMeshNode
     sender_id: string,
+    receiver_id?: string
 }
 
 
@@ -50,12 +51,13 @@ export class Mdns extends DiscoveryTransporter {
                 })
 
 
-                const broadcast = async (node: SpiderMeshNode, hi: boolean, target?: string) => {
+                const broadcast = async (node: SpiderMeshNode, hi: boolean, target?: string, receiver_id?: string) => {
 
                     const data: MdnsMessage = {
                         sender_id: metadata.node_id,
                         node,
                         hi,
+                        receiver_id
                     }
                     const msg = JSON.stringify(data)
                     const ips = target ? [this.#localAddress.has(target) ? '255.255.255.255' : target] : this.#broadcastAddress
@@ -64,7 +66,7 @@ export class Mdns extends DiscoveryTransporter {
 
                 udp4.on('message', async (raw: Buffer, r) => {
                     try {
-                        const { node, hi, sender_id } = JSON.parse(raw.toString()) as MdnsMessage
+                        const { node, hi, sender_id, receiver_id } = JSON.parse(raw.toString()) as MdnsMessage
                         if (node.node_id == metadata.node_id) return
                         if (sender_id == metadata.node_id) return
                         if (node.namespace != metadata.namespace) return
@@ -72,14 +74,15 @@ export class Mdns extends DiscoveryTransporter {
                         const is_remote = !this.#localAddress.has(r.address)
                         if (is_remote && !this.#broadcastAddress.has(r.address)) return
 
-                        // From remote
-                        is_remote && await broadcast(node, hi, '255.255.255.255')
+                        // Re-broadcast from remote
+                        is_remote && await broadcast(node, hi, '255.255.255.255', receiver_id)
 
                         // Process 
+                        if (receiver_id && receiver_id != metadata.node_id) return
                         o.next(node)
-                        hi && await broadcast(await firstValueFrom(metadata$), false, node.host)
+                        hi && await broadcast(await firstValueFrom(metadata$), false, node.host, node.node_id)
                     } catch (e) {
-                        console.log(e)
+                        console.error(e)
                     }
                 })
 
