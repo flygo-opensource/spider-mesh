@@ -1,4 +1,4 @@
-import { SpiderMesh, PubsubTransporter, PubsubTransporterEvent, NodesMap } from "@spider-mesh/core";
+import { SpiderMesh, PubsubTransporter, PubsubTransporterEvent, NodesMap, SpiderMeshNode } from "@spider-mesh/core";
 import { map, Observable, Subject } from "rxjs";
 import { filter } from 'rxjs'
 import { ClientHttp2Session, createSecureServer } from "http2";
@@ -24,9 +24,9 @@ export class Http2Pubsub extends PubsubTransporter {
     #topics = new Map<string, Set<NodeId>>()
 
 
-    constructor(sm: SpiderMesh) {
+    constructor() {
         super()
-        sm.linkTransporter(this)
+        SpiderMesh.linkTransporter(this)
     }
 
 
@@ -100,7 +100,7 @@ export class Http2Pubsub extends PubsubTransporter {
         )
     }
 
-    link(nodes$: Observable<NodesMap>): Observable<PubsubTransporterEvent> {
+    link(metadata$: Observable<SpiderMeshNode>, nodes$: Observable<NodesMap>): Observable<PubsubTransporterEvent> {
         return merge(this.#server(), this.#link(nodes$))
     }
 

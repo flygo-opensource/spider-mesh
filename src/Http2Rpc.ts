@@ -1,13 +1,12 @@
-import { SpiderMesh, RpcTransporter, type RpcOptions, SpiderMeshNode, MicroserviceOfflineException, RpcEvent, NodesMap, MicroserviceException } from "@spider-mesh/core";
-import { firstValueFrom, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, finalize, tap, distinctUntilChanged } from 'rxjs'
+import { RpcTransporter, type RpcOptions, SpiderMeshNode, MicroserviceOfflineException, RpcEvent, NodesMap, MicroserviceException, SpiderMesh } from "@spider-mesh/core";
+import { firstValueFrom, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, finalize, distinctUntilChanged } from 'rxjs'
 import { createServer, connect, ClientHttp2Session, IncomingHttpHeaders, IncomingHttpStatusHeader, ServerHttp2Stream } from 'node:http2'
 import { map, scan, mergeAll, filter, mergeMap, takeWhile } from "rxjs/operators";
 import { EMPTY } from "rxjs/internal/observable/empty";
 import { SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE } from "./const.js";
-import { AddressInfo, isIPv4, isIPv6 } from "node:net";
+import { AddressInfo } from "node:net";
 import { unpack, pack } from 'msgpackr'
 import { Subject } from "rxjs/internal/Subject";
-import { timer } from "rxjs/internal/observable/timer";
 
 
 export type RequestHeaders = {
@@ -22,17 +21,16 @@ export class Http2Rpc extends RpcTransporter {
     #offline$ = new Subject<string>()
     #connections = new Map<string, ClientHttp2Session>()
 
-    constructor(private sm: SpiderMesh) {
+    constructor(){
         super()
-        sm.linkTransporter(this)
+        SpiderMesh.linkTransporter(this)
     }
 
-
-    link(nodes$: Observable<NodesMap>): Observable<RpcEvent> {
+    link(metadata$: Observable<SpiderMeshNode>, nodes$: Observable<NodesMap>): Observable<RpcEvent> {
         return new Observable<RpcEvent>(o => {
 
             const server = createServer({
-
+                
             })
 
             server.on('stream', (stream: ServerHttp2Stream, headers: RequestHeaders) => {
@@ -46,11 +44,12 @@ export class Http2Rpc extends RpcTransporter {
                     const callback = async (res: Promise<any>) => {
                         try {
                             const response = await res
+                            const metadata = await firstValueFrom(metadata$ )
                             if (response instanceof Observable) {
                                 stream.respond({
                                     ':status': 200,
                                     'content-type': 'application/octet-stream',
-                                    'smnid': this.sm.node_id
+                                    'smnid': metadata.node_id
                                 })
                                 response.pipe(
                                     map(obj => {
@@ -81,7 +80,7 @@ export class Http2Rpc extends RpcTransporter {
                             stream.respond({
                                 ':status': 200,
                                 'content-type': 'application/json',
-                                'smnid': this.sm.node_id
+                                'smnid': metadata.node_id
                             })
                             const payload = pack(r)
                             stream.write(payload)
@@ -137,10 +136,10 @@ export class Http2Rpc extends RpcTransporter {
                 mergeAll(),
                 mergeMap(async node => {
                     if (node.transporters.Http2Rpc === undefined) return
-                    try{
+                    try {
                         await this.#connect({ service: '', method: '', args: [] }, node, false)
                         o.next({ online: node.node_id })
-                    }catch(e){
+                    } catch (e) {
 
                     }
                 })

@@ -1,21 +1,26 @@
 {
   "name": "@spider-mesh/tcp",
   "type": "module",
-  "version": "2.0.4",
+  "version": "2.0.6",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "repository": {
-    "url": "https://github.com/spider-mesh/tcp"
+    "url": "https://github.com/spider-mesh/tcp",
+    "rxjs": "^7.8.2",
+    "reflect-metadata": "^0.2.2"
   },
   "files": [
     "build/**/*",
     "tsconfig.json",
     "yarn.lock"
   ],
+  "peerDependencies": {
+    "@spider-mesh/core": "^2.0.6"
+  },
   "devDependencies": {
+    "@types/msgpack": "^0.0.34",
     "@types/node": "^22.10.5",
-    "ts-node": "^10.9.2",
     "@types/bun": "^1.2.23",
     "typescript": "^5.8.2"
   },
@@ -37,10 +42,6 @@
   "dependencies": {
     "@grpc/grpc-js": "^1.12.6",
     "@grpc/proto-loader": "^0.7.13",
-    "@spider-mesh/core": "2.0.4",
-    "@types/msgpack": "^0.0.34",
-    "msgpackr": "^1.11.5",
-    "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "msgpackr": "^1.11.5"
   }
 }

@@ -6,8 +6,8 @@ import { Http2Rpc } from "../src/Http2Rpc.js";
 console.log(`Master`)
 
 const sm = new SpiderMesh()
-new Http2Rpc(sm)
-new Mdns(sm)
+new Http2Rpc()
+new Mdns()
 const service = sm.linkRemoteService(A)
 console.log(service)
 service.watch$().subscribe(() => {

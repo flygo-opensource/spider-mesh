@@ -5,8 +5,10 @@ import { Mdns } from "../src/Mdns.js";
 
 console.log(`Worker`)
 const sm = new SpiderMesh()
-new Http2Rpc(sm)
-new Mdns(sm)
+new Http2Rpc()
+new Mdns()
+
+
 
 
 new A()
