@@ -64,26 +64,25 @@ export class SpiderMesh {
         services$.pipe(
             filter(list => Object.keys(list).length > 0),
             mergeMap(async services => {
-                for (const v of Object.values(services)) {
-                    const metadata = (v as any)['$'] || (
-                        typeof v.metadata == 'function' ? await v.metadata() : v.metadata
-                    )
-                    Object.defineProperty(v, '$', { value: metadata })
+                for (const { instance } of Object.values(services)) {
+                    const list = listBeforeMicroserviceOnlineMethods(instance)
+                    for (const method of list) {
+                        await instance[method]()
+                    }
                 }
-                return services
-            }),
-            tap(services => {
                 const metadata = {
                     ... this.#metadata$.value,
-                    services: Object.entries(services).reduce((p, [name, v]) => {
+                    services: Object.entries(services).reduce((p, [name, { metadata }]) => {
                         return {
                             ...p,
-                            [name]: (v as any)['$']
+                            [name]: metadata
                         }
                     }, {} as { [name: string]: any }),
                     version: this.#metadata$.value.version + 1
                 }
                 this.#metadata$.next(metadata)
+
+                return services
             }),
             catchError(e => EMPTY)
         ).subscribe()
@@ -363,12 +362,12 @@ export class SpiderMesh {
 
                 if ($ == 'nodes') return listRpcNodes()
 
-                if ($ == 'watch$') return (fn: ServiceChecker = (nodes => nodes.length > 0)) => {
+                if ($ == 'watch$') return () => {
                     return this.#services$.pipe(
                         filter((e, index) => {
                             if (index == 0) return true
-                            if(e.last_updated_services.has(service)) return true
-                            return false  
+                            if (e.last_updated_services.has(service)) return true
+                            return false
                         }),
                         map(e => e.services.get(service)?.nodes || []),
                         map(targets => targets.map(id => this.#nodes.value.nodes.get(id)!).filter(Boolean))
@@ -464,14 +463,12 @@ export class SpiderMesh {
         }
     }
 
-    async exposeLocalService(name: string, instance: any) {
-        const hooks = listBeforeMicroserviceOnlineMethods(instance)
-        for (const method of hooks) await instance[method]
+    async exposeLocalService(name: string, instance: any, metadata: any) {
         services$.next({
             ...services$.value,
             [name]: {
                 instance,
-                metadata: {},
+                metadata,
                 name
             }
         })
