@@ -1,7 +1,7 @@
 import { catchError, filter, firstValueFrom, from, map, mergeMap, Observable, of } from "rxjs";
 import { SpiderMeshNode } from "./SpiderMeshNode.js";
 import { RpcOptions } from "./RpcTransporter.js";
-import { ServiceChecker, SpiderMesh } from "src/SpiderMesh.js";
+import { ServiceChecker, SpiderMesh } from "../../src/SpiderMesh.js";
 
 
 

@@ -1,5 +1,5 @@
 import { Observable } from "rxjs"
-import { NodesMap } from "src/SpiderMesh.js"
+import { NodesMap } from "../../src/SpiderMesh.js"
 import { SpiderMeshNode } from "./SpiderMeshNode.js"
 
 
