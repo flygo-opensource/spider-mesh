@@ -41,7 +41,9 @@ export type Fallbackable<Fn, FallbackValue = unknown> = Fn extends (...args: inf
 export type FunctionOnly<T, Fallback> = T extends (...args: any[]) => any ? Fallback : never
 
 
-export class RemoteService<Response> {
+
+
+export class RemoteServiceLinker<Service> {
 
     constructor(
         private sm: SpiderMesh,
@@ -74,7 +76,7 @@ export class RemoteService<Response> {
     }
 
     set<Fallback>(options: Omit<Partial<RpcOptions<Fallback>>, 'service' | 'method' | 'args'>) {
-        return RemoteService.link<Response, Fallback>(this.sm, {
+        return RemoteServiceLinker.link<Service, Fallback>(this.sm, {
             ...this.options,
             ...options
         })
@@ -116,16 +118,16 @@ export class RemoteService<Response> {
 
                 return (...args: any[]) => {
 
-                    const response = target.sm.callRemoteService({
+                    const Service = target.sm.callRemoteService({
                         ...options,
                         method,
                         args
                     })
 
-                    return Object.assign(response, {
+                    return Object.assign(Service, {
                         then: async (s: Function, r: Function) => {
                             try {
-                                s(await firstValueFrom(response))
+                                s(await firstValueFrom(Service))
                             } catch (e) {
                                 r(e)
                             }
@@ -137,20 +139,23 @@ export class RemoteService<Response> {
             }
         }
 
-        return new Proxy(target, handler) as RemoteService<Service> & ({
-            [K in keyof Service as  FunctionOnly<Service[K], K>]: Fallbackable<Service[K], Fallback>
-        } & {
-            [key in keyof Service as FunctionOnly<Service[key], key extends string ? `__batch__${key}` : never>]: Service[key] extends ((...args: any) => any) ? (
-                (...args: Parameters<Service[key]>) => Observable<{
-                    node: SpiderMeshNode,
-                    data: Awaited<ReturnType<Service[key]>>
-                } | {
-                    node: SpiderMeshNode,
-                    error: Error
-                }>
-            ) : never
-        })
+        return new Proxy(target, handler) as Mapper<Service, Fallback>
     }
 }
 
- 
+export type Mapper<Service, Fallback = unknown> = RemoteServiceLinker<Service> & ({
+    [K in keyof Service as  FunctionOnly<Service[K], K>]: Fallbackable<Service[K], Fallback>
+} & {
+    [key in keyof Service as FunctionOnly<Service[key], key extends string ? `__batch__${key}` : never>]: Service[key] extends ((...args: any) => any) ? (
+        (...args: Parameters<Service[key]>) => Observable<{
+            node: SpiderMeshNode,
+            data: Awaited<ReturnType<Service[key]>>
+        } | {
+            node: SpiderMeshNode,
+            error: Error
+        }>
+    ) : never
+})
+
+
+export type RemoteService<Service> = Mapper<Service> 
