@@ -6,7 +6,6 @@ import { ServiceChecker, SpiderMesh } from "../../src/SpiderMesh.js";
 
 
 const InvaildMethodList = new Set([
-    "then",
     'caller',
     'callee',
     'arguments',
@@ -95,9 +94,8 @@ export class RemoteServiceLinker<Service> {
         const handler: ProxyHandler<any> = {
             get(_, prop) {
                 const method = prop.toString()
+                if(method == 'then') return null 
                 if (InvaildMethodList.has(method)) return () => null
-
-
                 const fn = (target as Service)[prop as keyof Service]
                 if (fn) return  (typeof fn === 'function') ? fn.bind(target) : fn;
 
