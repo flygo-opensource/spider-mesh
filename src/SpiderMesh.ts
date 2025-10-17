@@ -11,7 +11,8 @@ import { networkInterfaces } from "os";
 import { MicroserviceNotFound } from "./helpers/MicroserviceNotFound.js";
 import { DiscoveryTransporter } from "./abstracts/DiscoveryTransporter.js";
 import { MicroserviceRpcTimeout } from "./helpers/MicroserviceRpcTimeout.js";
-import { SPIDERMESH_NAMESPACE } from "../const.js";
+import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME } from "../const.js";
+import { AllIpAddresses } from "./helpers/GetIps.js";
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 export type ServiceChecker = (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean
@@ -31,8 +32,8 @@ export class SpiderMesh {
     #discovers = new Map<string, DiscoveryTransporter>()
 
     #metadata$ = new BehaviorSubject<SpiderMeshNode>({
-        ips: Object.values(networkInterfaces()).flat(2).filter(a => !a?.internal && !!a?.address).map(a => a?.address!),
-        host: '',
+        ips: AllIpAddresses,
+        host: SPIDERMESH_NODE_HOSTNAME,
         namespace: SPIDERMESH_NAMESPACE,
         node_id: this.node_id,
         services: {},
