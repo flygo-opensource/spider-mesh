@@ -6,6 +6,7 @@ import { ServiceChecker, SpiderMesh } from "../../src/SpiderMesh.js";
 
 
 const InvaildMethodList = new Set([
+    "then",
     'caller',
     'callee',
     'arguments',
@@ -94,10 +95,11 @@ export class RemoteServiceLinker<Service> {
         const handler: ProxyHandler<any> = {
             get(_, prop) {
                 const method = prop.toString()
-                const fn = (target as Service)[prop as keyof Service]
-                if (fn) return fn
-
                 if (InvaildMethodList.has(method)) return () => null
+
+
+                const fn = (target as Service)[prop as keyof Service]
+                if (fn) return  (typeof fn === 'function') ? fn.bind(target) : fn;
 
                 if (method.startsWith('__batch__')) {
                     const real_metod = method.split('__batch__')?.[1]
