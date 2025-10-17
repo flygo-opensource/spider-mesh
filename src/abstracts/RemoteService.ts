@@ -34,8 +34,8 @@ export type RemoteServiceOptions = Partial<RpcOptions<any>> & { service: string 
 
 export type Unwrap<T> = Awaited<T> extends Observable<infer U> ? Observable<U> : (T extends Promise<infer V> ? Promise<V> : Promise<T>)
 
-export type Fallbackable<Fn, FallbackValue = unknown> = Fn extends (...args: infer A) => Observable<infer R> | Promise<infer R> | (infer R) ? (
-    (...args: A) => IsUnknown<FallbackValue, Unwrap<R>, (FallbackValue extends Observable<any> ? FallbackValue : Promise<FallbackValue> | Unwrap<R>)>
+export type Fallbackable<Fn, FallbackValue = unknown> = Fn extends (...args: infer A) => infer R ? (
+    (...args: A) => IsUnknown<FallbackValue, Unwrap<R>, FallbackValue | Unwrap<R>>
 ) : undefined
 
 export type FunctionOnly<T, Fallback> = T extends (...args: any[]) => any ? Fallback : never
@@ -59,7 +59,7 @@ export class RemoteServiceLinker<Service> {
         }).filter(Boolean).map(node => node!)
     }
 
-    watch$() {
+    watch() {
         return this.sm.services$.pipe(
             filter((e, index) => {
                 if (index == 0) return true
@@ -158,4 +158,5 @@ export type Mapper<Service, Fallback = unknown> = RemoteServiceLinker<Service> &
 })
 
 
-export type RemoteService<Service> = Mapper<Service> 
+export type RemoteService<Service> = Mapper<Service>
+
