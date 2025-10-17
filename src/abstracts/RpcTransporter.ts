@@ -32,6 +32,6 @@ export abstract class RpcTransporter {
             last_updated_node_id: string
         }>
     ): Observable<RpcEvent>
-    abstract rpc<T>(r: RpcOptions<T>, node: SpiderMeshNode, force: boolean): Observable<T>
+    abstract rpc<R, T>(r: RpcOptions<T>, node: SpiderMeshNode, force: boolean): Observable<R>
 }
 

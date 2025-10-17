@@ -1,5 +1,5 @@
 import { BehaviorSubject, ReplaySubject } from "rxjs"
-import { SpiderMeshNode } from "../interfaces/SpiderMeshNode.js"
+import { SpiderMeshNode } from "../abstracts/SpiderMeshNode.js"
 
 export const services$ = new BehaviorSubject<{
     [name: string]: {
