@@ -5,6 +5,8 @@ import { ClientHttp2Session, createSecureServer } from "http2";
 import http2 from 'http2'
 import { AddressInfo } from "net";
 import { merge } from "rxjs/internal/observable/merge";
+import { unpack, pack } from 'msgpackr'
+
 
 type NodeId = string
 
@@ -56,8 +58,12 @@ export class Http2Pubsub extends PubsubTransporter {
                 req.on('end', () => {
                     const $ = this.#subscriptions.get(event)
                     if (!$) return
-                    const data = JSON.parse(Buffer.concat(buffers).toString('utf8'))
-                    $.next(data)
+                    try {
+                        const data = unpack(Buffer.concat(buffers))
+                        $.next(data)
+                    } catch (e) {
+
+                    }
                 })
             })
 
@@ -114,7 +120,7 @@ export class Http2Pubsub extends PubsubTransporter {
 
     async publish<T>(topic: string, data: T) {
         const ids = this.#topics.get(topic) || new Set<NodeId>
-        const buffer = Buffer.from(JSON.stringify(data))
+        const buffer = pack(data)
         for (const id of ids) {
             const connection = this.#nodes.get(id)
             if (!connection) continue

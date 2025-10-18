@@ -5,7 +5,7 @@ import { SPIDERMESH_UDP_BROADCAST_ADDRESS, SPIDERMESH_UDP_BROADCAST_PORT } from 
 import { from, map, Observable } from "rxjs";
 import { firstValueFrom } from "rxjs";
 import { debounceTime, mergeMap } from "rxjs/operators";
-
+import { unpack, pack } from 'msgpackr'
 
 export type MdnsMessage = {
     hi: boolean
@@ -59,14 +59,14 @@ export class UdpDiscovery extends DiscoveryTransporter {
                         hi,
                         receiver_id
                     }
-                    const msg = JSON.stringify(data)
+                    const msg = pack(data)
                     const ips = target ? [this.#localAddress.has(target) ? '255.255.255.255' : target] : this.#broadcastAddress
                     for (const ip of ips) udp4.send(msg, 0, msg.length, SPIDERMESH_UDP_BROADCAST_PORT, ip)
                 }
 
                 udp4.on('message', async (raw: Buffer, r) => {
                     try {
-                        const { node, hi, sender_id, receiver_id } = JSON.parse(raw.toString()) as MdnsMessage
+                        const { node, hi, sender_id, receiver_id } = unpack(raw) as MdnsMessage
                         if (node.node_id == metadata.node_id) return
                         if (sender_id == metadata.node_id) return
                         if (node.namespace != metadata.namespace) return
@@ -82,7 +82,6 @@ export class UdpDiscovery extends DiscoveryTransporter {
                         o.next(node)
                         hi && await broadcast(await firstValueFrom(metadata$), false, node.host, node.node_id)
                     } catch (e) {
-                        console.error(e)
                     }
                 })
 
