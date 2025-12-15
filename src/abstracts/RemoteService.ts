@@ -1,4 +1,4 @@
-import { catchError, filter, firstValueFrom, from, map, mergeMap, Observable, of } from "rxjs";
+import { catchError, EMPTY, filter, firstValueFrom, from, map, mergeMap, Observable, of } from "rxjs";
 import { SpiderMeshNode } from "./SpiderMeshNode.js";
 import { RpcOptions } from "./RpcTransporter.js";
 import { ServiceChecker, SpiderMesh } from "../../src/SpiderMesh.js";
@@ -82,8 +82,8 @@ export class RemoteServiceLinker<Service> {
         })
     }
 
-    wait(check: ServiceChecker = (nodes => nodes.length > 0)) {
-        return this.sm.waitServiceOnline(this.options.service, check)
+    wait(check: ServiceChecker = (nodes => nodes.length > 0), stop$: Observable<void> = EMPTY) {
+        return this.sm.waitServiceOnline(this.options.service, check, stop$)
     }
 
     static link<Service, Fallback = never>(sm: SpiderMesh, options: RemoteServiceOptions) {

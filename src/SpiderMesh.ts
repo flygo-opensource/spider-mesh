@@ -1,4 +1,4 @@
-import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, mergeAll, mergeMap, Observable, of, ReplaySubject, retry, tap, throwError, timeout, timer } from "rxjs"
+import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, ReplaySubject, retry, tap, throwError, timeout, timer } from "rxjs"
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { RemoteService } from "./abstracts/RemoteService.js";
 import { SpiderMeshNode } from "./abstracts/SpiderMeshNode.js";
@@ -129,7 +129,7 @@ export class SpiderMesh {
     callRemoteService<R, T>(options: RpcOptions<T>) {
         return of(0).pipe(
             mergeMap(async () => {
-                await this.waitServiceOnline(options.service)
+                await this.waitServiceOnline(options.service, undefined, options.timeout ? timer(options.timeout) : EMPTY)
                 const target = this.#selectRpcTarget(options)
                 if (!target) throw new MicroserviceOfflineException()
                 const force = !!options.node_id || !!options.ip
@@ -305,16 +305,21 @@ export class SpiderMesh {
     }
 
 
-    waitServiceOnline(service: string, check: ServiceChecker = (nodes => nodes.length > 0)) {
-        return firstValueFrom(this.services$.pipe(
-            map(() => {
-                const targets = this.services$.value.services.get(service)?.nodes || []
-                const nodes = targets.map(id => this.nodes$.value.nodes.get(id)!).filter(Boolean)
-                return nodes
-            }),
-            mergeMap(async targets => check(targets)),
-            filter(Boolean)
-        ))
+    waitServiceOnline(service: string, check: ServiceChecker = (nodes => nodes.length > 0), stop$: Observable<any>) {
+        return firstValueFrom(
+            merge(
+                stop$.pipe(map(() => false)),
+                this.services$.pipe(
+                    map(() => {
+                        const targets = this.services$.value.services.get(service)?.nodes || []
+                        const nodes = targets.map(id => this.nodes$.value.nodes.get(id)!).filter(Boolean)
+                        return nodes
+                    }),
+                    mergeMap(async targets => check(targets)),
+                    filter(Boolean)
+                )
+            )
+        )
     }
 
 
