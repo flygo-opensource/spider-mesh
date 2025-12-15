@@ -1,4 +1,4 @@
-import { catchError, EMPTY, filter, firstValueFrom, from, map, mergeMap, Observable, of } from "rxjs";
+import { catchError, EMPTY, filter, firstValueFrom, from, map, mergeMap, Observable, of, timer } from "rxjs";
 import { SpiderMeshNode } from "./SpiderMeshNode.js";
 import { RpcOptions } from "./RpcTransporter.js";
 import { ServiceChecker, SpiderMesh } from "../../src/SpiderMesh.js";
@@ -82,7 +82,7 @@ export class RemoteServiceLinker<Service> {
         })
     }
 
-    wait(check: ServiceChecker = (nodes => nodes.length > 0), stop$: Observable<void> = EMPTY) {
+    wait(check: ServiceChecker = (nodes => nodes.length > 0), stop$: Observable<any> = EMPTY) {
         return this.sm.waitServiceOnline(this.options.service, check, stop$)
     }
 
@@ -94,10 +94,10 @@ export class RemoteServiceLinker<Service> {
         const handler: ProxyHandler<any> = {
             get(_, prop) {
                 const method = prop.toString()
-                if(method == 'then') return null 
+                if (method == 'then') return null
                 if (InvaildMethodList.has(method)) return () => null
                 const fn = (target as Service)[prop as keyof Service]
-                if (fn) return  (typeof fn === 'function') ? fn.bind(target) : fn;
+                if (fn) return (typeof fn === 'function') ? fn.bind(target) : fn;
 
                 if (method.startsWith('__batch__')) {
                     const real_metod = method.split('__batch__')?.[1]
@@ -160,3 +160,7 @@ export type Mapper<Service, Fallback = unknown> = RemoteServiceLinker<Service> &
 
 export type RemoteService<Service> = Mapper<Service>
 
+
+const a = {} as any as RemoteServiceLinker<{
+
+}>
