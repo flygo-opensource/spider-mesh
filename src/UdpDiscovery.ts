@@ -15,15 +15,13 @@ export type MdnsMessage = {
 }
 
 
-
-
 export class UdpDiscovery extends DiscoveryTransporter {
 
     #localAddress = new Set(
         Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
     )
     #broadcastAddress = new Set([
-        '255.255.255.255',
+        'localhost',
         ...(SPIDERMESH_UDP_BROADCAST_ADDRESS || '').split(',').map(e => {
             const ppps = e.trim().split('.')
             if (ppps.length == 4) return e.trim()
@@ -60,8 +58,10 @@ export class UdpDiscovery extends DiscoveryTransporter {
                         receiver_id
                     }
                     const msg = pack(data)
-                    const ips = target ? [this.#localAddress.has(target) ? '255.255.255.255' : target] : this.#broadcastAddress
-                    for (const ip of ips) udp4.send(msg, 0, msg.length, SPIDERMESH_UDP_BROADCAST_PORT, ip)
+                    const ips = target ? [this.#localAddress.has(target) ? 'localhost' : target] : this.#broadcastAddress
+                    for (const ip of ips) udp4.send(msg, 0, msg.length, SPIDERMESH_UDP_BROADCAST_PORT, ip, e => {
+                        e && console.error('UDP Broadcast error', e)
+                    })
                 }
 
                 udp4.on('message', async (raw: Buffer, r) => {
@@ -75,7 +75,7 @@ export class UdpDiscovery extends DiscoveryTransporter {
                         if (is_remote && !this.#broadcastAddress.has(r.address)) return
 
                         // Re-broadcast from remote
-                        is_remote && await broadcast(node, hi, '255.255.255.255', receiver_id)
+                        is_remote && await broadcast(node, hi, 'localhost', receiver_id)
 
                         // Process 
                         if (receiver_id && receiver_id != metadata.node_id) return
