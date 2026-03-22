@@ -1,7 +1,7 @@
 import { createSocket } from "dgram";
 import { DiscoveryTransporter, SpiderMesh, SpiderMeshNode } from "@spider-mesh/core";
 import { networkInterfaces } from "os";
-import { SPIDERMESH_UDP_BROADCAST_ADDRESS, SPIDERMESH_UDP_BROADCAST_PORT } from "./const.js";
+import { SPIDERMESH_UDP_BROADCAST_ADDRESS, SPIDERMESH_UDP_BROADCAST_PORT, SPIDERMESH_UDP_MULTICAST_ADDRESS } from "./const.js";
 import { from, map, Observable } from "rxjs";
 import { firstValueFrom } from "rxjs";
 import { debounceTime, mergeMap } from "rxjs/operators";
@@ -10,7 +10,8 @@ import { unpack, pack } from 'msgpackr'
 export type MdnsMessage = {
     hi: boolean
     node: SpiderMeshNode
-    sender_id: string,
+    sender_id: string
+    forwarder_id?: string
     receiver_id?: string
 }
 
@@ -21,7 +22,7 @@ export class UdpDiscovery extends DiscoveryTransporter {
         Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
     )
     #broadcastAddress = new Set([
-        'localhost',
+        SPIDERMESH_UDP_MULTICAST_ADDRESS,
         ...(SPIDERMESH_UDP_BROADCAST_ADDRESS || '').split(',').map(e => {
             const ppps = e.trim().split('.')
             if (ppps.length == 4) return e.trim()
@@ -49,48 +50,60 @@ export class UdpDiscovery extends DiscoveryTransporter {
                 })
 
 
-                const broadcast = async (node: SpiderMeshNode, hi: boolean, target?: string, receiver_id?: string) => {
-
-                    const data: MdnsMessage = {
-                        sender_id: metadata.node_id,
-                        node,
-                        hi,
-                        receiver_id
-                    }
+                const broadcast = async (data: MdnsMessage, ips: string[] = [...this.#broadcastAddress]) => {
                     const msg = pack(data)
-                    const ips = target ? [this.#localAddress.has(target) ? 'localhost' : target] : this.#broadcastAddress
-                    for (const ip of ips) udp4.send(msg, 0, msg.length, SPIDERMESH_UDP_BROADCAST_PORT, ip, e => {
-                        e && console.error('UDP Broadcast error', e)
-                    })
+                    for (const ip of ips) {
+                        udp4.send(msg, 0, msg.length, SPIDERMESH_UDP_BROADCAST_PORT, ip, e => {
+                            e && console.error('UDP Broadcast error', e)
+                        })
+                    }
                 }
 
                 udp4.on('message', async (raw: Buffer, r) => {
                     try {
-                        const { node, hi, sender_id, receiver_id } = unpack(raw) as MdnsMessage
-                        if (node.node_id == metadata.node_id) return
-                        if (sender_id == metadata.node_id) return
-                        if (node.namespace != metadata.namespace) return
-                        node.host = node.host || r.address
-                        const is_remote = !this.#localAddress.has(r.address)
-                        if (is_remote && !this.#broadcastAddress.has(r.address)) return
+                        const msg = unpack(raw) as MdnsMessage
+                        if (msg.node.node_id == metadata.node_id) return
+                        if (msg.sender_id == metadata.node_id) return
+                        if (msg.forwarder_id == metadata.node_id) return
+                        if (msg.node.namespace != metadata.namespace) return
+                        
+                        // Forward message in case from remote
+                        const node = { ...msg.node, host: msg.node.host || r.address }
+                        const is_remote = !this.#localAddress.has(r.address);
+                        is_remote && !msg.forwarder_id && await broadcast({
+                            ...msg,
+                            node,
+                            forwarder_id: metadata.node_id
+                        }, [SPIDERMESH_UDP_MULTICAST_ADDRESS]);
 
-                        // Re-broadcast from remote
-                        is_remote && await broadcast(node, hi, 'localhost', receiver_id)
+                        // Ignore if message has receiver and it's not me
+                        if (msg.receiver_id && msg.receiver_id != metadata.node_id) return;
 
-                        // Process 
-                        if (receiver_id && receiver_id != metadata.node_id) return
-                        o.next(node)
-                        hi && await broadcast(await firstValueFrom(metadata$), false, node.host, node.node_id)
+                        // Say hi back if first time seen 
+                        msg.hi && await broadcast({
+                            node: metadata,
+                            hi: false,
+                            sender_id: metadata.node_id,
+                            receiver_id: msg.sender_id
+                        }, [is_remote ? r.address : SPIDERMESH_UDP_MULTICAST_ADDRESS]);
+
+                        // Emit node
+                        o.next(node);
+
                     } catch (e) {
                     }
                 })
 
                 udp4.on('listening', () => {
-                    udp4.setBroadcast(true)
-
+                    udp4.setMulticastInterface("127.0.0.1");
+                    udp4.addMembership(SPIDERMESH_UDP_MULTICAST_ADDRESS, "127.0.0.1");
                     const s = metadata$.pipe(
                         debounceTime(1000),
-                        map((metadata, index) => broadcast(metadata, index == 0))
+                        map(node => broadcast({
+                            node,
+                            hi: true,
+                            sender_id: metadata.node_id
+                        }))
                     ).subscribe()
 
                     o.add(() => s.unsubscribe())
