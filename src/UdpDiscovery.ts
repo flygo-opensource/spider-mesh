@@ -66,7 +66,7 @@ export class UdpDiscovery extends DiscoveryTransporter {
                         if (msg.sender_id == metadata.node_id) return
                         if (msg.forwarder_id == metadata.node_id) return
                         if (msg.node.namespace != metadata.namespace) return
-                        
+
                         // Forward message in case from remote
                         const node = { ...msg.node, host: msg.node.host || r.address }
                         const is_remote = !this.#localAddress.has(r.address);
@@ -80,12 +80,15 @@ export class UdpDiscovery extends DiscoveryTransporter {
                         if (msg.receiver_id && msg.receiver_id != metadata.node_id) return;
 
                         // Say hi back if first time seen 
-                        msg.hi && await broadcast({
-                            node: metadata,
-                            hi: false,
-                            sender_id: metadata.node_id,
-                            receiver_id: msg.sender_id
-                        }, [is_remote ? r.address : SPIDERMESH_UDP_MULTICAST_ADDRESS]);
+                        if (msg.hi) {
+                            const node = await firstValueFrom(metadata$)
+                            await broadcast({
+                                node,
+                                hi: false,
+                                sender_id: node.node_id,
+                                receiver_id: msg.sender_id
+                            }, [is_remote ? r.address : SPIDERMESH_UDP_MULTICAST_ADDRESS]);
+                        }
 
                         // Emit node
                         o.next(node);
