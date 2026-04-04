@@ -67,12 +67,13 @@ export class Http2Pubsub implements PubsubTransporter {
         })
     }
 
-    #link(nodes: Observable<NodesMap>) {
-        return nodes.pipe(
+
+    link(metadata$: Observable<SpiderMeshNode>, nodes$: Observable<NodesMap>): Observable<PubsubTransporterEvent> {
+        return merge(this.#server(), nodes$.pipe(
             map(e => {
                 const node = e.nodes.get(e.last_updated_node_id)
                 if (!node) return
-                if (!this.#nodes.has(node.node_id) && node.online) {
+                if (!this.#nodes.has(node.node_id)) {
                     const port = node.transporters.http2pubsub
                     if (isNaN(Number(port))) return
                     const url = `http://${node.host}:${port}`
@@ -86,22 +87,20 @@ export class Http2Pubsub implements PubsubTransporter {
 
                 for (const topic of node.topics) {
                     const set = this.#topics.get(topic) || new Set<string>()
-                    if (node.online) {
-                        set.add(node.node_id)
-                        this.#topics.set(topic, set)
-                    } else {
-                        set.delete(node.node_id)
-                        set.size == 0 && this.#topics.delete(topic)
-                    }
+                    set.add(node.node_id)
+                    this.#topics.set(topic, set)
+                    // if (node.online) {
+                    //     set.add(node.node_id)
+                    //     this.#topics.set(topic, set)
+                    // } else {
+                    //     set.delete(node.node_id)
+                    //     set.size == 0 && this.#topics.delete(topic)
+                    // }
                 }
             }),
             map(() => null),
             filter(Boolean)
-        )
-    }
-
-    link(metadata$: Observable<SpiderMeshNode>, nodes$: Observable<NodesMap>): Observable<PubsubTransporterEvent> {
-        return merge(this.#server(), this.#link(nodes$))
+        ))
     }
 
     listen<T>(topic: string) {
