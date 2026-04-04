@@ -3,7 +3,7 @@ import { networkInterfaces } from "os";
 import { SPIDERMESH_WHITELIST_ADDRESS, SPIDERMESH_MULTICAST_PORT, SPIDERMESH_MULTICAST_ADDRESS } from "./const.js";
 import { BehaviorSubject, debounceTime, from, map, ReplaySubject } from "rxjs";
 import { firstValueFrom, fromEvent } from "rxjs";
-import { switchMap, mergeMap, filter} from "rxjs/operators";
+import { switchMap, mergeMap, filter } from "rxjs/operators";
 import { unpack, pack } from 'msgpackr'
 
 export type NodeMetadata<T = {}> = T & {
@@ -21,12 +21,13 @@ export type MdnsMessage<T extends NodeMetadata> = {
 }
 
 
-export class UdpDiscovery  {
+export class UdpDiscovery {
 
     #udp4 = createSocket({
         type: 'udp4',
         reuseAddr: true
     })
+    #ready$ = new ReplaySubject<boolean>(1)
 
     #localAddress = new Set(
         Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
@@ -36,8 +37,8 @@ export class UdpDiscovery  {
         ...(SPIDERMESH_WHITELIST_ADDRESS || '').split(',').map(e => {
             const ppps = e.trim().split('.')
             if (ppps.length == 4) return e.trim()
-            if (ppps.length == 3) return new Array(256).fill(0).map((h, index) => {
-                return `${e.trim()}.${index}`
+            if (ppps.length == 3) return new Array(254).fill(0).map((h, index) => {
+                return `${e.trim()}.${index+1}`
             })
             return []
         }).flat(2)
@@ -45,8 +46,11 @@ export class UdpDiscovery  {
 
     constructor() {
         this.#udp4.on('listening', () => {
-            this.#udp4.setMulticastInterface("127.0.0.1");
-            this.#udp4.addMembership(SPIDERMESH_MULTICAST_ADDRESS, "127.0.0.1");
+            this.#udp4.setMulticastInterface("0.0.0.0");
+            this.#udp4.setMulticastLoopback(true);
+            this.#udp4.setMulticastTTL(1);
+            this.#udp4.addMembership(SPIDERMESH_MULTICAST_ADDRESS, "0.0.0.0");
+            this.#ready$.next(true)
         })
         this.#udp4.on('error', (e) => {
             throw e
@@ -55,6 +59,7 @@ export class UdpDiscovery  {
     }
 
     async broadcast<T extends NodeMetadata>(data: MdnsMessage<T>, ips: string[] = [...this.#broadcastAddress]) {
+        await firstValueFrom(this.#ready$)
         const msg = pack(data)
         for (const ip of ips) {
             this.#udp4.send(msg, 0, msg.length, SPIDERMESH_MULTICAST_PORT, ip, e => {
@@ -119,3 +124,4 @@ export class UdpDiscovery  {
     }
 
 }
+ 
