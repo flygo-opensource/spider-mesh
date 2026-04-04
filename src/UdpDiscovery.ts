@@ -4,22 +4,10 @@ import { SPIDERMESH_WHITELIST_ADDRESS, SPIDERMESH_MULTICAST_PORT, SPIDERMESH_MUL
 import { BehaviorSubject, debounceTime, from, map, ReplaySubject } from "rxjs";
 import { firstValueFrom, fromEvent } from "rxjs";
 import { switchMap, mergeMap, filter } from "rxjs/operators";
-import { unpack, pack } from 'msgpackr'
+import { unpack, pack } from 'msgpackr' 
+import { MdnsMessage, NodeMetadata } from "@spider-mesh/types";
 
-export type NodeMetadata<T = {}> = T & {
-    host: string
-    node_id: string
-    namespace: string
-}
-
-export type MdnsMessage<T extends NodeMetadata> = {
-    hi: boolean
-    node: T
-    sender_id: string
-    forwarder_id?: string
-    receiver_id?: string
-}
-
+ 
 
 export class UdpDiscovery {
 
@@ -38,7 +26,7 @@ export class UdpDiscovery {
             const ppps = e.trim().split('.')
             if (ppps.length == 4) return e.trim()
             if (ppps.length == 3) return new Array(254).fill(0).map((h, index) => {
-                return `${e.trim()}.${index+1}`
+                return `${e.trim()}.${index + 1}`
             })
             return []
         }).flat(2)
@@ -50,7 +38,7 @@ export class UdpDiscovery {
             this.#udp4.setMulticastLoopback(true);
             this.#udp4.setMulticastTTL(1);
             this.#udp4.addMembership(SPIDERMESH_MULTICAST_ADDRESS, "0.0.0.0");
-            this.#ready$.next(true)
+            this.#ready$.next(true) 
         })
         this.#udp4.on('error', (e) => {
             throw e
@@ -124,4 +112,3 @@ export class UdpDiscovery {
     }
 
 }
- 

@@ -1,4 +1,4 @@
-import { SpiderMesh, PubsubTransporter, PubsubTransporterEvent, NodesMap, SpiderMeshNode } from "@spider-mesh/core";
+import { PubsubTransporter, PubsubTransporterEvent, NodesMap, SpiderMeshNode } from "@spider-mesh/types";
 import { map, Observable, Subject } from "rxjs";
 import { filter } from 'rxjs'
 import { ClientHttp2Session, createSecureServer } from "http2";
@@ -18,18 +18,12 @@ export type PubsubMessage<T = any> = {
     data: T
 }
 
-export class Http2Pubsub extends PubsubTransporter {
+export class Http2Pubsub implements PubsubTransporter {
 
-
+    public readonly type = 'pubsub'
     #nodes = new Map<string, ClientHttp2Session>()
     #subscriptions = new Map<string, Subject<any>>()
     #topics = new Map<string, Set<NodeId>>()
-
-
-    constructor() {
-        super()
-        SpiderMesh.linkTransporter(this)
-    }
 
 
     #server() {
@@ -39,9 +33,10 @@ export class Http2Pubsub extends PubsubTransporter {
             const server = createSecureServer({
                 allowHTTP1: true,
                 requestCert: true,
-                rejectUnauthorized: true
+                rejectUnauthorized: true,
+
             })
-            server.listen(0, '0.0.0.0', 0, () => {
+            server.listen(() => {
                 const address = server.address() as AddressInfo
                 o.next({
                     metadata: {
@@ -49,7 +44,6 @@ export class Http2Pubsub extends PubsubTransporter {
                     }
                 })
             })
-
             server.on('request', (req, res) => {
                 const event = req.headers[':path']?.split('/')?.[2]
                 if (!event) return

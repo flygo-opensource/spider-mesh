@@ -1,4 +1,4 @@
-import { RpcTransporter, type RpcOptions, SpiderMeshNode, MicroserviceOfflineException, RpcEvent, NodesMap, MicroserviceException, SpiderMesh } from "@spider-mesh/core";
+import { RpcTransporter, type RpcOptions, SpiderMeshNode, RpcEvent, NodesMap, SpiderMeshError } from "@spider-mesh/types";
 import { firstValueFrom, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, finalize, distinctUntilChanged } from 'rxjs'
 import { createServer, connect, ClientHttp2Session, IncomingHttpHeaders, IncomingHttpStatusHeader, ServerHttp2Stream } from 'node:http2'
 import { map, scan, mergeAll, filter, mergeMap, takeWhile } from "rxjs/operators";
@@ -7,6 +7,7 @@ import { SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE } from "./const.js";
 import { AddressInfo } from "node:net";
 import { unpack, pack } from 'msgpackr'
 import { Subject } from "rxjs/internal/Subject";
+import { MicroserviceException } from "./MicroserviceException.js";
 
 
 export type RequestHeaders = {
@@ -16,21 +17,17 @@ export type RequestHeaders = {
 }
 
 
-export class Http2Rpc extends RpcTransporter {
+export class Http2Rpc implements RpcTransporter {
 
     #offline$ = new Subject<string>()
     #connections = new Map<string, ClientHttp2Session>()
 
-    constructor(){
-        super()
-        SpiderMesh.linkTransporter(this)
-    }
 
     link(metadata$: Observable<SpiderMeshNode>, nodes$: Observable<NodesMap>): Observable<RpcEvent> {
         return new Observable<RpcEvent>(o => {
 
             const server = createServer({
-                
+
             })
 
             server.on('stream', (stream: ServerHttp2Stream, headers: RequestHeaders) => {
@@ -44,7 +41,7 @@ export class Http2Rpc extends RpcTransporter {
                     const callback = async (res: Promise<any>) => {
                         try {
                             const response = await res
-                            const metadata = await firstValueFrom(metadata$ )
+                            const metadata = await firstValueFrom(metadata$)
                             if (response instanceof Observable) {
                                 stream.respond({
                                     ':status': 200,
@@ -193,7 +190,7 @@ export class Http2Rpc extends RpcTransporter {
                 return connection
             }
         }
-        throw new MicroserviceOfflineException()
+        throw new MicroserviceException('MICROSERVICE_OFFLINE')
     }
 
     rpc<T>(r: RpcOptions, node: SpiderMeshNode, force: boolean) {
@@ -222,7 +219,7 @@ export class Http2Rpc extends RpcTransporter {
                 return merge(
                     fromEvent(connection, 'close').pipe(
                         map(() => {
-                            throw new MicroserviceOfflineException()
+                            throw new MicroserviceException('MICROSERVICE_OFFLINE')
                         })
                     ),
                     fromEvent<Buffer>(req, 'data'),

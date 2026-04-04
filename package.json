@@ -15,8 +15,7 @@
     "tsconfig.json",
     "yarn.lock"
   ],
-  "peerDependencies": {
-    "@spider-mesh/core": "^2.0.17"
+  "peerDependencies": { 
   },
   "devDependencies": {
     "@types/msgpack": "^0.0.34",
@@ -34,14 +33,11 @@
   },
   "scripts": {
     "dev": "clear; npx tsx ",
-    "x": "clear; node --no-warnings --es-module-specifier-resolution=node --experimental-specifier-resolution=node --loader ts-node/esm ",
     "build": "tsc -v; rm -rf build && tsc -b tsconfig.json"
   },
   "author": "Duong Van Ba",
   "license": "ISC",
-  "dependencies": {
-    "@grpc/grpc-js": "^1.12.6",
-    "@grpc/proto-loader": "^0.7.13",
+  "dependencies": { 
     "msgpackr": "^1.11.5"
   }
 }
