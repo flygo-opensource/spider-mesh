@@ -1,5 +1,5 @@
 import { RpcOptions, SpiderMeshNode } from "@spider-mesh/types";
-import { catchError, EMPTY, filter, firstValueFrom, from, map, mergeMap, Observable, of, timer } from "rxjs"; 
+import { catchError, EMPTY, filter, takeUntil, firstValueFrom, from, map, mergeMap, Observable, of, timer } from "rxjs";
 import { ServiceChecker, SpiderMesh } from "./SpiderMesh.js";
 
 
@@ -49,29 +49,14 @@ export class RemoteServiceLinker<Service> {
         private options: RemoteServiceOptions
     ) { }
 
-    #listRpcNodes() {
-        const targets = this.sm.services$.value.services.get(this.options.service)
-        if (!targets || targets.nodes.length == 0) return []
-        return targets.nodes.map(id => {
-            const node = this.sm.nodes$.value.nodes.get(id)
-            if (node && node.rpc) return node
-        }).filter(Boolean).map(node => node!)
-    }
+
 
     watch() {
-        return this.sm.services$.pipe(
-            filter((e, index) => {
-                if (index == 0) return true
-                if (e.last_updated_services.has(this.options.service)) return true
-                return false
-            }),
-            map(e => e.services.get(this.options.service)?.nodes || []),
-            map(targets => targets.map(id => this.sm.nodes$.value.nodes.get(id)!).filter(Boolean))
-        )
+        return this.sm.watchService(this.options.service)
     }
 
     get nodes() {
-        return this.#listRpcNodes()
+        return this.sm.listRpcNodes(this.options.service)
     }
 
     set<Fallback>(options: Omit<Partial<RpcOptions<Fallback>>, 'service' | 'method' | 'args'>) {
@@ -81,8 +66,14 @@ export class RemoteServiceLinker<Service> {
         })
     }
 
-    wait(check: ServiceChecker = (nodes => nodes.length > 0), stop$: Observable<any> = EMPTY) {
-        return this.sm.waitServiceOnline(this.options.service, check, stop$)
+    wait(checker: ServiceChecker = (nodes => nodes.length > 0), stop$: Observable<any> = EMPTY) {
+        return firstValueFrom(this.watch().pipe(
+            takeUntil(stop$),
+            filter(nodes => {
+                if (checker(nodes)) return true
+                return false
+            })
+        ), { defaultValue: null })
     }
 
     static link<Service, Fallback = never>(sm: SpiderMesh, options: RemoteServiceOptions) {
@@ -91,14 +82,14 @@ export class RemoteServiceLinker<Service> {
             get(_, prop) {
                 const method = prop.toString()
                 if (method == 'then') return null
-                if (InvaildMethodList.has(method)) return () => {}
+                if (InvaildMethodList.has(method)) return () => { }
                 const fn = (target as Service)[prop as keyof Service]
                 if (fn) return (typeof fn === 'function') ? fn.bind(target) : fn;
 
                 if (method.startsWith('__batch__')) {
                     const real_metod = method.split('__batch__')?.[1]
 
-                    return (...args: any[]) => from(target.#listRpcNodes()).pipe(
+                    return (...args: any[]) => from(target.sm.listRpcNodes(options.service)).pipe(
                         mergeMap(node => (
                             target.sm.callRemoteService({
                                 ...options,
@@ -154,4 +145,3 @@ export type Mapper<Service, Fallback = unknown> = RemoteServiceLinker<Service> &
 
 
 export type RemoteService<Service> = Mapper<Service>
- 
