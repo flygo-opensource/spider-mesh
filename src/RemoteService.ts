@@ -1,7 +1,6 @@
-import { catchError, EMPTY, filter, firstValueFrom, from, map, mergeMap, Observable, of, timer } from "rxjs";
-import { SpiderMeshNode } from "./SpiderMeshNode.js";
-import { RpcOptions } from "./RpcTransporter.js";
-import { ServiceChecker, SpiderMesh } from "../../src/SpiderMesh.js";
+import { RpcOptions, SpiderMeshNode } from "@spider-mesh/types";
+import { catchError, EMPTY, filter, firstValueFrom, from, map, mergeMap, Observable, of, timer } from "rxjs"; 
+import { ServiceChecker, SpiderMesh } from "./SpiderMesh.js";
 
 
 
@@ -87,15 +86,12 @@ export class RemoteServiceLinker<Service> {
     }
 
     static link<Service, Fallback = never>(sm: SpiderMesh, options: RemoteServiceOptions) {
-
         const target = new this<Service>(sm, options)
-
-
         const handler: ProxyHandler<any> = {
             get(_, prop) {
                 const method = prop.toString()
                 if (method == 'then') return null
-                if (InvaildMethodList.has(method)) return () => null
+                if (InvaildMethodList.has(method)) return () => {}
                 const fn = (target as Service)[prop as keyof Service]
                 if (fn) return (typeof fn === 'function') ? fn.bind(target) : fn;
 
@@ -138,7 +134,6 @@ export class RemoteServiceLinker<Service> {
 
             }
         }
-
         return new Proxy(target, handler) as Mapper<Service, Fallback>
     }
 }
@@ -159,8 +154,4 @@ export type Mapper<Service, Fallback = unknown> = RemoteServiceLinker<Service> &
 
 
 export type RemoteService<Service> = Mapper<Service>
-
-
-const a = {} as any as RemoteServiceLinker<{
-
-}>
+ 

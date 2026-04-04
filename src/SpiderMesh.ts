@@ -1,18 +1,10 @@
-import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, ReplaySubject, retry, tap, throwError, timeout, timer } from "rxjs"
+import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, retry, tap, throwError, timeout, timer } from "rxjs"
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
-import { RemoteService } from "./abstracts/RemoteService.js";
-import { SpiderMeshNode } from "./abstracts/SpiderMeshNode.js";
-import { PubsubTransporter } from "./abstracts/PubsubTransporter.js";
-import { RpcTransporter, RpcOptions } from "./abstracts/RpcTransporter.js";
-import { MicroserviceException } from "./helpers/MicroserviceException.js";
-import { MicroserviceOfflineException } from "./helpers/MicroserviceOfflineException.js";
+import { MicroserviceException, MicroserviceNotFound, MicroserviceOfflineException, MicroserviceRpcTimeout } from "./helpers/MicroserviceException.js";
 import { services$ } from "./decorators/Microservice.js";
-import { networkInterfaces } from "os";
-import { MicroserviceNotFound } from "./helpers/MicroserviceNotFound.js";
-import { DiscoveryTransporter } from "./abstracts/DiscoveryTransporter.js";
-import { MicroserviceRpcTimeout } from "./helpers/MicroserviceRpcTimeout.js";
 import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME } from "../const.js";
 import { AllIpAddresses } from "./helpers/GetIps.js";
+import { SpiderMeshNode, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions } from '@spider-mesh/types'
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 export type ServiceChecker = (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean
@@ -20,6 +12,10 @@ export type ServiceChecker = (nodes: SpiderMeshNode[]) => Promise<boolean> | boo
 export type NodesMap = {
     nodes: Map<string, SpiderMeshNode>,
     last_updated_node_id: string
+}
+
+export type SpiderMeshOptions = {
+    transporters: Array<{ new(): RpcTransporter | PubsubTransporter | DiscoveryTransporter }>
 }
 
 export class SpiderMesh {
@@ -56,12 +52,8 @@ export class SpiderMesh {
         last_updated_services: new Set<string>()
     })
 
-    static #transporters$ = new ReplaySubject<RpcTransporter | PubsubTransporter | DiscoveryTransporter>()
-    static linkTransporter(t: RpcTransporter | PubsubTransporter | DiscoveryTransporter) {
-        SpiderMesh.#transporters$.next(t)
-    }
-
-    constructor() {
+    constructor(private options: SpiderMeshOptions) {
+        if (!options) throw new Error(`Missing options for SpiderMesh, please using like that new SpiderMeshOptions({ ... options})`)
         services$.pipe(
             filter(list => Object.keys(list).length > 0),
             mergeMap(async services => {
@@ -88,10 +80,15 @@ export class SpiderMesh {
             catchError(e => EMPTY)
         ).subscribe()
 
-        SpiderMesh.#transporters$.pipe(
-            tap(t => this.linkTransporter(t))
-        ).subscribe()
+        this.#linkTransporters()
 
+    }
+
+    static asProvider(options: SpiderMeshOptions) {
+        return {
+            provide: this,
+            useFactory: async () => new this(options)
+        }
     }
 
 
@@ -138,7 +135,7 @@ export class SpiderMesh {
             mergeMap($ => $),
             retry({
                 delay: (e: Error, count: number) => {
-                    if (e instanceof MicroserviceOfflineException || e.message == MicroserviceOfflineException.code) {
+                    if (e instanceof MicroserviceOfflineException) {
                         if (options.retry && count < options.retry) return timer(1000)
                     }
                     throw e
@@ -160,148 +157,162 @@ export class SpiderMesh {
         )
     }
 
-    linkTransporter(
-        transporter: RpcTransporter | PubsubTransporter | DiscoveryTransporter
-    ) {
-        const transporter_name = Object.getPrototypeOf(transporter).constructor.name
-
-        if (transporter instanceof RpcTransporter) {
-            // Is RpcTransporter
-            const rpc = transporter
-            if (this.#rpcs.has(transporter_name)) return
-
-            this.#rpcs.set(transporter_name, rpc)
 
 
-            return transporter.link(this.#metadata$, this.nodes$).pipe(
-                map(e => {
-                    const rpc = e.rpc
-                    if (rpc) {
-                        try {
-                            const service = services$.value[rpc.service]
-                            const instance = service?.instance
-                            if (!instance) return rpc.callback(throwError(() => new MicroserviceNotFound()))
-                            const response = instance[rpc.method](...rpc.args)
-                            rpc.callback(response)
-                        } catch (err) {
-                            rpc.callback(throwError(() => err))
-                        }
-                    }
+    #linkTransporters() {
+        const transporters = this.options.transporters.map(t => {
+            const name = t.name
+            const transporter = new t()
+            const rpc = !!(transporter as RpcTransporter).rpc ? transporter as RpcTransporter : null
+            const pubsub = !!(transporter as PubsubTransporter).publish ? transporter as PubsubTransporter : null
+            const discovery = !!(transporter as DiscoveryTransporter).broadcast ? transporter as DiscoveryTransporter : null
+            return {
+                name,
+                rpc,
+                pubsub,
+                discovery
+            }
+        })
+        return merge(
+            from(transporters).pipe(
+                map(({ name, rpc }) => {
+                    if (!rpc) return EMPTY
+                    if (this.#rpcs.has(name)) return
+                    this.#rpcs.set(name, rpc)
+                    return rpc.link(this.#metadata$, this.nodes$).pipe(
+                        map(e => {
+                            const rpc = e.rpc
+                            if (rpc) {
+                                try {
+                                    const service = services$.value[rpc.service]
+                                    const instance = service?.instance
+                                    if (!instance) return rpc.callback(throwError(() => new MicroserviceNotFound()))
+                                    const response = instance[rpc.method](...rpc.args)
+                                    rpc.callback(response)
+                                } catch (err) {
+                                    rpc.callback(throwError(() => err))
+                                }
+                            }
 
-                    const online = e.online
-                    if (online) {
-                        const node = this.nodes$.value.nodes.get(online)
-                        if (node) {
-                            node.rpc = transporter_name
-                            const services = this.services$.value.services
-                            for (const service of Object.keys(node.services || {})) {
-                                const target = services.get(service) || { index: 0, nodes: [] }
-                                services.set(service, {
-                                    index: target.index,
-                                    nodes: [
-                                        ...target.nodes.filter(id => id != node.node_id),
-                                        node.node_id
-                                    ]
+                            const online = e.online
+                            if (online) {
+                                const node = this.nodes$.value.nodes.get(online)
+                                if (node) {
+                                    node.rpc = name
+                                    const services = this.services$.value.services
+                                    for (const service of Object.keys(node.services || {})) {
+                                        const target = services.get(service) || { index: 0, nodes: [] }
+                                        services.set(service, {
+                                            index: target.index,
+                                            nodes: [
+                                                ...target.nodes.filter(id => id != node.node_id),
+                                                node.node_id
+                                            ]
+                                        })
+                                    }
+                                    this.services$.next({
+                                        services,
+                                        last_updated_services: new Set(Object.keys(node.services || {}))
+                                    })
+                                }
+                            }
+
+                            const offline = e.offline
+                            if (offline) {
+                                const nodes = this.nodes$.value.nodes
+                                const node = nodes.get(offline)
+
+
+
+                                if (node) {
+                                    // Update node list
+                                    nodes.delete(offline)
+                                    this.nodes$.next({ nodes, last_updated_node_id: node.node_id })
+
+                                    // Update services
+                                    const services = this.services$.value.services
+                                    for (const service of Object.values(node.services)) {
+                                        const target = services.get(service) || { index: 0, nodes: [] }
+                                        const nodes = target.nodes.filter(id => id != node.node_id)
+                                        nodes.length == 0 ? services.delete(service) : services.set(service, { ...target, nodes })
+                                    }
+                                    this.services$.next({
+                                        services,
+                                        last_updated_services: new Set(Object.keys(node.services || {}))
+                                    })
+                                }
+                            }
+
+                            const metadata = e.metadata
+                            if (metadata) {
+                                this.#metadata$.next({
+                                    ... this.#metadata$.value,
+                                    transporters: {
+                                        ... this.#metadata$.value.transporters,
+                                        [name]: metadata
+                                    },
+                                    version: this.#metadata$.value.version + 1
                                 })
                             }
-                            this.services$.next({
-                                services,
-                                last_updated_services: new Set(Object.keys(node.services || {}))
-                            })
                         }
-                    }
-
-                    const offline = e.offline
-                    if (offline) {
-                        const nodes = this.nodes$.value.nodes
-                        const node = nodes.get(offline)
-
-
-
-                        if (node) {
-                            // Update node list
-                            nodes.delete(offline)
-                            this.nodes$.next({ nodes, last_updated_node_id: node.node_id })
-
-                            // Update services
-                            const services = this.services$.value.services
-                            for (const service of Object.values(node.services)) {
-                                const target = services.get(service) || { index: 0, nodes: [] }
-                                const nodes = target.nodes.filter(id => id != node.node_id)
-                                nodes.length == 0 ? services.delete(service) : services.set(service, { ...target, nodes })
-                            }
-                            this.services$.next({
-                                services,
-                                last_updated_services: new Set(Object.keys(node.services || {}))
-                            })
-                        }
-                    }
-
-                    const metadata = e.metadata
-                    if (metadata) {
-                        this.#metadata$.next({
-                            ... this.#metadata$.value,
-                            transporters: {
-                                ... this.#metadata$.value.transporters,
-                                [transporter_name]: metadata
-                            },
-                            version: this.#metadata$.value.version + 1
+                        ),
+                        finalize(() => {
+                            this.#rpcs.delete(name)
                         })
-                    }
-                }
-                ),
-                finalize(() => {
-                    this.#rpcs.delete(transporter_name)
+                    )
                 })
-            ).subscribe()
-        }
+            ),
 
-        if (transporter instanceof PubsubTransporter) {
-            const transporters = this.#pubsubs.getValue()
-            transporters.set(transporter_name, transporter)
-            this.#pubsubs.next(transporters)
-
-            return transporter.link(this.#metadata$, this.nodes$).pipe(
-                map(a => a.metadata),
-                filter(Boolean),
-                tap(metadata => {
-                    this.#metadata$.next({
-                        ... this.#metadata$.value,
-                        transporters: {
-                            ... this.#metadata$.value.transporters,
-                            [transporter_name]: metadata
-                        },
-                        version: this.#metadata$.value.version + 1
-                    })
-                }),
-                finalize(() => {
-                    transporters.delete(transporter_name)
+            from(transporters).pipe(
+                mergeMap(({ name, pubsub: transporter }) => {
+                    if (!transporter) return EMPTY
+                    const transporters = this.#pubsubs.getValue()
+                    transporters.set(name, transporter)
                     this.#pubsubs.next(transporters)
+                    return transporter.link(this.#metadata$, this.nodes$).pipe(
+                        map(a => a.metadata),
+                        filter(Boolean),
+                        tap(metadata => {
+                            this.#metadata$.next({
+                                ... this.#metadata$.value,
+                                transporters: {
+                                    ... this.#metadata$.value.transporters,
+                                    [name]: metadata
+                                },
+                                version: this.#metadata$.value.version + 1
+                            })
+                        }),
+                        finalize(() => {
+                            transporters.delete(name)
+                            this.#pubsubs.next(transporters)
+                        })
+                    )
                 })
-            ).subscribe()
-        }
+            ),
 
-        if (transporter instanceof DiscoveryTransporter) {
-            // Is discover transporter
-            const discover = transporter as DiscoveryTransporter
-            this.#discovers.set(transporter_name, discover)
-            return discover.link(this.#metadata$).pipe(
-                tap(node => {
-                    const nodes = this.nodes$.value.nodes
-                    nodes.set(node.node_id, {
-                        ...nodes.get(node.node_id) || {},
-                        ...node
-                    })
-                    const last_updated_node_id = node.node_id
-                    this.nodes$.next({
-                        nodes,
-                        last_updated_node_id
-                    })
-                }),
-                finalize(() => this.#discovers.delete(transporter_name))
-            ).subscribe()
 
-        }
+            from(transporters).pipe(
+                mergeMap(({ name, discovery }) => {
+                    if (!discovery) return EMPTY
+                    this.#discovers.set(name, discovery)
+                    return discovery.link(this.#metadata$).pipe(
+                        tap(node => {
+                            const nodes = this.nodes$.value.nodes
+                            nodes.set(node.node_id, {
+                                ...nodes.get(node.node_id) || {},
+                                ...node
+                            })
+                            const last_updated_node_id = node.node_id
+                            this.nodes$.next({
+                                nodes,
+                                last_updated_node_id
+                            })
+                        }),
+                        finalize(() => this.#discovers.delete(name))
+                    )
+                })
+            )
+        ).subscribe()
     }
 
 

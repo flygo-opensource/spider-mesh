@@ -1,5 +1,5 @@
-import { BehaviorSubject, ReplaySubject } from "rxjs"
-import { SpiderMeshNode } from "../abstracts/SpiderMeshNode.js"
+import { BehaviorSubject } from "rxjs"
+import { SpiderMeshNode } from "@spider-mesh/types"
 
 export const services$ = new BehaviorSubject<{
     [name: string]: {
@@ -8,7 +8,7 @@ export const services$ = new BehaviorSubject<{
         metadata: object | (() => Promise<object>)
     }
 }>({})
- 
+
 
 export const MicroserviceList: SpiderMeshNode['services'] = {}
 
@@ -37,4 +37,3 @@ export const Microservice = (metadata: any = {}) => {
 
     ) as any
 }
- 

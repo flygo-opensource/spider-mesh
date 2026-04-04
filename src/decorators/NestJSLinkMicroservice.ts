@@ -1,8 +1,11 @@
-import { RemoteService, RemoteServiceLinker } from "../../src/abstracts/RemoteService.js";
+import { RemoteServiceLinker } from "src/RemoteService.js";
 import { SpiderMesh } from "../SpiderMesh.js";
 
 export const NestJSLinkMicroservice = (factory: any) => ({
     provide: factory,
     inject: [SpiderMesh],
-    useFactory: (sm: SpiderMesh) => RemoteServiceLinker.link(sm, { service: factory.name })
+    useFactory: async (sm: SpiderMesh) => {
+        const service = RemoteServiceLinker.link(sm, { service: factory.name })
+        return service
+    }
 })
