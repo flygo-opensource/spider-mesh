@@ -1,5 +1,5 @@
 import { RpcTransporter, type RpcOptions, SpiderMeshNode, RpcEvent, NodesMap, SpiderMeshError } from "@spider-mesh/types";
-import { firstValueFrom, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, finalize, distinctUntilChanged } from 'rxjs'
+import { firstValueFrom, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, finalize, distinctUntilChanged, groupBy, exhaustMap, timer } from 'rxjs'
 import { createServer, connect, ClientHttp2Session, IncomingHttpHeaders, IncomingHttpStatusHeader, ServerHttp2Stream } from 'node:http2'
 import { map, scan, mergeAll, filter, mergeMap, takeWhile } from "rxjs/operators";
 import { EMPTY } from "rxjs/internal/observable/empty";
@@ -131,15 +131,18 @@ export class Http2Rpc implements RpcTransporter {
                     return node ? [node] : []
                 }),
                 mergeAll(),
-                mergeMap(async node => {
-                    if (node.transporters.Http2Rpc === undefined) return
-                    try {
-                        await this.#connect({ service: '', method: '', args: [] }, node, false)
-                        o.next({ online: node.node_id })
-                    } catch (e) {
-
-                    }
-                })
+                groupBy(node => node.node_id, { duration: () => timer(60_000) }),
+                mergeMap($ => $.pipe(
+                    exhaustMap(async node => { 
+                        if (node.transporters.Http2Rpc === undefined) return 
+                        try {
+                            await this.#connect(node, false)
+                            o.next({ online: node.node_id })
+                        } catch (e) {
+                            console.error(e)
+                        }
+                    })
+                ))
             ).subscribe()
 
 
@@ -162,7 +165,7 @@ export class Http2Rpc implements RpcTransporter {
         })
     }
 
-    async #connect(r: RpcOptions, node: SpiderMeshNode, force: boolean) {
+    async #connect(node: SpiderMeshNode, force: boolean) { 
         const current_connection = this.#connections.get(node.node_id)
         if (current_connection) {
             if (!current_connection.destroyed && !current_connection.closed) {
@@ -175,6 +178,7 @@ export class Http2Rpc implements RpcTransporter {
         const urls = auto ? [
             `http://${node.host}:${node.transporters.Http2Rpc.port}`,
         ] : node.ips.sort((a, b) => a.length - b.length).map(ip => `http://${ip.includes(':') ? `[${ip}]` : ip}:${node.transporters.Http2Rpc.port}`)
+
 
         for (const url of urls) {
             const connection = connect(url)
@@ -202,7 +206,7 @@ export class Http2Rpc implements RpcTransporter {
             error: boolean
         }>(undefined)
         return of(0).pipe(
-            mergeMap(() => this.#connect(r, node, force)),
+            mergeMap(() => this.#connect(node, force)),
             mergeMap(connection => {
                 const req = connection.request({
                     ':method': 'POST',
