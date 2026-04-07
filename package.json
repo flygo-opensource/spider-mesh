@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/tcp",
   "type": "module",
-  "version": "2.0.26",
+  "version": "2.0.28",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
@@ -15,12 +15,12 @@
     "tsconfig.json",
     "yarn.lock"
   ],
-  "peerDependencies": { 
-  },
+  "peerDependencies": {},
   "devDependencies": {
+    "@spider-mesh/types": "^2.0.28",
+    "@types/bun": "^1.2.23",
     "@types/msgpack": "^0.0.34",
     "@types/node": "^22.10.5",
-    "@types/bun": "^1.2.23",
     "typescript": "^5.8.2"
   },
   "exports": {
@@ -37,7 +37,7 @@
   },
   "author": "Duong Van Ba",
   "license": "ISC",
-  "dependencies": { 
+  "dependencies": {
     "msgpackr": "^1.11.5"
   }
 }

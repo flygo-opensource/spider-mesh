@@ -1,5 +1,5 @@
 import { RpcTransporter, type RpcOptions, SpiderMeshNode, RpcEvent, NodesMap, SpiderMeshError } from "@spider-mesh/types";
-import { firstValueFrom, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, finalize, distinctUntilChanged, groupBy, exhaustMap, timer } from 'rxjs'
+import { firstValueFrom, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, tap, finalize, distinctUntilChanged, groupBy, exhaustMap, timer, takeUntil } from 'rxjs'
 import { createServer, connect, ClientHttp2Session, IncomingHttpHeaders, IncomingHttpStatusHeader, ServerHttp2Stream } from 'node:http2'
 import { map, scan, mergeAll, filter, mergeMap, takeWhile } from "rxjs/operators";
 import { EMPTY } from "rxjs/internal/observable/empty";
@@ -7,7 +7,6 @@ import { SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE } from "./const.js";
 import { AddressInfo } from "node:net";
 import { unpack, pack } from 'msgpackr'
 import { Subject } from "rxjs/internal/Subject";
-import { MicroserviceException } from "./MicroserviceException.js";
 
 
 export type RequestHeaders = {
@@ -26,9 +25,7 @@ export class Http2Rpc implements RpcTransporter {
     link(metadata$: Observable<SpiderMeshNode>, nodes$: Observable<NodesMap>): Observable<RpcEvent> {
         return new Observable<RpcEvent>(o => {
 
-            const server = createServer({
-
-            })
+            const server = createServer({})
 
             server.on('stream', (stream: ServerHttp2Stream, headers: RequestHeaders) => {
 
@@ -42,14 +39,15 @@ export class Http2Rpc implements RpcTransporter {
                         try {
                             const response = await res
                             const metadata = await firstValueFrom(metadata$)
-                            if (response instanceof Observable) {
+                            if ('pipe' in response && typeof response.pipe === 'function') {
                                 stream.respond({
                                     ':status': 200,
                                     'content-type': 'application/octet-stream',
                                     'smnid': metadata.node_id
-                                })
-                                response.pipe(
-                                    map(obj => {
+                                });
+
+                                (response as Observable<any>).pipe(
+                                    tap((obj) => {
                                         const encoded = pack(obj)
                                         const length = Buffer.alloc(4)
                                         length.writeInt32LE(encoded.length)
@@ -57,18 +55,20 @@ export class Http2Rpc implements RpcTransporter {
                                         !stream.destroyed && stream.writable && stream.write(data)
                                     }),
                                     catchError(e => {
-                                        const encoded = pack(e)
+                                        const code = e.code || e.name || 'UNKNOWN_ERROR'
+                                        const message = e.message || 'An unknown error occurred'
+                                        const encoded = pack({ code, message })
                                         const length = Buffer.alloc(4)
                                         length.writeInt32LE(-encoded.length)
                                         const data = Buffer.concat([length, encoded])
-                                        !stream.destroyed && stream.writable && stream.write(data)
-                                        if (!(e instanceof MicroserviceException)) throw e
+                                        if (!stream.destroyed && stream.writable) stream.write(data)
                                         return EMPTY
                                     }),
                                     finalize(() => {
-                                        stream.end()
-                                    })
-
+                                        if (!stream.destroyed && stream.writable) stream.end()
+                                    }),
+                                    takeUntil(fromEvent(stream, 'close')),
+                                    takeUntil(fromEvent(stream, 'error'))
                                 ).subscribe()
                                 return
                             }
@@ -133,13 +133,13 @@ export class Http2Rpc implements RpcTransporter {
                 mergeAll(),
                 groupBy(node => node.node_id, { duration: () => timer(60_000) }),
                 mergeMap($ => $.pipe(
-                    exhaustMap(async node => { 
-                        if (node.transporters.Http2Rpc === undefined) return 
+                    exhaustMap(async node => {
+                        if (node.transporters.Http2Rpc === undefined) return
                         try {
                             await this.#connect(node, false)
                             o.next({ online: node.node_id })
                         } catch (e) {
-                            console.error(e)
+                            console.error('Spidermesh HTTP2 RPC connection error', node, e)
                         }
                     })
                 ))
@@ -165,7 +165,7 @@ export class Http2Rpc implements RpcTransporter {
         })
     }
 
-    async #connect(node: SpiderMeshNode, force: boolean) { 
+    async #connect(node: SpiderMeshNode, force: boolean) {
         const current_connection = this.#connections.get(node.node_id)
         if (current_connection) {
             if (!current_connection.destroyed && !current_connection.closed) {
@@ -194,7 +194,11 @@ export class Http2Rpc implements RpcTransporter {
                 return connection
             }
         }
-        throw new MicroserviceException('MICROSERVICE_OFFLINE')
+        const e: SpiderMeshError = {
+            code: 'MICROSERVICE_OFFLINE',
+            message: `All connection attempts to node ${node.node_id} failed`
+        }
+        throw e
     }
 
     rpc<T>(r: RpcOptions, node: SpiderMeshNode, force: boolean) {
@@ -223,7 +227,11 @@ export class Http2Rpc implements RpcTransporter {
                 return merge(
                     fromEvent(connection, 'close').pipe(
                         map(() => {
-                            throw new MicroserviceException('MICROSERVICE_OFFLINE')
+                            const e: SpiderMeshError = {
+                                code: 'MICROSERVICE_OFFLINE',
+                                message: `Connection to node ${node.node_id} closed`
+                            }
+                            throw e
                         })
                     ),
                     fromEvent<Buffer>(req, 'data'),
@@ -286,7 +294,12 @@ export class Http2Rpc implements RpcTransporter {
             map(e => e.frames),
             mergeAll(),
             map(({ data, error }) => {
-                if (error) throw data
+                if (error) {
+                    const error = new Error(data?.message || 'An error occurred during RPC call');
+                    error.name = data?.code || 'RPC_ERROR'
+                    error.stack = ''
+                    throw error
+                }
                 return data
             })
         )
