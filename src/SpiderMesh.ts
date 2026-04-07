@@ -5,6 +5,7 @@ import { LOCAL_SERVICES$ } from "./decorators/Microservice.js";
 import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME } from "../const.js";
 import { AllIpAddresses } from "./helpers/GetIps.js";
 import { SpiderMeshNode, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions } from '@spider-mesh/types'
+import { pipe } from "rxjs/internal/util/pipe";
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 export type ServiceChecker = (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean
@@ -95,8 +96,8 @@ export class SpiderMesh {
 
     watchService(service: string) {
         return this.#nodes$.pipe(
-            filter(e => {
-                if (!e.last_updated_node_id) return true
+            filter((e, i) => {
+                if (i == 0 || !e.last_updated_node_id) return true
                 if (e.last_updated_node_id.startsWith('offline:')) {
                     return e.last_updated_node_id.split(':')[1].includes(service)
                 }
@@ -140,38 +141,28 @@ export class SpiderMesh {
     }
 
     callRemoteService<R, T>(options: RpcOptions<T>) {
-        return of(0).pipe(
-            mergeMap(async () => {
-                await firstValueFrom(this.watchService(options.service).pipe(
-                    options.timeout ? timeout(options.timeout) : tap(),
-                    filter(nodes => nodes.length > 0)
-                ), { defaultValue: null })
 
+        return this.watchService(options.service).pipe(
+            options.timeout ? timeout({
+                each: options.timeout,
+                with: () => throwError(() => new MicroserviceRpcTimeout())
+            }) : tap(),
+            mergeMap(() => {
                 const target = this.#selectRpcTarget(options)
-                if (!target) throw new MicroserviceOfflineException()
+                if (!target) throw { code: 'MICROSERVICE_OFFLINE', message: `No available node for service ${options.service}` }
                 const force = !!options.node_id || !!options.ip
                 return target.transporter.rpc<R, T>(options, target.node, force)
             }),
-            mergeMap($ => $),
             retry({
-                delay: (e: Error, count: number) => {
-                    if (e instanceof MicroserviceOfflineException) {
+                delay: (e: { code: string }, count: number) => {
+                    if (e.code === 'MICROSERVICE_OFFLINE') {
                         if (options.retry && count < options.retry) return timer(1000)
                     }
                     throw e
                 }
             }),
-            options.timeout ? timeout({
-                each: options.timeout,
-                with: () => throwError(() => new MicroserviceRpcTimeout())
-            }) : tap(),
             catchError(e => {
-                if (options.fallback != undefined) return of(options.fallback as any as T)
-                if (e.code) {
-                    const error = new MicroserviceException(e)
-                    error.stack = e.stack
-                    throw error
-                }
+                if (options.fallback != undefined) return of(options.fallback as any as T) 
                 throw e
             })
         )
@@ -195,9 +186,8 @@ export class SpiderMesh {
                             if (rpc) {
                                 try {
                                     const service = this.#local_services.get(rpc.service)
-                                    const instance = service?.instance
-                                    if (!instance) return rpc.callback(throwError(() => new MicroserviceNotFound()))
-                                    const response = instance[rpc.method](...rpc.args)
+                                    if (!service) return rpc.callback(throwError(() => new MicroserviceNotFound()))
+                                    const response = service[rpc.method].apply(service, rpc.args)
                                     rpc.callback(response)
                                 } catch (err) {
                                     rpc.callback(throwError(() => err))
@@ -270,9 +260,11 @@ export class SpiderMesh {
                     return transporter.link(this.#metadata$, this.#nodes$).pipe(
                         tap(node => {
                             const nodes = this.#nodes$.value.nodes
+                            const rpc = Object.keys(node.transporters || {}).find(key => this.#rpcs.has(key));
                             nodes.set(node.node_id, {
                                 ...nodes.get(node.node_id) || {},
-                                ...node
+                                ...node,
+                                rpc
                             })
                             this.#nodes$.next({
                                 nodes,
