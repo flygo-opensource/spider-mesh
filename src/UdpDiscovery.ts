@@ -50,7 +50,7 @@ export class UdpDiscovery {
         const msg = pack(data)
         for (const ip of ips) {
             this.#udp4.send(msg, 0, msg.length, SPIDERMESH_MULTICAST_PORT, ip, e => {
-                e && console.error('Spidermesh UDP broadcast error', e)
+                // e && console.error('Spidermesh UDP broadcast error', e)
             })
         }
     }
