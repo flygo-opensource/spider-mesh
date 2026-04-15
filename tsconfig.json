@@ -9,7 +9,6 @@
     "experimentalDecorators": true,
     "target": "ESNext",
     "sourceMap": true,
-    "baseUrl": ".",
     "moduleResolution": "NodeNext", 
     "strictPropertyInitialization": false ,
     "allowImportingTsExtensions": false,
