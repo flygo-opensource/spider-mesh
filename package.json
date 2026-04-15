@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/tcp",
   "type": "module",
-  "version": "2.0.28",
+  "version": "2.0.29",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
@@ -20,7 +20,7 @@
     "@spider-mesh/types": "^2.0.28",
     "@types/bun": "^1.2.23",
     "@types/msgpack": "^0.0.34",
-    "@types/node": "^22.10.5",
+    "@types/node": "^25.6.0",
     "typescript": "^5.8.2"
   },
   "exports": {

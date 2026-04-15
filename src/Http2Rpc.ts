@@ -39,7 +39,7 @@ export class Http2Rpc implements RpcTransporter {
                         try {
                             const response = await res
                             const metadata = await firstValueFrom(metadata$)
-                            if ('pipe' in response && typeof response.pipe === 'function') {
+                            if (typeof response?.["pipe"] === 'function') {
                                 stream.respond({
                                     ':status': 200,
                                     'content-type': 'application/octet-stream',
@@ -72,14 +72,12 @@ export class Http2Rpc implements RpcTransporter {
                                 ).subscribe()
                                 return
                             }
-
-                            const r = await response
                             stream.respond({
                                 ':status': 200,
                                 'content-type': 'application/json',
                                 'smnid': metadata.node_id
                             })
-                            const payload = pack(r)
+                            const payload = pack(response)
                             stream.write(payload)
                             stream.end()
                         } catch (e: any) {
