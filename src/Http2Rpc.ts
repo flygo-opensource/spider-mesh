@@ -1,5 +1,5 @@
 import { RpcTransporter, type RpcOptions, SpiderMeshNode, RpcEvent, NodesMap, SpiderMeshError } from "@spider-mesh/types";
-import { firstValueFrom, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, tap, finalize, distinctUntilChanged, groupBy, exhaustMap, timer, takeUntil } from 'rxjs'
+import { firstValueFrom, defer, merge, Observable, delayWhen, BehaviorSubject, of, fromEvent, catchError, tap, finalize, take, distinctUntilChanged, groupBy, exhaustMap, timer, takeUntil, switchMap } from 'rxjs'
 import { createServer, connect, ClientHttp2Session, IncomingHttpHeaders, IncomingHttpStatusHeader, ServerHttp2Stream } from 'node:http2'
 import { map, scan, mergeAll, filter, mergeMap, takeWhile } from "rxjs/operators";
 import { EMPTY } from "rxjs/internal/observable/empty";
@@ -28,12 +28,12 @@ export class Http2Rpc implements RpcTransporter {
             const server = createServer({})
 
             server.on('stream', (stream: ServerHttp2Stream, headers: RequestHeaders) => {
-
                 const [_, service, method] = headers[':path'].split('/')
                 const buffers = [] as Buffer[]
                 stream.on('data', (b: Buffer) => buffers.push(b))
-                stream.on('end', async () => {
+                stream.once('end', async () => {
                     const data = Buffer.concat(buffers)
+                    buffers.length = 0
                     const args = unpack(data) || []
                     const callback = async (res: Promise<any>) => {
                         try {
@@ -104,6 +104,11 @@ export class Http2Rpc implements RpcTransporter {
                             service
                         }
                     })
+                })
+                stream.on('close', () => {
+                    if (buffers.length > 0) {
+                        buffers.length = 0
+                    }
                 })
             });
 
@@ -200,30 +205,23 @@ export class Http2Rpc implements RpcTransporter {
     }
 
     rpc<T>(r: RpcOptions, node: SpiderMeshNode, force: boolean) {
-
-
-        const header$ = new BehaviorSubject<undefined | {
-            headers: IncomingHttpHeaders & IncomingHttpStatusHeader,
-            json: boolean,
-            error: boolean
-        }>(undefined)
         return of(0).pipe(
-            mergeMap(() => this.#connect(node, force)),
-            mergeMap(connection => {
+            switchMap(() => this.#connect(node, force)),
+            switchMap(connection => {
                 const req = connection.request({
                     ':method': 'POST',
                     ':path': `/${r.service}/${r.method}`,
                     'content-type': 'application/octet-stream'
                 })
-                req.on('response', headers => {
-                    header$.next({
-                        headers,
-                        json: !!headers['content-type']?.startsWith('application/json'),
-                        error: headers[':status'] != 200
-                    })
-                })
                 return merge(
-                    fromEvent(connection, 'close').pipe(
+                    fromEvent<IncomingHttpHeaders & IncomingHttpStatusHeader>(req, 'response').pipe(
+                        map(headers => {
+                            return { headers }
+                        })
+                    ),
+                    this.#offline$.pipe(
+                        filter(id => id === node.node_id),
+                        take(1),
                         map(() => {
                             const e: SpiderMeshError = {
                                 code: 'MICROSERVICE_OFFLINE',
@@ -232,18 +230,56 @@ export class Http2Rpc implements RpcTransporter {
                             throw e
                         })
                     ),
-                    fromEvent<Buffer>(req, 'data'),
-                    new Observable<null>(o => {
-                        req.on('end', () => o.next(null))
+                    fromEvent<Buffer>(req, 'data').pipe(
+                        map(data => ({ data }))
+                    ),
+                    fromEvent(req, 'error').pipe(
+                        mergeMap(err => { throw err })
+                    ),
+                    defer(() => {
                         const data = pack(r.args)
-                        req.write(data)
-                        req.end()
+                        req.write(data, () => req.end())
+                        return fromEvent(req, 'end').pipe(
+                            map(() => ({ data: null }))
+                        )
+                    })
+                ).pipe(
+                    finalize(() => {
+                        if (!req.destroyed) {
+                            req.close()
+                        }
                     })
                 )
             }),
-            delayWhen(() => header$.value ? of(1) : header$.pipe(filter(Boolean))),
             scan((p, c) => {
-                const json = header$.value!.json
+                const headers = 'headers' in p ? p.headers : undefined
+                if (headers) return {
+                    ...p,
+                    events: 'data' in c ? [{ data: c.data, headers }] : []
+                }
+                if ('headers' in c) return {
+                    headers: c.headers,
+                    queue: [],
+                    events: p.queue.map(data => ({ data, headers: c.headers }))
+                }
+                if ('data' in c) return {
+                    ...p,
+                    queue: [...p.queue, c.data]
+                }
+                return p
+            }, {
+                queue: [],
+                events: [],
+            } as {
+                queue: Array<Buffer | null>,
+                headers?: IncomingHttpHeaders & IncomingHttpStatusHeader,
+                events: Array<{ data: Buffer | null, headers: IncomingHttpHeaders & IncomingHttpStatusHeader }>
+            }),
+            map(d => d.events),
+            mergeAll(),
+            scan((p, { data: c, headers }) => {
+                const json = !!headers['content-type']?.startsWith('application/json')
+                const error = headers[':status'] != 200
                 if (json) {
                     if (c) return {
                         completed: false,
@@ -251,7 +287,6 @@ export class Http2Rpc implements RpcTransporter {
                         tmp: Buffer.concat([p.tmp, c])
                     }
                     const data = unpack(p.tmp)
-                    const error = !!header$.value?.error
                     return {
                         tmp: p.tmp,
                         frames: [{ data, error }],
@@ -280,14 +315,11 @@ export class Http2Rpc implements RpcTransporter {
                     index += length + 4
                 }
             }, {
-                frames: [],
+                frames: [] as Array<{ data: T | undefined, error: boolean }>,
                 tmp: Buffer.alloc(0),
                 completed: false
-            } as {
-                frames: Array<{ data: T | undefined, error: boolean }>,
-                tmp: Buffer,
-                completed: boolean
-            }),
+            })
+        ).pipe(
             takeWhile(e => !e.completed, true),
             map(e => e.frames),
             mergeAll(),
