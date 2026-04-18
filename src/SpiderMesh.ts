@@ -1,6 +1,5 @@
-import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeAll, mergeMap, Observable, of, retry, tap, throwError, timeout, timer } from "rxjs"
+import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, first, merge, mergeAll, mergeMap, Observable, of, retry, tap, throwError, timeout, timer } from "rxjs"
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
-import { MicroserviceException, MicroserviceNotFound, MicroserviceOfflineException, MicroserviceRpcTimeout } from "./helpers/MicroserviceException.js";
 import { LOCAL_SERVICES$ } from "./decorators/Microservice.js";
 import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME } from "../const.js";
 import { AllIpAddresses } from "./helpers/GetIps.js";
@@ -142,14 +141,14 @@ export class SpiderMesh {
 
     callRemoteService<R, T>(options: RpcOptions<T>) {
 
-        return this.watchService(options.service).pipe(
+        return this.#nodes$.pipe(
+            map(() => this.#selectRpcTarget(options)),
+            filter(Boolean),
             options.timeout ? timeout({
                 each: options.timeout,
-                with: () => throwError(() => new MicroserviceRpcTimeout())
+                with: () => throwError(() => ({ code: 'MICROSERVICE_RPC_TIMEOUT', message: 'RPC timeout' }))
             }) : tap(),
-            mergeMap(() => {
-                const target = this.#selectRpcTarget(options)
-                if (!target) throw { code: 'MICROSERVICE_OFFLINE', message: `No available node for service ${options.service}` }
+            mergeMap(target => {
                 const force = !!options.node_id || !!options.ip
                 return target.transporter.rpc<R, T>(options, target.node, force)
             }),
@@ -162,7 +161,7 @@ export class SpiderMesh {
                 }
             }),
             catchError(e => {
-                if (options.fallback != undefined) return of(options.fallback as any as T) 
+                if (options.fallback != undefined) return of(options.fallback as any as T)
                 throw e
             })
         )
@@ -186,11 +185,11 @@ export class SpiderMesh {
                             if (rpc) {
                                 try {
                                     const service = this.#local_services.get(rpc.service)
-                                    if (!service) return rpc.callback(throwError(() => new MicroserviceNotFound()))
+                                    if (!service) return rpc.callback(throwError(() => ({ code: 'MICROSERVICE_NOT_FOUND', message: `Service ${rpc.service} not found` })))
                                     const response = service[rpc.method].apply(service, rpc.args)
                                     rpc.callback(response)
                                 } catch (err) {
-                                    rpc.callback(throwError(() => err))
+                                    rpc.callback(throwError(() => ({ code: 'MICROSERVICE_OFFLINE', message: 'Microservice is offline' })))
                                 }
                             }
 
