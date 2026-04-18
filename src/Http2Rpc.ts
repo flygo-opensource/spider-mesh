@@ -204,7 +204,7 @@ export class Http2Rpc implements RpcTransporter {
         throw e
     }
 
-    rpc<T>(r: RpcOptions, node: SpiderMeshNode, force: boolean) {
+    rpc<T>(r: RpcOptions, node: SpiderMeshNode, force: boolean) { 
         return of(0).pipe(
             switchMap(() => this.#connect(node, force)),
             switchMap(connection => {
@@ -214,9 +214,14 @@ export class Http2Rpc implements RpcTransporter {
                     'content-type': 'application/octet-stream'
                 })
                 return merge(
-                    fromEvent<IncomingHttpHeaders & IncomingHttpStatusHeader>(req, 'response').pipe(
-                        map(headers => {
-                            return { headers }
+                    fromEvent<[IncomingHttpHeaders & IncomingHttpStatusHeader]>(req, 'response').pipe(
+                        map(([hds]) => {
+                            return {
+                                headers: Object.assign(hds, {
+                                    json: !!hds['content-type']?.startsWith('application/json'),
+                                    error: Number(hds[':status']) != 200
+                                })
+                            }
                         })
                     ),
                     this.#offline$.pipe(
@@ -278,8 +283,8 @@ export class Http2Rpc implements RpcTransporter {
             map(d => d.events),
             mergeAll(),
             scan((p, { data: c, headers }) => {
-                const json = !!headers['content-type']?.startsWith('application/json')
-                const error = headers[':status'] != 200
+                const json = !!headers.json
+                const error = !!headers.error
                 if (json) {
                     if (c) return {
                         completed: false,
