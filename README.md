@@ -91,10 +91,12 @@ You can pass either transporter classes or already-created transporter instances
 - `WebsocketRelayServer`: relay server for connected nodes
 - `WebsocketTransporter`: RPC + discovery + pubsub transporter for each node
 
+The root package entry exports only the runtime-agnostic core APIs. WebSocket-specific modules are exposed through subpath imports so React Native apps do not pull Node-only `ws` code from the root entry.
+
 Start a relay server:
 
 ```ts
-import { WebsocketRelayServer } from '@spider-mesh/core'
+import { WebsocketRelayServer } from '@spider-mesh/core/relay-server'
 
 const server = new WebsocketRelayServer({
   host: '127.0.0.1',
@@ -107,7 +109,8 @@ console.log(`WebSocket relay listening on ws://127.0.0.1:${server.port}`)
 Create a provider node:
 
 ```ts
-import { Microservice, SpiderMesh, WebsocketTransporter } from '@spider-mesh/core'
+import { Microservice, SpiderMesh } from '@spider-mesh/core'
+import { WebsocketTransporter } from '@spider-mesh/core/websocket'
 
 const transporter = new WebsocketTransporter('ws://127.0.0.1:8787', {
   heartbeatIntervalMs: 5000,
@@ -128,7 +131,8 @@ new SpiderMesh({ transporters: [transporter] })
 Create a client node:
 
 ```ts
-import { RemoteServiceLinker, SpiderMesh, WebsocketTransporter } from '@spider-mesh/core'
+import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
+import { WebsocketTransporter } from '@spider-mesh/core/websocket'
 
 const transporter = new WebsocketTransporter('ws://127.0.0.1:8787', {
   heartbeatIntervalMs: 5000,
@@ -384,7 +388,7 @@ export class AuditModule {}
 
 ## Transporter Contract
 
-This package includes a built-in WebSocket transporter via `WebsocketTransporter` and `WebsocketRelayServer`.
+This package includes a built-in WebSocket transporter via `@spider-mesh/core/websocket` and a relay server via `@spider-mesh/core/relay-server`.
 
 You can also provide your own classes that implement one or more transporter contracts exported by `@spider-mesh/core`.
 

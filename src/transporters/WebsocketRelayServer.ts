@@ -1,6 +1,9 @@
-import type { IncomingMessage } from 'node:http'
 import { WebSocket, WebSocketServer as WsServer } from 'ws'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame } from './websocketProtocol.js'
+
+type RelayServerConnectionRequest = {
+    url?: string
+}
 
 export type WebsocketRelayServerOptions = {
     port?: number
@@ -8,7 +11,7 @@ export type WebsocketRelayServerOptions = {
     path?: string
     heartbeatIntervalMs?: number
     heartbeatTimeoutMs?: number
-    isServerConnection?: (socket: WebSocket, request: IncomingMessage) => boolean
+    isServerConnection?: (socket: WebSocket, request: RelayServerConnectionRequest) => boolean
 }
 
 export class WebsocketRelayServer {
@@ -79,7 +82,7 @@ export class WebsocketRelayServer {
                     this.#nodes.delete(nodeId)
                     this.#broadcast({
                         header: { type: 'offline', sender_id: nodeId },
-                        payload: Buffer.alloc(0)
+                        payload: new Uint8Array(0)
                     }, socket)
                 }
                 this.#socketNodes.delete(socket)

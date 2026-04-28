@@ -26,6 +26,18 @@
         "types": "./build/src/index.d.ts",
         "default": "./build/src/index.js"
       }
+    },
+    "./websocket": {
+      "import": {
+        "types": "./build/src/transporters/WebsocketTransporter.d.ts",
+        "default": "./build/src/transporters/WebsocketTransporter.js"
+      }
+    },
+    "./relay-server": {
+      "import": {
+        "types": "./build/src/transporters/WebsocketRelayServer.d.ts",
+        "default": "./build/src/transporters/WebsocketRelayServer.js"
+      }
     }
   },
   "scripts": {

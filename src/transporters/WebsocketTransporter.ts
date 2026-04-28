@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer'
 import { decode, encode } from '@msgpack/msgpack'
 import { Observable, Subject } from 'rxjs'
 import WebSocket from 'ws'
@@ -70,7 +69,7 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
         await this.#sendFrame({
             type: 'discovery',
             sender_id: data.sender_id,
-        }, Buffer.from(encode(this.#localNode)), { allowDisconnected: true })
+        }, encode(this.#localNode), { allowDisconnected: true })
     }
 
     async publish<T>(topic: string, data: T) {
@@ -78,7 +77,7 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
             type: 'pubsub',
             sender_id: this.#localNode?.node_id,
             topic,
-        }, Buffer.from(encode(data)))
+        }, encode(data))
     }
 
     listen<T>(topic: string): Observable<T> {
@@ -112,7 +111,7 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
                 void this.#sendFrame({
                     type: 'discovery',
                     sender_id: this.#latestDiscovery.sender_id,
-                }, Buffer.from(encode(this.#latestDiscovery.node))).catch(() => undefined)
+                }, encode(this.#latestDiscovery.node)).catch(() => undefined)
             }
 
             this.#startHeartbeat()
@@ -227,10 +226,10 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
 
     #encodeRpcPacket(packet: RpcPacket) {
         const { kind: _, ...payload } = packet
-        return Buffer.from(encode(payload))
+        return encode(payload)
     }
 
-    #decodeRpcPacket(header: RpcRelayHeader, payload: Buffer) {
+    #decodeRpcPacket(header: RpcRelayHeader, payload: Uint8Array) {
         try {
             return {
                 kind: header.type,
@@ -241,7 +240,7 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
         }
     }
 
-    async #sendFrame(header: RelayHeader, payload: Buffer = Buffer.alloc(0), options: { allowDisconnected?: boolean } = {}) {
+    async #sendFrame(header: RelayHeader, payload: Uint8Array = new Uint8Array(0), options: { allowDisconnected?: boolean } = {}) {
         if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) {
             if (options.allowDisconnected) return
             throw new Error('WebSocket is not connected')
