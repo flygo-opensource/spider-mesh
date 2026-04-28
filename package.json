@@ -15,9 +15,11 @@
     "tsconfig.json",
     "yarn.lock"
   ],
-  "peerDependencies": {},
+  "peerDependencies": {
+    "@spider-mesh/core": "^2.0.31"
+  },
   "devDependencies": {
-    "@spider-mesh/types": "^2.0.28",
+    "@spider-mesh/core": "^2.0.31",
     "@types/bun": "^1.2.23",
     "@types/msgpack": "^0.0.34",
     "@types/node": "^25.6.0",
@@ -33,7 +35,12 @@
   },
   "scripts": {
     "dev": "clear; npx tsx ",
-    "build": "tsc -v; rm -rf build && tsc -b tsconfig.json"
+    "build": "tsc -v; rm -rf build && tsc -b tsconfig.json",
+    "test:tcp": "bun run examples/tcp-smoke-test.ts",
+    "test:tcp:e2e": "bun run examples/tcp-e2e-test.ts",
+    "test:tcp:e2e:matrix": "bun run examples/tcp-e2e-matrix-test.ts",
+    "test:tcp:e2e:reverse": "bun run examples/tcp-e2e-reverse-test.ts",
+    "test:e2e": "bun test tests/tcp-transporters.e2e.test.ts && bun test tests/tcp-spidermesh.e2e.test.ts && bun test tests/tcp-spidermesh-reverse.e2e.test.ts && bun test tests/tcp-spidermesh-matrix.e2e.test.ts && bun test tests/tcp-spidermesh-round-robin.e2e.test.ts"
   },
   "author": "Duong Van Ba",
   "license": "ISC",

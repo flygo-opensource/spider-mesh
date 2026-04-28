@@ -1,14 +1,9 @@
-import { PubsubTransporter, PubsubTransporterEvent, NodesMap, SpiderMeshNode } from "@spider-mesh/types";
-import { map, Observable, Subject } from "rxjs";
-import { filter } from 'rxjs'
-import { ClientHttp2Session, createSecureServer } from "http2";
-import http2 from 'http2'
-import { AddressInfo } from "net";
-import { merge } from "rxjs/internal/observable/merge";
+import { Subject } from "rxjs"
+import { connect, createServer, type ClientHttp2Session, type Http2Server } from "node:http2"
+import { AddressInfo } from "node:net"
 import { unpack, pack } from 'msgpackr'
-
-
-type NodeId = string
+import type { PubsubTransporter, SpiderMeshNode } from "./types.js"
+import { transportRuntime } from "./runtime.js"
 
 export type PubsubMessage<T = any> = {
     namespace: string
@@ -20,87 +15,43 @@ export type PubsubMessage<T = any> = {
 
 export class Http2Pubsub implements PubsubTransporter {
 
-    public readonly type = 'pubsub'
     #nodes = new Map<string, ClientHttp2Session>()
     #subscriptions = new Map<string, Subject<any>>()
-    #topics = new Map<string, Set<NodeId>>()
+    #port = 0
+    #server: Http2Server
 
 
-    #server() {
-        return new Observable<PubsubTransporterEvent>(o => {
+    constructor() {
+        this.#server = createServer()
 
-            // Init server
-            const server = createSecureServer({
-                allowHTTP1: true,
-                requestCert: true,
-                rejectUnauthorized: true,
-
-            })
-            server.listen(() => {
-                const address = server.address() as AddressInfo
-                o.next({
-                    metadata: {
-                        http2pubsub: address.port
-                    }
-                })
-            })
-            server.on('request', (req, res) => {
-                const event = req.headers[':path']?.split('/')?.[2]
-                if (!event) return
-                const buffers = [] as Buffer[]
-                req.on('data', b => buffers.push(b as Buffer))
-                req.on('end', () => {
-                    const $ = this.#subscriptions.get(event)
-                    if (!$) return
-                    try {
-                        const data = unpack(Buffer.concat(buffers))
-                        $.next(data)
-                    } catch (e) {
-
-                    }
-                })
-            })
-
-            return () => {
-                server.close()
+        this.#server.on('request', (req, res) => {
+            const event = req.url?.split('/')?.[2]
+            if (!event) {
+                res.statusCode = 404
+                res.end()
+                return
             }
+            const buffers = [] as Buffer[]
+            req.on('data', chunk => buffers.push(chunk as Buffer))
+            req.on('end', () => {
+                const stream = this.#subscriptions.get(event)
+                if (stream) {
+                    try {
+                        stream.next(unpack(Buffer.concat(buffers)))
+                    } catch {
+                        stream.next(Buffer.concat(buffers))
+                    }
+                }
+                res.statusCode = 204
+                res.end()
+            })
         })
-    }
 
-
-    link(metadata$: Observable<SpiderMeshNode>, nodes$: Observable<NodesMap>): Observable<PubsubTransporterEvent> {
-        return merge(this.#server(), nodes$.pipe(
-            map(e => {
-                const node = e.nodes.get(e.last_updated_node_id)
-                if (!node) return
-                if (!this.#nodes.has(node.node_id)) {
-                    const port = node.transporters.http2pubsub
-                    if (isNaN(Number(port))) return
-                    const url = `http://${node.host}:${port}`
-                    const connection = http2.connect(url)
-                    if (!connection) return
-                    this.#nodes.set(node.node_id, connection)
-                    connection.once('error', () => {
-                        this.#nodes.delete(node.node_id)
-                    })
-                }
-
-                for (const topic of node.topics) {
-                    const set = this.#topics.get(topic) || new Set<string>()
-                    set.add(node.node_id)
-                    this.#topics.set(topic, set)
-                    // if (node.online) {
-                    //     set.add(node.node_id)
-                    //     this.#topics.set(topic, set)
-                    // } else {
-                    //     set.delete(node.node_id)
-                    //     set.size == 0 && this.#topics.delete(topic)
-                    // }
-                }
-            }),
-            map(() => null),
-            filter(Boolean)
-        ))
+        this.#server.listen(0, () => {
+            const address = this.#server.address() as AddressInfo
+            this.#port = address.port
+            transportRuntime.setTransporterMetadata(this.constructor.name, { port: this.#port })
+        })
     }
 
     listen<T>(topic: string) {
@@ -112,10 +63,14 @@ export class Http2Pubsub implements PubsubTransporter {
     }
 
     async publish<T>(topic: string, data: T) {
-        const ids = this.#topics.get(topic) || new Set<NodeId>
         const buffer = pack(data)
-        for (const id of ids) {
-            const connection = this.#nodes.get(id)
+        const targets = [...transportRuntime.nodes.values()].filter(node => {
+            return node.node_id !== transportRuntime.localNode?.node_id
+                && !!this.#resolvePort(node)
+        })
+
+        for (const node of targets) {
+            const connection = await this.#connect(node)
             if (!connection) continue
             if (!connection.destroyed && !connection.closed) {
                 const req = connection.request({
@@ -123,9 +78,67 @@ export class Http2Pubsub implements PubsubTransporter {
                     ':method': 'POST',
                     'content-type': 'application/json'
                 })
-                req.write(buffer)
-                req.end()
+                await new Promise<void>((resolve, reject) => {
+                    let settled = false
+
+                    req.on('response', headers => {
+                        const status = Number(headers[':status'] || 0)
+                        if (status >= 400 && !settled) {
+                            settled = true
+                            reject(new Error(`HTTP2 pubsub request failed with status ${status}`))
+                        }
+                    })
+                    req.on('data', () => undefined)
+                    req.once('end', () => {
+                        if (!settled) {
+                            settled = true
+                            resolve()
+                        }
+                    })
+                    req.once('error', error => {
+                        if (!settled) {
+                            settled = true
+                            reject(error)
+                        }
+                    })
+
+                    req.end(buffer)
+                })
             }
         }
+    }
+
+    async #connect(node: SpiderMeshNode) {
+        const current = this.#nodes.get(node.node_id)
+        if (current && !current.destroyed && !current.closed) {
+            return current
+        }
+
+        const port = this.#resolvePort(node)
+        if (!port) return null
+        const connection = connect(`http://${node.host}:${port}`)
+        this.#nodes.set(node.node_id, connection)
+        connection.once('close', () => {
+            this.#nodes.delete(node.node_id)
+        })
+        connection.once('error', () => {
+            this.#nodes.delete(node.node_id)
+        })
+        return connection
+    }
+
+    #resolvePort(node: SpiderMeshNode) {
+        const metadata = node.transporters?.[this.constructor.name]
+            || node.transporters?.Http2Pubsub
+            || node.transporters?.http2pubsub
+        return Number(metadata?.port || metadata || 0)
+    }
+
+    close() {
+        for (const connection of this.#nodes.values()) {
+            connection.close()
+        }
+        this.#nodes.clear()
+        this.#server.close()
     }
 }
