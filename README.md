@@ -19,6 +19,88 @@ bun add @spider-mesh/core rxjs reflect-metadata
 
 This package is ESM-only.
 
+## AI Usage Guide
+
+Use this section as the canonical decision guide when generating code with AI tools.
+
+### Environment support matrix
+
+| Runtime | `@spider-mesh/core` | `@spider-mesh/core/websocket` | `@spider-mesh/core/relay-server` |
+| --- | --- | --- | --- |
+| Node.js | Supported | Supported | Supported |
+| Bun | Supported | Supported | Supported |
+| Browser | Partially supported, depends on your custom transporter | Not recommended yet | Not supported |
+| React Native | Supported for the core entry only | Not recommended yet, current transporter is still Node-oriented | Not supported |
+
+### Recommended imports
+
+Use these imports exactly.
+
+- Core runtime, decorators, RPC linking, NestJS helpers: `import { ... } from '@spider-mesh/core'`
+- Built-in WebSocket transporter for Node/Bun client or provider processes: `import { WebsocketTransporter } from '@spider-mesh/core/websocket'`
+- Built-in relay server for Node/Bun only: `import { WebsocketRelayServer } from '@spider-mesh/core/relay-server'`
+
+### When to use what
+
+- Use `SpiderMesh` when you need a local runtime that can expose services, discover nodes, publish events, or call remote services.
+- Use `@Microservice()` on local classes that should be callable remotely.
+- Use `RemoteServiceLinker.link()` when you need a typed remote proxy for another service.
+- Use `WebsocketTransporter` when you want a built-in WebSocket-based transport between nodes running on Node.js or Bun.
+- Use `WebsocketRelayServer` only when you need a relay process that forwards WebSocket traffic between nodes.
+- Use a custom transporter when the runtime is not Node.js or Bun, or when you need a different protocol.
+
+### Do and don't
+
+Do:
+
+- Import runtime-agnostic APIs from `@spider-mesh/core`.
+- Import WebSocket-specific APIs only from `@spider-mesh/core/websocket` or `@spider-mesh/core/relay-server`.
+- Start the relay server before providers and clients when using the built-in WebSocket transport.
+- Wait for remote service availability with `wait()` before making calls in startup flows.
+- Treat the files under `examples/` as canonical usage references.
+
+Don't:
+
+- Do not import `WebsocketRelayServer` from `@spider-mesh/core`.
+- Do not use `@spider-mesh/core/relay-server` in React Native or browser code.
+- Do not assume the built-in WebSocket transporter is React Native-ready.
+- Do not instantiate a relay server inside a mobile app process.
+- Do not call remote services before the target service has been discovered unless you intentionally rely on retry behavior.
+
+### Canonical recipes
+
+Provider recipe:
+
+1. Import `Microservice` and `SpiderMesh` from `@spider-mesh/core`.
+2. Import `WebsocketTransporter` from `@spider-mesh/core/websocket`.
+3. Define a class and decorate it with `@Microservice()`.
+4. Instantiate the service class.
+5. Create `new SpiderMesh({ transporters: [transporter] })`.
+
+Client recipe:
+
+1. Import `SpiderMesh` and `RemoteServiceLinker` from `@spider-mesh/core`.
+2. Import `WebsocketTransporter` from `@spider-mesh/core/websocket`.
+3. Create `new SpiderMesh({ transporters: [transporter] })`.
+4. Create a typed remote proxy with `RemoteServiceLinker.link()`.
+5. Call `await proxy.wait()` before the first RPC call.
+
+Relay server recipe:
+
+1. Import `WebsocketRelayServer` from `@spider-mesh/core/relay-server`.
+2. Run it in a dedicated Node.js or Bun process.
+3. Point all providers and clients to the relay WebSocket URL.
+
+### AI-safe assumptions
+
+An AI agent should assume the following unless the codebase says otherwise:
+
+- The root package entry is the safe default for shared runtime APIs.
+- WebSocket support is opt-in through subpath imports.
+- The relay server is a server-side process, not an app-side helper.
+- The built-in transporter is currently best suited to Node.js and Bun runtimes.
+- If the target runtime is React Native, prefer the core APIs and a runtime-appropriate custom transporter.
+
 ## Core Model
 
 `SpiderMesh` is the runtime coordinator.
@@ -154,6 +236,17 @@ console.log(await greeter.hello('websocket'))
 ```
 
 The built-in WebSocket transporter is the default bundled transporter in this package. If you do not need Redis, NATS, or another custom transport, you can use it directly.
+
+### 2b. Minimal working startup order
+
+When using the built-in WebSocket transport, the canonical startup order is:
+
+1. Start `WebsocketRelayServer` in a dedicated Node.js or Bun process.
+2. Start one or more provider processes that register local `@Microservice()` classes.
+3. Start client processes.
+4. In clients, call `await remote.wait()` before the first remote method call.
+
+If an AI agent needs one default operational pattern, use this startup order.
 
 ### 3. Call a remote service
 
@@ -392,11 +485,20 @@ This package includes a built-in WebSocket transporter via `@spider-mesh/core/we
 
 You can also provide your own classes that implement one or more transporter contracts exported by `@spider-mesh/core`.
 
+### Public API map
+
+- `SpiderMesh`: runtime coordinator for services, events, discovery, and transporters
+- `RemoteServiceLinker.link()`: creates a typed remote proxy
+- `@Microservice()`: exposes a local class instance as a remote service
+- `SpiderMesh.linkEvent()`: creates a topic binding for publish and subscribe
+- `WebsocketTransporter`: built-in Node/Bun WebSocket transporter
+- `WebsocketRelayServer`: built-in Node/Bun relay server process
+
 ### RPC transporter
 
 ```ts
 type RpcTransporter = Observable<RpcEvent> & {
-  send(data: Buffer, node: SpiderMeshNode): Promise<void>
+  send(data: RpcPacket, node: SpiderMeshNode): Promise<void>
 }
 ```
 
@@ -475,3 +577,5 @@ bun run build
 - RPC target selection is round-robin unless you force `node_id` or `ip`.
 - `SpiderMesh` owns RPC stream lifecycle, timeout, retry, and cancel behavior.
 - Transporters focus on byte transport, pubsub topic IO, and discovery broadcasts.
+- The root package entry intentionally excludes Node-only WebSocket exports so AI tools and mobile runtimes do not pull server-side code by default.
+- If an AI agent is uncertain which import to use, prefer `@spider-mesh/core` first, then opt into `@spider-mesh/core/websocket` or `@spider-mesh/core/relay-server` only when the runtime is Node.js or Bun.
