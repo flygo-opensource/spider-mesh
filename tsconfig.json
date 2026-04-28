@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "types": ["node"],
     "strict": true,   
     "module": "NodeNext",
     "declaration": true,
@@ -32,6 +33,7 @@
     "out",
     "src/schema.ts",
     "bin",
-    "./build/**/*" 
+    "./build/**/*",
+    "tests/**/*"
   ]
 }

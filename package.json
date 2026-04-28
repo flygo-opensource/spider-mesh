@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/core",
   "type": "module",
-  "version": "2.0.30",
+  "version": "2.0.31",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
@@ -17,6 +17,7 @@
     "@types/node": "^22.10.3",
     "@types/reflect-metadata": "^0.1.0",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.7.2"
   },
   "exports": {
@@ -28,16 +29,26 @@
     }
   },
   "scripts": {
-    "build": "tsc -v && tsc -b tsconfig.json"
+    "build": "tsc -v && tsc -b tsconfig.json",
+    "example:websocket:server": "bun run examples/websocket-server.ts",
+    "example:websocket:provider": "bun run examples/websocket-provider.ts",
+    "example:websocket:client": "bun run examples/websocket-client.ts",
+    "test:websocket": "bun run examples/websocket-smoke-test.ts",
+    "test:websocket:e2e": "bun run examples/websocket-e2e-test.ts",
+    "test:websocket:e2e:matrix": "bun run examples/websocket-e2e-matrix-test.ts",
+    "test:websocket:e2e:reverse": "bun run examples/websocket-e2e-reverse-test.ts",
+    "test:e2e": "bun test tests/websocket-transporter.e2e.test.ts && bun test tests/websocket-spidermesh.e2e.test.ts && bun test tests/websocket-spidermesh-reverse.e2e.test.ts && bun test tests/websocket-spidermesh-matrix.e2e.test.ts && bun test tests/websocket-spidermesh-round-robin.e2e.test.ts"
   },
   "author": "Duong Van Ba",
   "license": "ISC",
   "dependencies": {
-    "@spider-mesh/types": "^2.0.28",
+    "@msgpack/msgpack": "^3.1.3",
+    "@types/bun": "^1.3.13",
     "buffer": "^6.0.3",
     "react-native-uuid": "^2.0.2",
     "rxjs": "^7.8.2",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "ws": "^8.20.0"
   },
   "browser": {
     "crypto": false

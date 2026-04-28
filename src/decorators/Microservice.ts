@@ -1,5 +1,5 @@
-import { SpiderMeshNode } from "@spider-mesh/types"
 import { ReplaySubject } from "rxjs"
+import { SpiderMeshNode } from "../types.js"
 
 export const LOCAL_SERVICES$ = new ReplaySubject<{
     name: string,

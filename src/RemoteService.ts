@@ -1,6 +1,6 @@
-import { RpcOptions, SpiderMeshNode } from "@spider-mesh/types";
 import { catchError, EMPTY, filter, takeUntil, firstValueFrom, from, map, mergeMap, Observable, of, timer } from "rxjs";
 import { ServiceChecker, SpiderMesh } from "./SpiderMesh.js";
+import { RpcOptions, SpiderMeshNode } from "./types.js";
 
 
 
