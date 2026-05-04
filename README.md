@@ -20,6 +20,24 @@ Spider Mesh is now split into two main package layers:
 
 Keep companion packages on the same published version as `@spider-mesh/core` to avoid contract drift between the runtime and concrete transports.
 
+## Metadata Contract
+
+`SpiderMeshNode` is intentionally minimal.
+
+- Node metadata includes `host`, `namespace`, `node_id`, `version`, `services`, `nodes`, and `transporters`.
+- Node metadata no longer includes `ips`.
+- Node metadata no longer includes `online`.
+
+Discovery transporters should treat discovery as a node announcement stream, not as an interface-IP inventory.
+
+The discovery transporter contract is:
+
+```ts
+broadcast(data: MdnsMessage<NodeMetadata>): Promise<void>
+```
+
+`@spider-mesh/core` no longer passes a separate IP list into discovery transporters.
+
 If you are reading this package first, the practical rule is simple:
 
 - stay in `@spider-mesh/core` for service code and runtime code

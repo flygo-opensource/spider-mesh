@@ -12,12 +12,10 @@ export type SpiderMeshError = {
 
 
 export type SpiderMeshNode = {
-    ips: string[];
     host: string;
     namespace: string;
     version: number;
     node_id: string;
-    online?: boolean;
     services: {
         [name: string]: any;
     };
@@ -53,7 +51,7 @@ export type DiscoveryEvent = {
 };
 
 export type DiscoveryTransporter = Observable<DiscoveryEvent> & {
-    broadcast(data: MdnsMessage<NodeMetadata>, ips: string[]): Promise<void>;
+    broadcast(data: MdnsMessage<NodeMetadata>): Promise<void>;
 };
 
 export type PubsubTransporter = {
@@ -72,7 +70,6 @@ export type RpcOptions<T = any> = {
     timeout?: number;
     retry?: number;
     node_id?: string;
-    ip?: string;
 };
 
 export type RpcRequestPacket = {

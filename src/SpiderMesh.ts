@@ -2,7 +2,6 @@ import { BehaviorSubject, catchError, EMPTY, filter, finalize, from, lastValueFr
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { LOCAL_SERVICES$ } from "./decorators/Microservice.js";
 import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME } from "../const.js";
-import { AllIpAddresses } from "./helpers/GetIps.js";
 import { SpiderMeshNode, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions, SpiderMeshError, RpcEvent, RpcPacket, RpcRequestPacket, RpcResponsePacket, RpcCancelPacket, DiscoveryEvent } from './types.js'
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
@@ -41,7 +40,6 @@ export class SpiderMesh {
     #discovers = new Map<string, DiscoveryTransporter>()
 
     #metadata$ = new BehaviorSubject<SpiderMeshNode>({
-        ips: AllIpAddresses,
         host: SPIDERMESH_NODE_HOSTNAME,
         namespace: SPIDERMESH_NAMESPACE,
         node_id: this.node_id,
@@ -118,7 +116,7 @@ export class SpiderMesh {
     }
 
 
-    #selectRpcTarget(filters: Partial<Pick<RpcOptions<any>, 'node_id' | 'ip' | 'service'>> = {}) {
+    #selectRpcTarget(filters: Partial<Pick<RpcOptions<any>, 'node_id' | 'service'>> = {}) {
         if (!filters.service) return null
 
         if (filters.node_id) {
@@ -134,7 +132,6 @@ export class SpiderMesh {
         const nodes = this.listRpcNodes(filters.service).map(node => {
             const transporter = node.rpc && this.#rpcs.get(node.rpc)
             if (transporter) {
-                if (filters.ip && !node.ips.includes(filters.ip)) return null
                 return { node, transporter }
             }
             return null
@@ -172,7 +169,6 @@ export class SpiderMesh {
             node_id,
             namespace: this.namespace,
             host: '',
-            ips: [],
             version: 0,
             services: {},
             nodes: {},
@@ -431,7 +427,7 @@ export class SpiderMesh {
                 hi: true,
                 node: metadata,
                 sender_id: this.node_id,
-            }, metadata.ips).catch(() => undefined)
+            }).catch(() => undefined)
         })
 
         return transporter.pipe(
