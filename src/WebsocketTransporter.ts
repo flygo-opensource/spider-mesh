@@ -212,10 +212,9 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
         const packet = this.#decodeRpcPacket(frame)
         if (!packet) return
 
-        const sender = this.#resolveNode(frame.sender_id)
         this.next({
             rpc: {
-                node: sender,
+                node_id: frame.sender_id,
                 packet
             }
         } satisfies RpcEvent)
