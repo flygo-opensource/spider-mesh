@@ -20,7 +20,6 @@ await firstValueFrom(
 )
 
 const target: SpiderMeshNode = {
-    ips: ['127.0.0.1'],
     host: '127.0.0.1',
     namespace: 'tcp-contract',
     version: 1,

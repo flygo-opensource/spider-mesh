@@ -4,7 +4,6 @@ import type { MdnsMessage, SpiderMeshNode } from '../src/types.js'
 const discovery = new UdpDiscovery()
 
 const localNode: SpiderMeshNode = {
-    ips: ['127.0.0.1'],
     host: '127.0.0.1',
     namespace: process.env.SPIDERMESH_NAMESPACE || 'tcp-discovery-contract',
     version: 1,
@@ -20,7 +19,7 @@ const hello: MdnsMessage<SpiderMeshNode> = {
     sender_id: localNode.node_id,
 }
 
-await discovery.broadcast(hello, ['192.0.2.1'])
+await discovery.broadcast(hello)
 console.log('DISCOVERY_SENDER_SENT')
 
 setInterval(() => undefined, 1000)

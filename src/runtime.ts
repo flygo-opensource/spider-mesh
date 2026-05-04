@@ -1,14 +1,9 @@
 import type { RpcEvent, SpiderMeshNode } from "./types.js"
 
-function unique(values: string[] = []) {
-    return [...new Set(values.filter(Boolean))]
-}
-
 function mergeNode(current: SpiderMeshNode | undefined, next: SpiderMeshNode) {
     return {
         ...current,
         ...next,
-        ips: unique([...(current?.ips || []), ...(next.ips || [])]),
         services: {
             ...(current?.services || {}),
             ...(next.services || {})

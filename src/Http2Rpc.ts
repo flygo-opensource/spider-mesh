@@ -129,9 +129,9 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             } satisfies SpiderMeshError
         }
 
-        const urls = auto ? [
-            `http://${node.host}:${port}`,
-        ] : [...node.ips].sort((a: string, b: string) => a.length - b.length).map((ip: string) => `http://${ip.includes(':') ? `[${ip}]` : ip}:${port}`)
+        const urls = [
+            `http://${node.host.includes(':') ? `[${node.host}]` : node.host}:${port}`,
+        ]
 
 
         for (const url of urls) {

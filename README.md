@@ -39,6 +39,7 @@ import { Http2Rpc, Http2Pubsub, UdpDiscovery } from '@spider-mesh/tcp'
 - This package no longer depends on `@spider-mesh/types`.
 - `src/types.ts` re-exports transporter contract types directly from `@spider-mesh/core`, so core remains the source of truth for RPC, discovery, and pubsub typing.
 - When `@spider-mesh/core` is linked locally, `Observable` identity can differ across package boundaries. The matrix e2e example uses the linked core's local `rxjs` copy on purpose to keep `instanceof Observable` checks in core working.
+- `SpiderMeshNode` metadata no longer carries `ips` or `online` fields. TCP transporters should rely on `host` and transporter endpoint metadata instead.
 
 ## Components
 
@@ -53,14 +54,14 @@ Main responsibilities:
 - Filter nodes by namespace.
 - Reply to first-contact `hi` messages.
 - Fill `host` from the sender address when needed.
-- Preserve multicast delivery even when core passes only interface IPs into `broadcast(...)`.
+- Preserve multicast delivery without depending on a separate interface IP list from core.
 
 Public surface:
 
 ```ts
 class UdpDiscovery {
 	constructor()
-	broadcast<T extends NodeMetadata>(data: MdnsMessage<T>, ips?: string[]): Promise<void>
+	broadcast<T extends NodeMetadata>(data: MdnsMessage<T>): Promise<void>
 }
 ```
 
@@ -119,7 +120,7 @@ The package reads the following runtime settings:
 | `SPIDERMESH_MULTICAST_ADDRESS` | `239.0.0.3` | UDP multicast group used for discovery. |
 | `SPIDERMESH_MULTICAST_PORT` | `20002` | UDP multicast port used for discovery. |
 | `SPIDERMESH_WHITELIST_ADDRESS` | unset | Optional comma-separated IPv4 targets or prefixes used for additional broadcast addresses. |
-| `SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE` | enabled | When not explicitly disabled, RPC prefers the node host instead of iterating known IPs. |
+| `SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE` | enabled | When not explicitly disabled, RPC prefers the discovered node host for routing decisions. |
 
 ## Usage Sketch
 

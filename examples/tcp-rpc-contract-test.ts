@@ -21,7 +21,6 @@ async function main() {
     )
 
     const targetNode: SpiderMeshNode = {
-        ips: ['127.0.0.1'],
         host: '127.0.0.1',
         namespace: 'tcp-contract',
         version: 1,

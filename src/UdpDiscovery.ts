@@ -82,14 +82,18 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
         super.unsubscribe()
     }
 
-    async broadcast(data: MdnsMessage<NodeMetadata>, ips: string[] = [...this.#broadcastAddress]) {
+    async broadcast(data: MdnsMessage<NodeMetadata>) {
         await firstValueFrom(this.#ready)
         const node = transportRuntime.updateLocalNode(transportRuntime.withTransporters(data.node as unknown as SpiderMeshNode))
         const msg = pack({
             ...data,
             node
         })
-        const targets = new Set<string>([...ips, ...this.#broadcastAddress])
+        const targets = new Set<string>(this.#broadcastAddress)
+        this.#send(msg, targets)
+    }
+
+    #send(msg: Buffer, targets: Iterable<string>) {
         for (const ip of targets) {
             this.#udp4.send(msg, 0, msg.length, SPIDERMESH_MULTICAST_PORT, ip, e => {
                 // e && console.error('Spidermesh UDP broadcast error', e)
@@ -114,22 +118,24 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
             })
 
             if (isRemote && !msg.forwarder_id) {
-                await this.broadcast({
+                const forwarded = pack({
                     ...msg,
                     node,
                     forwarder_id: me.node_id
-                }, [SPIDERMESH_MULTICAST_ADDRESS])
+                })
+                this.#send(forwarded, [SPIDERMESH_MULTICAST_ADDRESS])
             }
 
             if (msg.receiver_id && msg.receiver_id !== me.node_id) return
 
             if (msg.hi) {
-                await this.broadcast({
+                const reply = pack({
                     node: me,
                     hi: false,
                     sender_id: me.node_id,
                     receiver_id: msg.sender_id
-                }, [isRemote ? address : SPIDERMESH_MULTICAST_ADDRESS])
+                })
+                this.#send(reply, [isRemote ? address : SPIDERMESH_MULTICAST_ADDRESS])
             }
 
             this.next({ discovered: node })
