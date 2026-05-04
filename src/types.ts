@@ -105,7 +105,7 @@ export type RpcCancelPacket = {
 export type RpcPacket = RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
 
 export type RpcMessage = {
-    node: SpiderMeshNode;
+    node_id: string;
     packet: RpcPacket;
 };
 

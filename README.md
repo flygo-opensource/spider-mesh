@@ -31,6 +31,13 @@ bun add @spider-mesh/core rxjs reflect-metadata
 
 This package is ESM-only.
 
+Practical implications:
+
+- published output is loaded as ESM through the root export map
+- repository TypeScript uses `module: NodeNext` and `moduleResolution: NodeNext`
+- internal relative imports use emitted `.js` specifiers, for example `./SpiderMesh.js`
+- avoid CommonJS patterns such as `require()` when adding new runtime code
+
 ## AI Usage Guide
 
 Use this section as the canonical decision guide when generating code with AI tools.
@@ -70,7 +77,7 @@ Do:
 - Import transporter contracts from `@spider-mesh/core` when you need transport typing.
 - Use a companion transport package such as `@spider-mesh/tcp` or `@spider-mesh/ws` when you need a ready-made transport implementation.
 - Wait for remote service availability with `wait()` before making calls in startup flows.
-- Treat the files under `examples/` as canonical usage references.
+- Treat companion package examples and e2e tests as canonical usage references for concrete transport behavior.
 
 Don't:
 
@@ -166,18 +173,20 @@ export class UserService {
 
 ```ts
 import { SpiderMesh } from '@spider-mesh/core'
-import { MdnsDiscoveryTransporter } from './transporters/MdnsDiscoveryTransporter.js'
-import { RedisRpcTransporter } from './transporters/RedisRpcTransporter.js'
-import { RedisPubsubTransporter } from './transporters/RedisPubsubTransporter.js'
+import { AppDiscoveryTransporter } from './AppDiscoveryTransporter.js'
+import { AppRpcTransporter } from './AppRpcTransporter.js'
+import { AppPubsubTransporter } from './AppPubsubTransporter.js'
 
 const mesh = new SpiderMesh({
   transporters: [
-    MdnsDiscoveryTransporter,
-    RedisRpcTransporter,
-    RedisPubsubTransporter,
+    AppDiscoveryTransporter,
+    AppRpcTransporter,
+    AppPubsubTransporter,
   ],
 })
 ```
+
+These transporter class names are application-local examples, not exports from `@spider-mesh/core`.
 
 Transporter capability is inferred by method shape:
 
@@ -366,17 +375,15 @@ userCreated.listen().subscribe(event => {
 ```ts
 import { Module } from '@nestjs/common'
 import { SpiderMesh } from '@spider-mesh/core'
-import { MdnsDiscoveryTransporter } from './transporters/MdnsDiscoveryTransporter.js'
-import { RedisRpcTransporter } from './transporters/RedisRpcTransporter.js'
-import { RedisPubsubTransporter } from './transporters/RedisPubsubTransporter.js'
+import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '@spider-mesh/tcp'
 
 @Module({
   providers: [
     SpiderMesh.asProvider({
       transporters: [
-        MdnsDiscoveryTransporter,
-        RedisRpcTransporter,
-        RedisPubsubTransporter,
+        UdpDiscovery,
+        Http2Rpc,
+        Http2Pubsub,
       ],
     }),
   ],
@@ -489,6 +496,17 @@ You can also provide your own classes that implement one or more transporter con
 ### RPC transporter
 
 ```ts
+type RpcMessage = {
+  node_id: string
+  packet: RpcPacket
+}
+
+type RpcEvent = Partial<{
+  rpc: RpcMessage
+  offline: string
+  endpoints: Record<string, string | boolean | number>
+}>
+
 type RpcTransporter = Observable<RpcEvent> & {
   send(data: RpcPacket, node: SpiderMeshNode): Promise<void>
 }
@@ -496,7 +514,7 @@ type RpcTransporter = Observable<RpcEvent> & {
 
 The RPC observable can emit:
 
-- `rpc`: inbound RPC packet with the source node attached
+- `rpc`: inbound RPC message shaped as `{ node_id, packet }`
 - `offline`: node offline event
 - `endpoints`: transporter metadata to attach to the current node
 
@@ -515,6 +533,10 @@ The internal RPC wire protocol supports:
 ### Discovery transporter
 
 ```ts
+type DiscoveryEvent = {
+  discovered: SpiderMeshNode
+}
+
 type DiscoveryTransporter = Observable<DiscoveryEvent> & {
   broadcast(
     data: MdnsMessage<NodeMetadata>,
@@ -552,7 +574,7 @@ The core defines these error codes for RPC flows:
 The package also exports:
 
 - `LimitConcurrency(limit)` and `LimitConcurrentRunning(limit)` for throttling async method execution
-- `randomUUID()` for Node.js, browser, and React Native compatible UUID generation
+- `randomUUID()` for Node.js, browser, and React Native compatible UUID generation using ESM-safe runtime detection
 - `MicroserviceException` types for common RPC error codes
 
 ## Build

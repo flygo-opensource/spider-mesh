@@ -68,6 +68,9 @@ import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
 - Use `@spider-mesh/core` for shared transporter contracts and runtime creation.
 - Use `@spider-mesh/tcp` or `@spider-mesh/ws` when you explicitly want a concrete companion transport package.
 - Do not assume the core root package exports every concrete transporter implementation.
+- This package is ESM-only; when editing repository source, keep relative TypeScript imports on emitted `.js` specifiers.
+- Do not introduce new CommonJS runtime code such as `require()`, `module.exports`, or `__dirname` unless the file is intentionally bridging runtimes.
+- When documenting transporter contracts or packet shapes, treat `src/types.ts` as the source of truth.
 
 ## Runtime Rules
 
@@ -157,6 +160,7 @@ When using any discovery-based transport package, prefer this order:
 - Remote methods may return observables, promises, or plain values.
 - RPC target selection is round-robin unless `node_id` or `ip` is forced.
 - Local services become available after class instantiation and any `@BeforeMicroserviceOnline()` hooks complete.
+- `randomUUID()` is expected to stay ESM-safe across Node.js, browser, and React Native runtimes.
 
 ## Examples To Prefer
 

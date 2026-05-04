@@ -162,6 +162,24 @@ export class SpiderMesh {
         return transporter.send(packet, node)
     }
 
+    #resolveRpcNode(node_id: string): SpiderMeshNode {
+        const known = this.#nodes$.value.nodes.get(node_id)
+        if (known) {
+            return known
+        }
+
+        return {
+            node_id,
+            namespace: this.namespace,
+            host: '',
+            ips: [],
+            version: 0,
+            services: {},
+            nodes: {},
+            transporters: {}
+        }
+    }
+
     #completePendingRpc(request_id: string) {
         this.#rpc.pending.delete(request_id)
     }
@@ -270,11 +288,11 @@ export class SpiderMesh {
                     if (packet?.kind === 'request') {
                         if (packet.target_node_id === this.node_id) {
                             const reply = async (response: Omit<RpcResponsePacket, 'kind' | 'request_id' | 'source_node_id' | 'target_node_id'>) => {
-                                await this.#sendRpcPacket(transporter, rpc.node, {
+                                await this.#sendRpcPacket(transporter, this.#resolveRpcNode(rpc.node_id), {
                                     kind: 'response',
                                     request_id: packet.request_id,
                                     source_node_id: this.node_id,
-                                    target_node_id: rpc.node.node_id,
+                                    target_node_id: rpc.node_id,
                                     ...response
                                 })
                             }
