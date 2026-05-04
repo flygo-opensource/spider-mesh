@@ -67,6 +67,7 @@ import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
 - Use `@spider-mesh/core` for runtime-agnostic APIs only.
 - Use `@spider-mesh/core` for shared transporter contracts and runtime creation.
 - Use `@spider-mesh/tcp` or `@spider-mesh/ws` when you explicitly want a concrete companion transport package.
+- Keep companion package versions aligned with the published `@spider-mesh/core` version when updating dependencies or release instructions.
 - Do not assume the core root package exports every concrete transporter implementation.
 - This package is ESM-only; when editing repository source, keep relative TypeScript imports on emitted `.js` specifiers.
 - Do not introduce new CommonJS runtime code such as `require()`, `module.exports`, or `__dirname` unless the file is intentionally bridging runtimes.

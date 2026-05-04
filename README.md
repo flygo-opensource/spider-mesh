@@ -18,6 +18,8 @@ Spider Mesh is now split into two main package layers:
 - `@spider-mesh/core`: runtime-agnostic service runtime, decorators, linking, and shared contracts
 - companion transport packages: concrete transport implementations such as `@spider-mesh/tcp` and `@spider-mesh/ws`
 
+Keep companion packages on the same published version as `@spider-mesh/core` to avoid contract drift between the runtime and concrete transports.
+
 If you are reading this package first, the practical rule is simple:
 
 - stay in `@spider-mesh/core` for service code and runtime code
@@ -28,6 +30,8 @@ If you are reading this package first, the practical rule is simple:
 ```bash
 bun add @spider-mesh/core rxjs reflect-metadata
 ```
+
+If you also install a companion transport package, keep it on the same release version as `@spider-mesh/core`.
 
 This package is ESM-only.
 
