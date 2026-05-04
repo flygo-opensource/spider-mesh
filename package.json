@@ -1,14 +1,12 @@
 {
-  "name": "@spider-mesh/tcp",
+  "name": "@spider-mesh/ws",
   "type": "module",
-  "version": "2.0.8",
-  "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
+  "version": "2.0.35",
+  "description": "Built-in WebSocket transporter and relay server for Spider Mesh",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "repository": {
-    "url": "https://github.com/spider-mesh/tcp",
-    "rxjs": "^7.8.2",
-    "reflect-metadata": "^0.2.2"
+    "url": "https://github.com/spider-mesh/ws"
   },
   "files": [
     "build/**/*",
@@ -16,13 +14,14 @@
     "yarn.lock"
   ],
   "peerDependencies": {
-    "@spider-mesh/core": "^2.0.7"
+    "@spider-mesh/core": "^2.0.35"
   },
   "devDependencies": {
-    "@types/msgpack": "^0.0.34",
-    "@types/node": "^22.10.5",
-    "@types/bun": "^1.2.23",
-    "typescript": "^5.8.2"
+    "@spider-mesh/core": "file:../core",
+    "@types/bun": "^1.3.13",
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3"
   },
   "exports": {
     ".": {
@@ -30,18 +29,33 @@
         "types": "./build/src/index.d.ts",
         "default": "./build/src/index.js"
       }
+    },
+    "./relay-server": {
+      "import": {
+        "types": "./build/src/relay-server.d.ts",
+        "default": "./build/src/relay-server.js"
+      }
     }
   },
   "scripts": {
-    "dev": "clear; npx tsx ",
-    "x": "clear; node --no-warnings --es-module-specifier-resolution=node --experimental-specifier-resolution=node --loader ts-node/esm ",
-    "build": "tsc -v; rm -rf build && tsc -b tsconfig.json"
+    "build": "tsc -v && tsc -b tsconfig.json",
+    "example:websocket:server": "bun run examples/websocket-server.ts",
+    "example:websocket:provider": "bun run examples/websocket-provider.ts",
+    "example:websocket:client": "bun run examples/websocket-client.ts",
+    "test:websocket": "bun run examples/websocket-smoke-test.ts",
+    "test:websocket:e2e": "bun run examples/websocket-e2e-test.ts",
+    "test:websocket:e2e:matrix": "bun run examples/websocket-e2e-matrix-test.ts",
+    "test:websocket:e2e:reverse": "bun run examples/websocket-e2e-reverse-test.ts",
+    "test:e2e": "bun test tests/websocket-transporter.e2e.test.ts && bun test tests/websocket-spidermesh.e2e.test.ts && bun test tests/websocket-spidermesh-reverse.e2e.test.ts && bun test tests/websocket-spidermesh-matrix.e2e.test.ts && bun test tests/websocket-spidermesh-round-robin.e2e.test.ts"
   },
   "author": "Duong Van Ba",
   "license": "ISC",
   "dependencies": {
-    "@grpc/grpc-js": "^1.12.6",
-    "@grpc/proto-loader": "^0.7.13",
-    "msgpackr": "^1.11.5"
+    "@msgpack/msgpack": "^3.1.3",
+    "rxjs": "^7.8.2",
+    "ws": "^8.20.0"
+  },
+  "browser": {
+    "crypto": false
   }
 }

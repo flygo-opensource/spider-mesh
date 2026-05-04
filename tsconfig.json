@@ -9,7 +9,6 @@
     "experimentalDecorators": true,
     "target": "ESNext",
     "sourceMap": true,
-    "baseUrl": ".",
     "moduleResolution": "NodeNext",
     "strictPropertyInitialization": false,
     "outDir": "./build",
@@ -33,6 +32,7 @@
     "out",
     "src/schema.ts",
     "bin",
+    "tests",
     "./build/**/*"
   ]
 }
