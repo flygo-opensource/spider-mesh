@@ -32,10 +32,12 @@ import {
 
 ### WebSocket transporter
 
-Import the transporter from the root of this package:
+Import the transporter from the runtime-appropriate entry point:
 
 ```ts
-import { WebsocketTransporter } from '@spider-mesh/ws'
+import { WebsocketTransporter as NodeWebsocketTransporter } from '@spider-mesh/ws/node'
+import { WebsocketTransporter as BrowserWebsocketTransporter } from '@spider-mesh/ws/browser'
+import { WebsocketTransporter as ReactNativeWebsocketTransporter } from '@spider-mesh/ws/react-native'
 ```
 
 ### Relay server
@@ -49,6 +51,10 @@ import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
 ## Import Rules
 
 - Do not import `WebsocketTransporter` from `@spider-mesh/core`.
+- Do not import anything from `@spider-mesh/ws` root.
+- Use `@spider-mesh/ws/node` when you want an explicit Node.js or Bun transporter import.
+- Use `@spider-mesh/ws/browser` for browser runtimes.
+- Use `@spider-mesh/ws/react-native` for React Native runtimes that expose `globalThis.WebSocket`.
 - Do not import `WebsocketRelayServer` from `@spider-mesh/core`.
 - Do not import `WebsocketRelayServer` from `@spider-mesh/ws` root.
 - Use `@spider-mesh/ws/relay-server` for relay processes only.
@@ -61,7 +67,7 @@ import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
 Supported:
 
 - `@spider-mesh/core`
-- `@spider-mesh/ws`
+- `@spider-mesh/ws/node`
 - `@spider-mesh/ws/relay-server`
 
 ### Bun
@@ -69,14 +75,18 @@ Supported:
 Supported:
 
 - `@spider-mesh/core`
-- `@spider-mesh/ws`
+- `@spider-mesh/ws/node`
 - `@spider-mesh/ws/relay-server`
 
 ### Browser
 
+Supported:
+
+- `@spider-mesh/core`
+- `@spider-mesh/ws/browser`
+
 Do not assume support for:
 
-- `@spider-mesh/ws`
 - `@spider-mesh/ws/relay-server`
 
 ### React Native
@@ -84,10 +94,10 @@ Do not assume support for:
 Use:
 
 - `@spider-mesh/core`
+- `@spider-mesh/ws/react-native`
 
 Do not assume support for:
 
-- `@spider-mesh/ws`
 - `@spider-mesh/ws/relay-server`
 
 ## Package Responsibilities
@@ -171,7 +181,7 @@ When generating code, prefer these package examples as canonical references:
 ## Do Not Infer
 
 - Do not assume the root core package exports WebSocket classes.
-- Do not assume this package is browser-ready or React Native-ready.
+- Do not assume the package root is available as an import target.
 - Do not treat the relay as an application service host.
 - Do not invent additional transport frame types without checking `src/websocketProtocol.ts`.
 - Do not replace binary frame encoding with JSON unless the task explicitly changes protocol semantics.

@@ -46,14 +46,21 @@ bun add @spider-mesh/core @spider-mesh/ws rxjs reflect-metadata
 
 Keep `@spider-mesh/ws` and `@spider-mesh/core` on matching published versions so transporter/runtime contracts stay aligned.
 
+`SpiderMeshNode` metadata consumed by this package no longer includes `ips` or `online`.
+Relay hello frames now mirror the core node metadata directly and discovery broadcast uses a single argument:
+
+```ts
+broadcast(data: MdnsMessage<NodeMetadata>): Promise<void>
+```
+
 This package is ESM-only.
 
 ## Export Surface
 
-Main entry:
+Transporter entries:
 
 ```ts
-import { WebsocketTransporter } from '@spider-mesh/ws'
+import { WebsocketTransporter } from '@spider-mesh/ws/node'
 ```
 
 Relay server entry:
@@ -66,20 +73,34 @@ Recommended full import shape:
 
 ```ts
 import { SpiderMesh, Microservice, RemoteServiceLinker } from '@spider-mesh/core'
-import { WebsocketTransporter } from '@spider-mesh/ws'
+import { WebsocketTransporter } from '@spider-mesh/ws/node'
 import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
 ```
 
 ## Runtime Support
 
-| Runtime | `@spider-mesh/ws` | `@spider-mesh/ws/relay-server` |
+| Runtime | Transporter Entry | Relay Server Entry |
 | --- | --- | --- |
-| Node.js | Supported | Supported |
-| Bun | Supported | Supported |
-| Browser | Not recommended | Not supported |
-| React Native | Not recommended | Not supported |
+| Node.js | `@spider-mesh/ws/node` | `@spider-mesh/ws/relay-server` |
+| Bun | `@spider-mesh/ws/node` | `@spider-mesh/ws/relay-server` |
+| Browser | Supported via `@spider-mesh/ws/browser` | Not supported |
+| React Native | Supported via `@spider-mesh/ws/react-native` | Not supported |
 
-If you need React Native or browser support, keep using `@spider-mesh/core` and provide a runtime-appropriate custom transporter.
+The package root `@spider-mesh/ws` is not exported. Import a runtime-specific subpath explicitly.
+
+`@spider-mesh/ws/node` uses the `ws` client implementation for Node.js and Bun.
+
+`@spider-mesh/ws/browser` and `@spider-mesh/ws/react-native` use the native `globalThis.WebSocket` client API.
+
+`@spider-mesh/ws/relay-server` remains Node.js or Bun only.
+
+Import the runtime-specific transporter from the matching subpath:
+
+```ts
+import { WebsocketTransporter } from '@spider-mesh/ws/node'
+import { WebsocketTransporter as BrowserWebsocketTransporter } from '@spider-mesh/ws/browser'
+import { WebsocketTransporter as ReactNativeWebsocketTransporter } from '@spider-mesh/ws/react-native'
+```
 
 ## Architecture
 
@@ -115,7 +136,7 @@ console.log(`WebSocket relay listening on ws://127.0.0.1:${server.port}`)
 
 ```ts
 import { Microservice, SpiderMesh } from '@spider-mesh/core'
-import { WebsocketTransporter } from '@spider-mesh/ws'
+import { WebsocketTransporter } from '@spider-mesh/ws/node'
 
 const transporter = new WebsocketTransporter({
 	heartbeatIntervalMs: 5000,
@@ -139,7 +160,7 @@ new SpiderMesh({ transporters: [transporter] })
 
 ```ts
 import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
-import { WebsocketTransporter } from '@spider-mesh/ws'
+import { WebsocketTransporter } from '@spider-mesh/ws/node'
 
 const transporter = new WebsocketTransporter({
 	heartbeatIntervalMs: 5000,
@@ -175,6 +196,8 @@ It also exposes `status$` as `BehaviorSubject<Map<string, string>>` so callers c
 Example:
 
 ```ts
+import { WebsocketTransporter } from '@spider-mesh/ws/node'
+
 const transporter = new WebsocketTransporter({
 	heartbeatIntervalMs: 5000,
 	reconnectIntervalMs: 1000,

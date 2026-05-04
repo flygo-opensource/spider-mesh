@@ -1,7 +1,7 @@
 import { firstValueFrom, filter, timeout, type Observable } from 'rxjs'
 import WebSocket from 'ws'
 import { WebsocketRelayServer } from '../src/relay-server.js'
-import { WebsocketTransporter } from '../src/index.js'
+import { WebsocketTransporter } from '../src/node.js'
 import { encodeRelayFrame } from '../src/websocketProtocol.js'
 import type { DiscoveryEvent, MdnsMessage, RpcPacket, SpiderMeshNode } from '@spider-mesh/core'
 
@@ -16,7 +16,6 @@ const server = new WebsocketRelayServer({
 })
 
 const nodeA: SpiderMeshNode = {
-    ips: ['127.0.0.1'],
     host: '127.0.0.1',
     namespace: 'test',
     version: 1,
@@ -27,7 +26,6 @@ const nodeA: SpiderMeshNode = {
 }
 
 const nodeB: SpiderMeshNode = {
-    ips: ['127.0.0.1'],
     host: '127.0.0.1',
     namespace: 'test',
     version: 1,
@@ -38,7 +36,6 @@ const nodeB: SpiderMeshNode = {
 }
 
 const nodeC: SpiderMeshNode = {
-    ips: ['127.0.0.1'],
     host: '127.0.0.1',
     namespace: 'test',
     version: 1,
@@ -105,9 +102,9 @@ async function main() {
         ))
 
         await Promise.all([
-            transporterA.broadcast(createDiscoveryMessage(nodeA), []),
-            transporterB.broadcast(createDiscoveryMessage(nodeB), []),
-            transporterC.broadcast(createDiscoveryMessage(nodeC), []),
+            transporterA.broadcast(createDiscoveryMessage(nodeA)),
+            transporterB.broadcast(createDiscoveryMessage(nodeB)),
+            transporterC.broadcast(createDiscoveryMessage(nodeC)),
         ])
 
         await Promise.all([discoveryA, discoveryC, noDiscoveryOnClient])
@@ -214,7 +211,6 @@ async function main() {
             me: {
                 ...nodeA,
                 node_id: rawNodeId,
-                online: true,
             },
         }))
 

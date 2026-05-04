@@ -1,6 +1,7 @@
 import { decode, encode } from '@msgpack/msgpack'
-import type WebSocket from 'ws'
 import type { RpcPacket, SpiderMeshNode } from '@spider-mesh/core'
+
+export type RelayRawData = Uint8Array | ArrayBuffer | ArrayBufferView | string | RelayRawData[]
 
 export type RelayRpcFrame = {
     type: RpcPacket['kind']
@@ -58,10 +59,11 @@ export function decodeRelayFrame(raw: Uint8Array) {
     }
 }
 
-export function normalizeRelayRawData(raw: WebSocket.RawData): Uint8Array {
+export function normalizeRelayRawData(raw: RelayRawData): Uint8Array {
     if (raw instanceof Uint8Array) return raw
     if (Array.isArray(raw)) return concatUint8Arrays(raw.map(chunk => normalizeRelayRawData(chunk)))
     if (raw instanceof ArrayBuffer) return new Uint8Array(raw)
+    if (typeof raw === 'string') return new TextEncoder().encode(raw)
     return asUint8Array(raw)
 }
 
