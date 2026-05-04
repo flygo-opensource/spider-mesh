@@ -1,19 +1,19 @@
 import { createSocket } from "node:dgram"
 import { networkInterfaces } from "node:os"
-import { Subject } from "rxjs"
+import { finalize, firstValueFrom, fromEvent, map, merge, ReplaySubject, Subject, takeUntil, tap } from "rxjs"
 import { unpack, pack } from 'msgpackr'
-import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, SpiderMeshNode } from "./types.js"
+import type { DiscoveryEvent, DiscoveryTransporter, MdnsMessage, NodeMetadata, SpiderMeshNode } from "./types.js"
 import { SPIDERMESH_WHITELIST_ADDRESS, SPIDERMESH_MULTICAST_PORT, SPIDERMESH_MULTICAST_ADDRESS } from "./const.js"
 import { transportRuntime } from "./runtime.js"
 
-export class UdpDiscovery extends Subject<SpiderMeshNode> implements DiscoveryTransporter {
+export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTransporter {
 
     #udp4 = createSocket({
         type: 'udp4',
         reuseAddr: true
     })
-    #ready: Promise<void>
-    #resolveReady!: () => void
+    #ready = new ReplaySubject<void>(1)
+    #stop$ = new Subject<void>()
 
     #localAddress = new Set(
         Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
@@ -32,27 +32,58 @@ export class UdpDiscovery extends Subject<SpiderMeshNode> implements DiscoveryTr
 
     constructor() {
         super()
-        this.#ready = new Promise(resolve => {
-            this.#resolveReady = resolve
-        })
-        this.#udp4.on('listening', () => {
-            this.#udp4.setMulticastInterface("0.0.0.0")
-            this.#udp4.setMulticastLoopback(true)
-            this.#udp4.setMulticastTTL(1)
-            this.#udp4.addMembership(SPIDERMESH_MULTICAST_ADDRESS, "0.0.0.0")
-            this.#resolveReady()
-        })
-        this.#udp4.on('error', (e) => {
-            throw e
-        })
-        this.#udp4.on('message', (raw, remote) => {
-            void this.#onMessage(raw, remote.address)
-        })
+        merge(
+            fromEvent(this.#udp4, 'listening').pipe(
+                tap(() => {
+                    try {
+                        this.#udp4.setMulticastInterface("0.0.0.0")
+                        this.#udp4.setMulticastLoopback(true)
+                        this.#udp4.setMulticastTTL(1)
+                        this.#udp4.addMembership(SPIDERMESH_MULTICAST_ADDRESS, "0.0.0.0")
+                        this.#ready.next()
+                        this.#ready.complete()
+                    } catch (error) {
+                        this.#ready.error(error as Error)
+                        this.#stop$.next()
+                        this.#stop$.complete()
+                        throw error
+                    }
+                }),
+                map(() => undefined)
+            ),
+            fromEvent(this.#udp4, 'error').pipe(
+                tap(error => {
+                    this.#ready.error(error as Error)
+                    this.#stop$.next()
+                    this.#stop$.complete()
+                    throw error
+                }),
+                map(() => undefined)
+            ),
+            fromEvent(this.#udp4, 'message').pipe(
+                tap(args => {
+                    const [raw, remote] = args as [Buffer, { address: string }]
+                    void this.#onMessage(raw, remote.address)
+                }),
+                map(() => undefined)
+            )
+        ).pipe(
+            takeUntil(this.#stop$),
+            finalize(() => {
+                this.#udp4.close()
+            })
+        ).subscribe()
         this.#udp4.bind(SPIDERMESH_MULTICAST_PORT, '0.0.0.0')
     }
 
-    async broadcast<T extends NodeMetadata>(data: MdnsMessage<T>, ips: string[] = [...this.#broadcastAddress]) {
-        await this.#ready
+    override unsubscribe() {
+        this.#stop$.next()
+        this.#stop$.complete()
+        super.unsubscribe()
+    }
+
+    async broadcast(data: MdnsMessage<NodeMetadata>, ips: string[] = [...this.#broadcastAddress]) {
+        await firstValueFrom(this.#ready)
         const node = transportRuntime.updateLocalNode(transportRuntime.withTransporters(data.node as unknown as SpiderMeshNode))
         const msg = pack({
             ...data,
@@ -101,7 +132,7 @@ export class UdpDiscovery extends Subject<SpiderMeshNode> implements DiscoveryTr
                 }, [isRemote ? address : SPIDERMESH_MULTICAST_ADDRESS])
             }
 
-            this.next(node)
+            this.next({ discovered: node })
         } catch {
             return
         }

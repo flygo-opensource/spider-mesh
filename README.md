@@ -35,7 +35,7 @@ import { Http2Rpc, Http2Pubsub, UdpDiscovery } from '@spider-mesh/tcp'
 - Discovery uses UDP multicast and remains best-effort.
 - RPC and pubsub use HTTP/2 over TCP.
 - This package no longer depends on `@spider-mesh/types`.
-- The public package root of `@spider-mesh/core` does not currently re-export all transporter helper types, so this repo keeps a local contract mirror in `src/types.ts` for build-time typing.
+- `src/types.ts` re-exports transporter contract types directly from `@spider-mesh/core`, so core remains the source of truth for RPC, discovery, and pubsub typing.
 - When `@spider-mesh/core` is linked locally, `Observable` identity can differ across package boundaries. The matrix e2e example uses the linked core's local `rxjs` copy on purpose to keep `instanceof Observable` checks in core working.
 
 ## Components
@@ -75,6 +75,8 @@ Main responsibilities:
 - Encode `RpcPacket` payloads with `msgpackr`.
 - Emit RPC events and transporter metadata directly as an observable.
 - Preserve remote transporter metadata instead of overwriting it with local ports.
+- Route RPC responses back over the original HTTP/2 request stream keyed by `request_id`.
+- Emit `rpc.node_id` instead of fabricating remote node objects inside the transporter.
 
 Public surface:
 
@@ -186,3 +188,5 @@ bun test tests/tcp-spidermesh-round-robin.e2e.test.ts
 ```
 
 `examples/` and `tests/` are intentionally excluded from the package TypeScript build.
+
+`examples/` also has its own `tsconfig.json` for editor tooling and ad-hoc script work. Example scripts import Node globals such as `process` explicitly from `node:*` modules instead of relying on ambient globals.

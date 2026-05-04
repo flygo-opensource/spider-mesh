@@ -27,7 +27,9 @@ Prefer `bun` commands over `npm` unless the user explicitly asks otherwise.
 - Do not reintroduce `@spider-mesh/types`.
 - Keep internal imports ESM-safe with explicit `.js` extensions in TypeScript source.
 - `examples/` and `tests/` are excluded from the package build on purpose.
-- The package root of `@spider-mesh/core` does not expose every internal transporter type needed here. This repo intentionally mirrors the current runtime contract in `src/types.ts`.
+- `src/types.ts` re-exports transporter contract types from `@spider-mesh/core`; core is the source of truth for those contracts.
+- `examples/` has its own `tsconfig.json` for editor/typecheck support. Do not pull example scripts into the root package build just to satisfy editor diagnostics.
+- In example scripts, prefer explicit Node imports such as `import process from 'node:process'` over relying on ambient globals.
 
 ## Transporter Semantics
 
@@ -44,6 +46,8 @@ Prefer `bun` commands over `npm` unless the user explicitly asks otherwise.
 - The transporter contract is `Observable<RpcEvent> & { send(packet, node): Promise<void> }`.
 - Keep request/response/cancel packet handling aligned with `@spider-mesh/core` runtime behavior.
 - Never overwrite remote node transporter metadata with local transporter metadata.
+- Response packets are sent back on the original HTTP/2 request stream; do not reintroduce reverse-dial reply routing.
+- RPC events emitted here carry `node_id`, not a fabricated `SpiderMeshNode`.
 
 ### `Http2Pubsub`
 

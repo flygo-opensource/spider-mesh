@@ -1,3 +1,4 @@
+import process from 'node:process'
 import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
 import { Observable, firstValueFrom, lastValueFrom, timeout, toArray } from 'rxjs'
 import { createTransporters } from './helpers/createTransporters.js'

@@ -1,3 +1,4 @@
+import process from 'node:process'
 import { Microservice, SpiderMesh } from '@spider-mesh/core'
 import { createTransporters } from './helpers/createTransporters.js'
 

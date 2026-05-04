@@ -9,7 +9,6 @@ function mergeNode(current: SpiderMeshNode | undefined, next: SpiderMeshNode) {
         ...current,
         ...next,
         ips: unique([...(current?.ips || []), ...(next.ips || [])]),
-        topics: unique([...(current?.topics || []), ...(next.topics || [])]),
         services: {
             ...(current?.services || {}),
             ...(next.services || {})
@@ -28,7 +27,7 @@ function mergeNode(current: SpiderMeshNode | undefined, next: SpiderMeshNode) {
 class TransportRuntime {
     #localNode: SpiderMeshNode | null = null
     #nodes = new Map<string, SpiderMeshNode>()
-    #transporters = new Map<string, RpcEvent['metadata']>()
+    #transporters = new Map<string, RpcEvent['endpoints']>()
 
     get localNode() {
         return this.#localNode
@@ -38,7 +37,7 @@ class TransportRuntime {
         return this.#nodes
     }
 
-    setTransporterMetadata(name: string, metadata: RpcEvent['metadata']) {
+    setTransporterMetadata(name: string, metadata: RpcEvent['endpoints']) {
         if (!metadata) return
         this.#transporters.set(name, metadata)
         if (this.#localNode) {

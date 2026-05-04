@@ -1,5 +1,5 @@
-import { Subject } from "rxjs"
-import { connect, createServer, type ClientHttp2Session, type IncomingHttpHeaders, type ServerHttp2Stream } from 'node:http2'
+import { firstValueFrom, fromEvent, reduce, Subject, takeUntil } from "rxjs"
+import { connect, createServer, type ClientHttp2Session, type ClientHttp2Stream, type IncomingHttpHeaders, type ServerHttp2Stream } from 'node:http2'
 import { SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE } from "./const.js"
 import { AddressInfo } from "node:net"
 import { unpack, pack } from 'msgpackr'
@@ -7,25 +7,20 @@ import type { RpcEvent, RpcPacket, RpcTransporter, SpiderMeshError, SpiderMeshNo
 import { transportRuntime } from "./runtime.js"
 
 
-export type RequestHeaders = {
-    ':path': string
-    ':authority': string,
-    smnode?: string
-    smport?: string
-}
-
-
 export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
 
     #connections = new Map<string, ClientHttp2Session>()
-    #metadata: RpcEvent['metadata'] | null = null
+    #responseStreams = new Map<string, ServerHttp2Stream>()
+    #metadata: RpcEvent['endpoints'] | null = null
     #server = createServer({})
+    #isDisposing = false
 
     constructor() {
         super()
 
-        this.#server.on('stream', (stream: ServerHttp2Stream, headers: RequestHeaders) => {
-            this.#handleStream(stream, headers)
+        fromEvent(this.#server, 'stream').subscribe(args => {
+            const [stream] = args as [ServerHttp2Stream]
+            void this.#handleStream(stream)
         })
 
         this.#server.listen({
@@ -36,7 +31,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             const { port } = this.#server.address() as AddressInfo
             this.#metadata = { port }
             transportRuntime.setTransporterMetadata(this.constructor.name, this.#metadata)
-            this.next({ metadata: this.#metadata })
+            this.next({ endpoints: this.#metadata })
         })
     }
 
@@ -45,8 +40,13 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
     }
 
     override unsubscribe() {
+        this.#isDisposing = true
+        for (const stream of this.#responseStreams.values()) {
+            stream.close()
+        }
+        this.#responseStreams.clear()
         for (const connection of this.#connections.values()) {
-            connection.close()
+            connection.destroy()
         }
         this.#connections.clear()
         this.#server.close()
@@ -54,13 +54,27 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
     }
 
     async send(packet: RpcPacket, node: SpiderMeshNode) {
+        if (packet.kind === 'response') {
+            const stream = this.#responseStreams.get(packet.request_id)
+            if (stream) {
+                await this.#writeResponsePacket(stream, packet)
+                if (packet.completed || packet.error != undefined) {
+                    this.#responseStreams.delete(packet.request_id)
+                }
+                return
+            }
+        }
+
         const connection = await this.#connect(node)
         const request = connection.request({
             ':method': 'POST',
             ':path': '/rpc',
             'content-type': 'application/octet-stream',
-            ...(this.#senderHeaders(packet.source_node_id))
         })
+
+        if (packet.kind === 'request') {
+            this.#bindResponseStream(packet, node, request)
+        }
 
         await new Promise<void>((resolve, reject) => {
             let settled = false
@@ -70,11 +84,17 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
                 if (status >= 400 && !settled) {
                     settled = true
                     reject(new Error(`HTTP2 RPC request failed with status ${status}`))
+                    return
+                }
+
+                if (!settled) {
+                    settled = true
+                    resolve()
                 }
             })
             request.on('data', () => undefined)
             request.once('end', () => {
-                if (!settled) {
+                if (!settled && packet.kind !== 'request') {
                     settled = true
                     resolve()
                 }
@@ -111,7 +131,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
 
         const urls = auto ? [
             `http://${node.host}:${port}`,
-        ] : node.ips.sort((a: string, b: string) => a.length - b.length).map((ip: string) => `http://${ip.includes(':') ? `[${ip}]` : ip}:${port}`)
+        ] : [...node.ips].sort((a: string, b: string) => a.length - b.length).map((ip: string) => `http://${ip.includes(':') ? `[${ip}]` : ip}:${port}`)
 
 
         for (const url of urls) {
@@ -123,7 +143,9 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             if (connected) {
                 connection.once('close', () => {
                     this.#connections.delete(node.node_id)
-                    this.next({ offline: node.node_id })
+                    if (!this.#isDisposing && !this.closed) {
+                        this.next({ offline: node.node_id })
+                    }
                 })
                 this.#connections.set(node.node_id, connection)
                 return connection
@@ -136,80 +158,163 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         throw e
     }
 
-    #handleStream(stream: ServerHttp2Stream, headers: RequestHeaders) {
-        const buffers = [] as Buffer[]
-        stream.on('data', (chunk: Buffer) => buffers.push(chunk))
-        stream.once('end', () => {
-            try {
-                const packet = unpack(Buffer.concat(buffers)) as RpcPacket
-                const node = this.#resolveSenderNode(packet, headers, stream)
-                transportRuntime.updateNode(node)
+    async #handleStream(stream: ServerHttp2Stream) {
+        try {
+            const end$ = fromEvent(stream, 'end')
+            const buffers = await firstValueFrom(
+                fromEvent(stream, 'data').pipe(
+                    takeUntil(end$),
+                    reduce((chunks, chunk) => {
+                        chunks.push(chunk as Buffer)
+                        return chunks
+                    }, [] as Buffer[])
+                )
+            )
+
+            const packet = unpack(Buffer.concat(buffers)) as RpcPacket
+
+            if (packet.kind === 'request') {
+                stream.respond({
+                    ':status': 200,
+                    'content-type': 'application/octet-stream'
+                })
+                this.#responseStreams.set(packet.request_id, stream)
+                stream.once('close', () => {
+                    this.#responseStreams.delete(packet.request_id)
+                })
+            } else {
                 stream.respond({ ':status': 204 })
                 stream.end()
-                this.next({
-                    message: {
-                        node,
-                        packet
-                    }
-                })
-            } catch {
-                if (!stream.headersSent) {
-                    stream.respond({ ':status': 400 })
-                }
-                stream.end()
             }
+
+            this.next({
+                rpc: {
+                    node_id: packet.source_node_id,
+                    packet
+                }
+            })
+        } catch {
+            if (!stream.headersSent) {
+                stream.respond({ ':status': 400 })
+            }
+            stream.end()
+        }
+    }
+
+    async #writeResponsePacket(stream: ServerHttp2Stream, packet: RpcPacket) {
+        const frame = this.#encodeFrame(packet)
+        const isTerminal = packet.kind === 'response' && (packet.completed || packet.error != undefined)
+
+        await new Promise<void>((resolve, reject) => {
+            const done = (error?: Error | null) => {
+                if (error) {
+                    reject(error)
+                    return
+                }
+                resolve()
+            }
+
+            if (isTerminal) {
+                stream.end(frame, done)
+                return
+            }
+
+            stream.write(frame, done)
         })
     }
 
-    #resolveSenderNode(packet: RpcPacket, headers: RequestHeaders, stream: ServerHttp2Stream) {
-        const encodedNode = headers.smnode
-        if (encodedNode) {
-            try {
-                return transportRuntime.updateNode(unpack(Buffer.from(encodedNode, 'base64url')) as SpiderMeshNode)
-            } catch {
-                return this.#fallbackSenderNode(packet, headers, stream)
+    #bindResponseStream(packet: Extract<RpcPacket, { kind: 'request' }>, node: SpiderMeshNode, request: ClientHttp2Stream) {
+        let buffer = Buffer.alloc(0)
+        let completed = false
+        let accepted = false
+
+        const emitResponse = (response: RpcPacket) => {
+            if (this.#isDisposing || this.closed) {
+                return
             }
-        }
 
-        return this.#fallbackSenderNode(packet, headers, stream)
-    }
-
-    #fallbackSenderNode(packet: RpcPacket, headers: RequestHeaders, stream: ServerHttp2Stream) {
-        const known = transportRuntime.getNode(packet.source_node_id)
-        const remoteAddress = this.#normalizeHost(stream.session?.socket.remoteAddress)
-        const port = Number(headers.smport || this.#getTransporterMetadata(known)?.port || 0)
-
-        return {
-            ips: known?.ips?.length ? known.ips : remoteAddress ? [remoteAddress] : [],
-            host: known?.host || remoteAddress || '',
-            namespace: known?.namespace || transportRuntime.localNode?.namespace || '',
-            version: known?.version || 0,
-            node_id: packet.source_node_id,
-            online: known?.online,
-            topics: known?.topics || [],
-            services: known?.services || {},
-            nodes: known?.nodes || {},
-            transporters: {
-                ...(known?.transporters || {}),
-                [this.constructor.name]: {
-                    ...(this.#getTransporterMetadata(known) || {}),
-                    ...(port ? { port } : {})
+            this.next({
+                rpc: {
+                    node_id: node.node_id,
+                    packet: response
                 }
+            })
+        }
+
+        request.on('response', (headers: IncomingHttpHeaders) => {
+            const status = Number(headers[':status'] || 0)
+            accepted = status > 0 && status < 400
+        })
+
+        request.on('data', chunk => {
+            buffer = Buffer.concat([buffer, chunk as Buffer])
+
+            while (buffer.length >= 4) {
+                const size = buffer.readUInt32BE(0)
+                if (buffer.length < size + 4) {
+                    return
+                }
+
+                const frame = buffer.subarray(4, size + 4)
+                buffer = buffer.subarray(size + 4)
+
+                const response = unpack(frame) as RpcPacket
+                if (response.kind !== 'response') {
+                    continue
+                }
+
+                if (response.completed || response.error != undefined) {
+                    completed = true
+                }
+
+                emitResponse(response)
             }
-        } satisfies SpiderMeshNode
+        })
+
+        request.once('end', () => {
+            if (!accepted || completed) {
+                return
+            }
+
+            emitResponse({
+                kind: 'response',
+                request_id: packet.request_id,
+                source_node_id: node.node_id,
+                target_node_id: packet.source_node_id,
+                error: {
+                    code: 'MICROSERVICE_OFFLINE',
+                    message: 'RPC response stream ended unexpectedly'
+                },
+                completed: true
+            })
+        })
+
+        request.once('error', error => {
+            if (!accepted || completed) {
+                return
+            }
+
+            completed = true
+            emitResponse({
+                kind: 'response',
+                request_id: packet.request_id,
+                source_node_id: node.node_id,
+                target_node_id: packet.source_node_id,
+                error: {
+                    code: 'MICROSERVICE_OFFLINE',
+                    message: error.message || 'RPC response stream failed'
+                },
+                completed: true
+            })
+        })
     }
 
-    #senderHeaders(sourceNodeId: string) {
-        const localNode = transportRuntime.localNode
-        const port = this.#metadata?.port
-        const senderNode = localNode?.node_id === sourceNodeId
-            ? transportRuntime.withTransporters(localNode)
-            : localNode
-
-        return {
-            ...(senderNode ? { smnode: Buffer.from(pack(senderNode)).toString('base64url') } : {}),
-            ...(port ? { smport: String(port) } : {})
-        }
+    #encodeFrame(packet: RpcPacket) {
+        const payload = pack(packet)
+        const frame = Buffer.allocUnsafe(payload.length + 4)
+        frame.writeUInt32BE(payload.length, 0)
+        payload.copy(frame, 4)
+        return frame
     }
 
     #getTransporterMetadata(node?: SpiderMeshNode | null) {
@@ -217,10 +322,5 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         return node.transporters?.[this.constructor.name]
             || node.transporters?.Http2Rpc
             || node.transporters?.http2rpc
-    }
-
-    #normalizeHost(host?: string | null) {
-        if (!host) return ''
-        return host.replace(/^::ffff:/, '')
     }
 } 
