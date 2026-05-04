@@ -1,5 +1,5 @@
 import { decode, encode } from '@msgpack/msgpack'
-import { defer, finalize, fromEvent, ignoreElements, map, merge, Observable, of, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, tap, throwError, timer } from 'rxjs'
+import { BehaviorSubject, defer, finalize, fromEvent, ignoreElements, map, merge, Observable, of, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, tap, throwError, timer } from 'rxjs'
 import WebSocket from 'ws'
 import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, PubsubTransporter, RpcEvent, RpcPacket, RpcTransporter, SpiderMeshNode } from '@spider-mesh/core'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type ReceivedRelayFrame, type ReceivedRelayRpcFrame } from './websocketProtocol.js'
@@ -25,11 +25,14 @@ type RelayConnection = {
     socket?: WebSocket
 }
 
+export type WebsocketConnectionStatus = 'connecting' | 'connected' | 'error' | 'not_connected'
+
 export class WebsocketTransporter extends Subject<any> implements RpcTransporter, DiscoveryTransporter, PubsubTransporter {
     #connections = new Map<string, RelayConnection>()
     #topics = new Map<string, TopicStream>()
     #nodes = new Map<string, KnownNode>()
     #me$ = new ReplaySubject<SpiderMeshNode>(1)
+    public readonly status$ = new BehaviorSubject<Map<string, string>>(new Map())
 
     constructor(protected options: WebsocketTransporterOptions = {}) {
         super()
@@ -42,6 +45,7 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
     connect(url: string | string[]) {
         for (const relayUrl of new Set(Array.isArray(url) ? url : [url])) {
             if (this.#connections.has(relayUrl)) continue
+            this.#setConnectionStatus(relayUrl, 'connecting')
             this.#connections.set(relayUrl, {
                 subscription: this.#createConnectionLoop(relayUrl).subscribe(),
             })
@@ -54,6 +58,7 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
         for (const relayUrl of urls) {
             this.#connections.get(relayUrl)?.subscription.unsubscribe()
             this.#connections.delete(relayUrl)
+            this.#setConnectionStatus(relayUrl, 'not_connected')
         }
     }
 
@@ -110,9 +115,22 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
     }
 
     #createConnectionLoop(url: string) {
-        return of(1).pipe(
-            map(() => new WebSocket(url)),
+        return defer(() => {
+            this.#setConnectionStatus(url, 'connecting')
+            return of(new WebSocket(url))
+        }).pipe(
             switchMap(socket => {
+                const disconnection$ = merge(
+                    fromEvent(socket, 'close'),
+                    fromEvent(socket, 'error'),
+                ).pipe(
+                    take(1),
+                    tap(event => {
+                        this.#setConnectionStatus(url, this.#getDisconnectionStatus(event))
+                    }),
+                    switchMap(() => throwError(() => new Error(`WebSocket disconnected: ${url}`))),
+                )
+
                 const disconnect = () => {
                     const connection = this.#connections.get(url)
                     if (connection?.socket === socket) {
@@ -125,13 +143,7 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
                         take(1),
                         map(() => socket),
                     ),
-                    merge(
-                        fromEvent(socket, 'close'),
-                        fromEvent(socket, 'error'),
-                    ).pipe(
-                        take(1),
-                        switchMap(() => throwError(() => new Error(`WebSocket disconnected: ${url}`))),
-                    )
+                    disconnection$
                 ).pipe(
                     take(1),
                     tap(() => {
@@ -139,6 +151,8 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
                         if (connection) {
                             connection.socket = socket
                         }
+
+                        this.#setConnectionStatus(url, 'connected')
                     }),
                     switchMap(() => merge(
                         this.#me$.pipe(
@@ -164,13 +178,7 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
                             }),
                             ignoreElements(),
                         ),
-                        merge(
-                            fromEvent(socket, 'close'),
-                            fromEvent(socket, 'error'),
-                        ).pipe(
-                            take(1),
-                            switchMap(() => throwError(() => new Error(`WebSocket disconnected: ${url}`))),
-                        ),
+                        disconnection$,
                         timer(0, this.options.heartbeatIntervalMs || 30000).pipe(
                             tap(() => {
                                 if (socket.readyState === WebSocket.OPEN) {
@@ -350,5 +358,20 @@ export class WebsocketTransporter extends Subject<any> implements RpcTransporter
 
     #parseFrame(raw: WebSocket.RawData) {
         return decodeRelayFrame(normalizeRelayRawData(raw)) as ReceivedRelayFrame | null
+    }
+
+    #getDisconnectionStatus(event: unknown): WebsocketConnectionStatus {
+        return Array.isArray(event) ? 'not_connected' : 'error'
+    }
+
+    #setConnectionStatus(url: string, status: WebsocketConnectionStatus) {
+        const currentStatus = this.status$.value.get(url)
+        if (currentStatus === status) {
+            return
+        }
+
+        const nextStatuses = new Map(this.status$.value)
+        nextStatuses.set(url, status)
+        this.status$.next(nextStatuses)
     }
 }

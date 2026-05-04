@@ -95,6 +95,7 @@ Do not assume support for:
 `WebsocketTransporter` is responsible for:
 
 - opening and maintaining WebSocket connections
+- exposing `status$` connection state for each relay URL
 - reconnect and heartbeat behavior
 - forwarding RPC packets through relay frames
 - forwarding discovery hello and offline events
@@ -149,6 +150,7 @@ When using the built-in WebSocket transport, prefer this order:
 When editing this package, preserve these behaviors unless the task explicitly changes them:
 
 - RPC request, response, and cancel frames are binary MsgPack payloads.
+- `status$` remains a public `BehaviorSubject<Map<string, string>>` that reflects `connecting`, `connected`, `error`, and `not_connected` for each configured relay URL.
 - Observable-returning RPC methods must work correctly across package boundaries.
 - Discovery synchronization must emit `hello` and `offline` state consistently.
 - Pubsub listeners are tracked by topic and unsubscribed with delay semantics.

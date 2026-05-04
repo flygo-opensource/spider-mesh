@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/ws",
   "type": "module",
-  "version": "2.0.37",
+  "version": "2.0.38",
   "description": "Built-in WebSocket transporter and relay server for Spider Mesh",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
@@ -14,7 +14,7 @@
     "yarn.lock"
   ],
   "peerDependencies": {
-    "@spider-mesh/core": "^2.0.37"
+    "@spider-mesh/core": "^2.0.38"
   },
   "devDependencies": {
     "@spider-mesh/core": "file:../core",

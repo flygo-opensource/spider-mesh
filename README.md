@@ -44,6 +44,8 @@ Do not use this package as the default import source for runtime-agnostic APIs.
 bun add @spider-mesh/core @spider-mesh/ws rxjs reflect-metadata
 ```
 
+Keep `@spider-mesh/ws` and `@spider-mesh/core` on matching published versions so transporter/runtime contracts stay aligned.
+
 This package is ESM-only.
 
 ## Export Surface
@@ -168,6 +170,8 @@ console.log(await greeter.hello('world'))
 - `reconnectIntervalMs`: delay before reconnect attempts after disconnect
 - `unsubscribeDelayMs`: delay before unsubscribe is sent after the last local subscriber leaves a topic
 
+It also exposes `status$` as `BehaviorSubject<Map<string, string>>` so callers can observe per-relay connection state transitions such as `connecting`, `connected`, `error`, and `not_connected`.
+
 Example:
 
 ```ts
@@ -175,6 +179,10 @@ const transporter = new WebsocketTransporter({
 	heartbeatIntervalMs: 5000,
 	reconnectIntervalMs: 1000,
 	unsubscribeDelayMs: 10000,
+})
+
+transporter.status$.subscribe(statuses => {
+	console.log(statuses.get('ws://127.0.0.1:8787'))
 })
 ```
 
