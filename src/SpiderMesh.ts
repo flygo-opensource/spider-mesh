@@ -3,7 +3,7 @@ import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroser
 import { LOCAL_SERVICES$ } from "./decorators/Microservice.js";
 import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME } from "../const.js";
 import { AllIpAddresses } from "./helpers/GetIps.js";
-import { SpiderMeshNode, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions, SpiderMeshError, RpcEvent, RpcPacket, RpcRequestPacket, RpcResponsePacket, RpcCancelPacket } from './types.js'
+import { SpiderMeshNode, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions, SpiderMeshError, RpcEvent, RpcPacket, RpcRequestPacket, RpcResponsePacket, RpcCancelPacket, DiscoveryEvent } from './types.js'
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 export type ServiceChecker = (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean
@@ -27,6 +27,10 @@ type PendingRpcStream = {
     finished: boolean
 }
 
+const isSubscribable = (value: unknown): value is Observable<unknown> => {
+    return !!value && typeof value === 'object' && typeof (value as { subscribe?: unknown }).subscribe === 'function'
+}
+
 export class SpiderMesh {
 
     public readonly node_id = `${Date.now().toString(36).toUpperCase()}`
@@ -42,7 +46,6 @@ export class SpiderMesh {
         namespace: SPIDERMESH_NAMESPACE,
         node_id: this.node_id,
         services: {},
-        topics: [],
         transporters: {},
         nodes: {},
         version: 0,
@@ -247,37 +250,37 @@ export class SpiderMesh {
         if (this.#rpcs.has(name)) return EMPTY
         this.#rpcs.set(name, transporter)
 
-        const initialMetadata = (transporter as RpcTransporter & { metadata?: RpcEvent['metadata'] }).metadata
-        if (initialMetadata) {
+        const initialEndpoints = (transporter as RpcTransporter & { metadata?: RpcEvent['endpoints'] }).metadata
+        if (initialEndpoints) {
             this.#metadata$.next({
                 ... this.#metadata$.value,
                 transporters: {
                     ... this.#metadata$.value.transporters,
-                    [name]: initialMetadata
+                    [name]: initialEndpoints
                 },
                 version: this.#metadata$.value.version + 1
             })
         }
 
         return transporter.pipe(
-            map(({ message, offline, metadata }) => {
-                if (message) {
-                    const packet = message.packet
+            map(({ rpc, offline, endpoints }) => {
+                if (rpc) {
+                    const packet = rpc.packet
 
                     if (packet?.kind === 'request') {
                         if (packet.target_node_id === this.node_id) {
                             const reply = async (response: Omit<RpcResponsePacket, 'kind' | 'request_id' | 'source_node_id' | 'target_node_id'>) => {
-                                await this.#sendRpcPacket(transporter, message.node, {
+                                await this.#sendRpcPacket(transporter, rpc.node, {
                                     kind: 'response',
                                     request_id: packet.request_id,
                                     source_node_id: this.node_id,
-                                    target_node_id: message.node.node_id,
+                                    target_node_id: rpc.node.node_id,
                                     ...response
                                 })
                             }
 
                             const handleResponse = (response: any) => {
-                                if (response instanceof Observable) {
+                                if (isSubscribable(response)) {
                                     let queue = Promise.resolve()
                                     // Preserve event ordering while forwarding a remote observable stream.
                                     const running = response.subscribe({
@@ -372,12 +375,12 @@ export class SpiderMesh {
                     }
                 }
 
-                if (metadata) {
+                if (endpoints) {
                     this.#metadata$.next({
                         ... this.#metadata$.value,
                         transporters: {
                             ... this.#metadata$.value.transporters,
-                            [name]: metadata
+                            [name]: endpoints
                         },
                         version: this.#metadata$.value.version + 1
                     })
@@ -414,7 +417,7 @@ export class SpiderMesh {
         })
 
         return transporter.pipe(
-            tap(node => {
+            tap(({ discovered: node }: DiscoveryEvent) => {
                 if (!node || typeof node !== 'object' || !('node_id' in node) || !('services' in node)) return
                 const nodes = this.#nodes$.value.nodes
                 const rpc = Object.keys(node.transporters || {}).find(key => this.#rpcs.has(key));

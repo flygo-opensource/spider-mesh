@@ -8,8 +8,20 @@ It provides:
 - Typed remote service linking through a Proxy
 - Stream-first RPC over transporter-managed byte delivery
 - Discovery and pubsub integration through simple transporter contracts
-- Built-in WebSocket transporter and relay server
+- Transporter contracts that can be implemented directly or consumed through companion transport packages such as `@spider-mesh/tcp` and `@spider-mesh/ws`
 - NestJS adapters for exposing and consuming services
+
+## Package Boundary
+
+Spider Mesh is now split into two main package layers:
+
+- `@spider-mesh/core`: runtime-agnostic service runtime, decorators, linking, and shared contracts
+- companion transport packages: concrete transport implementations such as `@spider-mesh/tcp` and `@spider-mesh/ws`
+
+If you are reading this package first, the practical rule is simple:
+
+- stay in `@spider-mesh/core` for service code and runtime code
+- add a companion transport package only when you explicitly need a concrete transport implementation
 
 ## Install
 
@@ -25,28 +37,29 @@ Use this section as the canonical decision guide when generating code with AI to
 
 ### Environment support matrix
 
-| Runtime | `@spider-mesh/core` | `@spider-mesh/core/websocket` | `@spider-mesh/core/relay-server` |
+| Runtime | `@spider-mesh/core` | `@spider-mesh/tcp` | `@spider-mesh/ws` |
 | --- | --- | --- | --- |
 | Node.js | Supported | Supported | Supported |
 | Bun | Supported | Supported | Supported |
-| Browser | Partially supported, depends on your custom transporter | Not recommended yet | Not supported |
-| React Native | Supported for the core entry only | Not recommended yet, current transporter is still Node-oriented | Not supported |
+| Browser | Partially supported, depends on your custom transporter | Not recommended | Not recommended |
+| React Native | Supported for the core entry only | Not recommended | Not recommended |
 
 ### Recommended imports
 
 Use these imports exactly.
 
 - Core runtime, decorators, RPC linking, NestJS helpers: `import { ... } from '@spider-mesh/core'`
-- Built-in WebSocket transporter for Node/Bun client or provider processes: `import { WebsocketTransporter } from '@spider-mesh/core/websocket'`
-- Built-in relay server for Node/Bun only: `import { WebsocketRelayServer } from '@spider-mesh/core/relay-server'`
+- Shared transporter contracts and runtime APIs: `import { ... } from '@spider-mesh/core'`
+- Companion TCP transport implementation when needed: `import { Http2Rpc, Http2Pubsub, UdpDiscovery } from '@spider-mesh/tcp'`
+- Companion WebSocket transport implementation when needed: `import { WebsocketTransporter } from '@spider-mesh/ws'`
 
 ### When to use what
 
 - Use `SpiderMesh` when you need a local runtime that can expose services, discover nodes, publish events, or call remote services.
 - Use `@Microservice()` on local classes that should be callable remotely.
 - Use `RemoteServiceLinker.link()` when you need a typed remote proxy for another service.
-- Use `WebsocketTransporter` when you want a built-in WebSocket-based transport between nodes running on Node.js or Bun.
-- Use `WebsocketRelayServer` only when you need a relay process that forwards WebSocket traffic between nodes.
+- Use transporter contracts from `@spider-mesh/core` when you are implementing or typing your own transport.
+- Use `@spider-mesh/tcp` or `@spider-mesh/ws` when you want a companion transport package.
 - Use a custom transporter when the runtime is not Node.js or Bun, or when you need a different protocol.
 
 ### Do and don't
@@ -54,17 +67,17 @@ Use these imports exactly.
 Do:
 
 - Import runtime-agnostic APIs from `@spider-mesh/core`.
-- Import WebSocket-specific APIs only from `@spider-mesh/core/websocket` or `@spider-mesh/core/relay-server`.
-- Start the relay server before providers and clients when using the built-in WebSocket transport.
+- Import transporter contracts from `@spider-mesh/core` when you need transport typing.
+- Use a companion transport package such as `@spider-mesh/tcp` or `@spider-mesh/ws` when you need a ready-made transport implementation.
 - Wait for remote service availability with `wait()` before making calls in startup flows.
 - Treat the files under `examples/` as canonical usage references.
 
 Don't:
 
-- Do not import `WebsocketRelayServer` from `@spider-mesh/core`.
-- Do not use `@spider-mesh/core/relay-server` in React Native or browser code.
-- Do not assume the built-in WebSocket transporter is React Native-ready.
-- Do not instantiate a relay server inside a mobile app process.
+- Do not assume `@spider-mesh/core` exports every concrete transporter.
+- Do not assume `@spider-mesh/tcp` is React Native-ready.
+- Do not assume `@spider-mesh/ws` is React Native-ready.
+- Do not couple service code to a single transport package unless that is intentional.
 - Do not call remote services before the target service has been discovered unless you intentionally rely on retry behavior.
 
 ### Canonical recipes
@@ -72,7 +85,7 @@ Don't:
 Provider recipe:
 
 1. Import `Microservice` and `SpiderMesh` from `@spider-mesh/core`.
-2. Import `WebsocketTransporter` from `@spider-mesh/core/websocket`.
+2. Choose a concrete transporter implementation, for example from `@spider-mesh/tcp` or `@spider-mesh/ws`.
 3. Define a class and decorate it with `@Microservice()`.
 4. Instantiate the service class.
 5. Create `new SpiderMesh({ transporters: [transporter] })`.
@@ -80,25 +93,33 @@ Provider recipe:
 Client recipe:
 
 1. Import `SpiderMesh` and `RemoteServiceLinker` from `@spider-mesh/core`.
-2. Import `WebsocketTransporter` from `@spider-mesh/core/websocket`.
+2. Choose a concrete transporter implementation, for example from `@spider-mesh/tcp` or `@spider-mesh/ws`.
 3. Create `new SpiderMesh({ transporters: [transporter] })`.
 4. Create a typed remote proxy with `RemoteServiceLinker.link()`.
 5. Call `await proxy.wait()` before the first RPC call.
 
-Relay server recipe:
+Companion transport package recipes:
 
-1. Import `WebsocketRelayServer` from `@spider-mesh/core/relay-server`.
-2. Run it in a dedicated Node.js or Bun process.
-3. Point all providers and clients to the relay WebSocket URL.
+TCP:
+
+1. Import `UdpDiscovery`, `Http2Rpc`, and `Http2Pubsub` from `@spider-mesh/tcp`.
+2. Add those transporters to `new SpiderMesh({ transporters: [...] })`.
+3. Let the TCP package handle discovery, RPC, and pubsub transport.
+
+WebSocket:
+
+1. Import `WebsocketTransporter` from `@spider-mesh/ws`.
+2. Add that transporter to `new SpiderMesh({ transporters: [...] })`.
+3. Run `WebsocketRelayServer` from `@spider-mesh/ws/relay-server` when using the WebSocket companion package.
 
 ### AI-safe assumptions
 
 An AI agent should assume the following unless the codebase says otherwise:
 
 - The root package entry is the safe default for shared runtime APIs.
-- WebSocket support is opt-in through subpath imports.
-- The relay server is a server-side process, not an app-side helper.
-- The built-in transporter is currently best suited to Node.js and Bun runtimes.
+- Concrete transports are opt-in through companion packages or custom implementations.
+- Transporter contracts come from the core package.
+- The companion TCP and WebSocket packages are sibling transport options for Node.js and Bun runtimes.
 - If the target runtime is React Native, prefer the core APIs and a runtime-appropriate custom transporter.
 
 ## Core Model
@@ -166,84 +187,54 @@ Transporter capability is inferred by method shape:
 
 You can pass either transporter classes or already-created transporter instances into `transporters`.
 
-### 2a. Use the built-in WebSocket transporter
+### 2a. Use companion transport packages
 
-`@spider-mesh/core` ships with a built-in WebSocket transporter pair:
+Spider Mesh can work with companion transport packages such as `@spider-mesh/tcp` and `@spider-mesh/ws`.
 
-- `WebsocketRelayServer`: relay server for connected nodes
-- `WebsocketTransporter`: RPC + discovery + pubsub transporter for each node
+The root package entry exports the runtime-agnostic APIs and shared transporter contracts. Concrete transport implementations can be imported from companion packages when needed.
 
-The root package entry exports only the runtime-agnostic core APIs. WebSocket-specific modules are exposed through subpath imports so React Native apps do not pull Node-only `ws` code from the root entry.
-
-Start a relay server:
+Create a runtime using the TCP package:
 
 ```ts
-import { WebsocketRelayServer } from '@spider-mesh/core/relay-server'
+import { SpiderMesh } from '@spider-mesh/core'
+import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '@spider-mesh/tcp'
 
-const server = new WebsocketRelayServer({
-  host: '127.0.0.1',
-  port: 8787,
+const mesh = new SpiderMesh({
+  transporters: [
+    new UdpDiscovery(),
+    new Http2Rpc(),
+    new Http2Pubsub(),
+  ],
 })
-
-console.log(`WebSocket relay listening on ws://127.0.0.1:${server.port}`)
 ```
 
-Create a provider node:
+Or use the WebSocket package:
 
 ```ts
-import { Microservice, SpiderMesh } from '@spider-mesh/core'
-import { WebsocketTransporter } from '@spider-mesh/core/websocket'
+import { SpiderMesh } from '@spider-mesh/core'
+import { WebsocketTransporter } from '@spider-mesh/ws'
 
-const transporter = new WebsocketTransporter('ws://127.0.0.1:8787', {
+const transporter = new WebsocketTransporter({
   heartbeatIntervalMs: 5000,
   reconnectIntervalMs: 1000,
 })
 
-@Microservice()
-class GreetingService {
-  async hello(name: string) {
-    return `hello ${name}`
-  }
-}
+transporter.connect('ws://127.0.0.1:8787')
 
-new GreetingService()
-new SpiderMesh({ transporters: [transporter] })
+const mesh = new SpiderMesh({
+  transporters: [transporter],
+})
 ```
 
-Create a client node:
-
-```ts
-import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
-import { WebsocketTransporter } from '@spider-mesh/core/websocket'
-
-const transporter = new WebsocketTransporter('ws://127.0.0.1:8787', {
-  heartbeatIntervalMs: 5000,
-  reconnectIntervalMs: 1000,
-})
-
-type GreetingService = {
-  hello(name: string): Promise<string>
-}
-
-const mesh = new SpiderMesh({ transporters: [transporter] })
-const greeter = RemoteServiceLinker.link<GreetingService>(mesh, {
-  service: 'GreetingService',
-  timeout: 5000,
-})
-
-await greeter.wait()
-console.log(await greeter.hello('websocket'))
-```
-
-The built-in WebSocket transporter is the default bundled transporter in this package. If you do not need Redis, NATS, or another custom transport, you can use it directly.
+Both patterns keep service/runtime code in `@spider-mesh/core` while delegating concrete transport behavior to a companion package.
 
 ### 2b. Minimal working startup order
 
-When using the built-in WebSocket transport, the canonical startup order is:
+When using a discovery-based transport package, the canonical startup order is:
 
-1. Start `WebsocketRelayServer` in a dedicated Node.js or Bun process.
-2. Start one or more provider processes that register local `@Microservice()` classes.
-3. Start client processes.
+1. Start one or more provider processes that register local `@Microservice()` classes.
+2. Start client processes.
+3. Wait for discovery to converge.
 4. In clients, call `await remote.wait()` before the first remote method call.
 
 If an AI agent needs one default operational pattern, use this startup order.
@@ -481,7 +472,7 @@ export class AuditModule {}
 
 ## Transporter Contract
 
-This package includes a built-in WebSocket transporter via `@spider-mesh/core/websocket` and a relay server via `@spider-mesh/core/relay-server`.
+Concrete transport implementations can live in companion packages such as `@spider-mesh/tcp` and `@spider-mesh/ws`, or in your own application code.
 
 You can also provide your own classes that implement one or more transporter contracts exported by `@spider-mesh/core`.
 
@@ -491,8 +482,9 @@ You can also provide your own classes that implement one or more transporter con
 - `RemoteServiceLinker.link()`: creates a typed remote proxy
 - `@Microservice()`: exposes a local class instance as a remote service
 - `SpiderMesh.linkEvent()`: creates a topic binding for publish and subscribe
-- `WebsocketTransporter`: built-in Node/Bun WebSocket transporter
-- `WebsocketRelayServer`: built-in Node/Bun relay server process
+- `RpcTransporter`: RPC transporter contract
+- `DiscoveryTransporter`: discovery transporter contract
+- `PubsubTransporter`: pubsub transporter contract
 
 ### RPC transporter
 
@@ -504,9 +496,9 @@ type RpcTransporter = Observable<RpcEvent> & {
 
 The RPC observable can emit:
 
-- `message`: inbound binary payload with the source node attached
+- `rpc`: inbound RPC packet with the source node attached
 - `offline`: node offline event
-- `metadata`: transporter metadata to attach to the current node
+- `endpoints`: transporter metadata to attach to the current node
 
 The internal RPC wire protocol supports:
 
@@ -523,9 +515,9 @@ The internal RPC wire protocol supports:
 ### Discovery transporter
 
 ```ts
-type DiscoveryTransporter = Observable<SpiderMeshNode> & {
-  broadcast<T extends NodeMetadata>(
-    data: MdnsMessage<T>,
+type DiscoveryTransporter = Observable<DiscoveryEvent> & {
+  broadcast(
+    data: MdnsMessage<NodeMetadata>,
     ips: string[],
   ): Promise<void>
 }
@@ -577,5 +569,5 @@ bun run build
 - RPC target selection is round-robin unless you force `node_id` or `ip`.
 - `SpiderMesh` owns RPC stream lifecycle, timeout, retry, and cancel behavior.
 - Transporters focus on byte transport, pubsub topic IO, and discovery broadcasts.
-- The root package entry intentionally excludes Node-only WebSocket exports so AI tools and mobile runtimes do not pull server-side code by default.
-- If an AI agent is uncertain which import to use, prefer `@spider-mesh/core` first, then opt into `@spider-mesh/core/websocket` or `@spider-mesh/core/relay-server` only when the runtime is Node.js or Bun.
+- The root package entry intentionally focuses on runtime-agnostic APIs and shared contracts.
+- If an AI agent is uncertain which import to use, prefer `@spider-mesh/core` first, then opt into a companion transport package such as `@spider-mesh/tcp` or `@spider-mesh/ws` only when a concrete transport is needed.

@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "types": ["node"],
+    "types": ["node","bun"],
     "strict": true,   
     "module": "NodeNext",
     "declaration": true,

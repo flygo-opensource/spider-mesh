@@ -1,6 +1,10 @@
 import { Observable, Subject } from 'rxjs';
 import { finalize, mergeMap } from 'rxjs/operators';
 
+const isSubscribable = (value: unknown): value is Observable<unknown> => {
+  return !!value && typeof value === 'object' && typeof (value as { subscribe?: unknown }).subscribe === 'function';
+};
+
 // Helper type: Only allow methods that return Promise<any>
 type AsyncMethod = (...args: any[]) => Promise<any>;
 
@@ -31,7 +35,7 @@ export function LimitConcurrency(limit: number) {
       mergeMap(async ({ args, context, reject, success }) => {
         try {
           const response = await fn.call(context, ...args)
-          if (response instanceof Observable) {
+          if (isSubscribable(response)) {
             await new Promise<void>(done => {
               success(response.pipe(finalize(done)))
             })

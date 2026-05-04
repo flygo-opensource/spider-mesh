@@ -18,7 +18,6 @@ export type SpiderMeshNode = {
     version: number;
     node_id: string;
     online?: boolean;
-    topics: string[];
     services: {
         [name: string]: any;
     };
@@ -49,8 +48,12 @@ export type MdnsMessage<T extends NodeMetadata> = {
     receiver_id?: string;
 };
 
-export type DiscoveryTransporter = Observable<SpiderMeshNode> & {
-    broadcast<T extends NodeMetadata>(data: MdnsMessage<T>, ips: string[]): Promise<void>;
+export type DiscoveryEvent = {
+    discovered: SpiderMeshNode;
+};
+
+export type DiscoveryTransporter = Observable<DiscoveryEvent> & {
+    broadcast(data: MdnsMessage<NodeMetadata>, ips: string[]): Promise<void>;
 };
 
 export type PubsubTransporter = {
@@ -107,9 +110,9 @@ export type RpcMessage = {
 };
 
 export type RpcEvent = Partial<{
-    message: RpcMessage;
+    rpc: RpcMessage;
     offline: string;
-    metadata: Record<string, string | boolean | number>;
+    endpoints: Record<string, string | boolean | number>;
 }>;
 export type RpcTransporter = Observable<RpcEvent> & {
     send(data: RpcPacket, node: SpiderMeshNode): Promise<void>;

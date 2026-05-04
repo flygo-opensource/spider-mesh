@@ -9,3 +9,22 @@ export * from './helpers/randomUUID.js'
 export * from './helpers/MicroserviceException.js' 
 export * from './helpers/LimitConcurrency.js' 
 export * from './RemoteService.js'
+export type {
+	DiscoveryEvent,
+	DiscoveryTransporter,
+	MdnsMessage,
+	NodeMetadata,
+	PubsubTransporter,
+	RpcCancelPacket,
+	RpcEvent,
+	RpcMessage,
+	RpcOptions,
+	RpcPacket,
+	RpcRequestPacket,
+	RpcResponsePacket,
+	RpcRoutingOptions,
+	RpcTransporter,
+	SpiderMeshError,
+	SpiderMeshErrorCode,
+	SpiderMeshNode,
+} from './types.js'
