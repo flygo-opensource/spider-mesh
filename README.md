@@ -15,14 +15,16 @@ The repository is ESM-only and built with TypeScript `moduleResolution: NodeNext
 ## Installation
 
 ```bash
-bun add @spider-mesh/tcp
+bun add @spider-mesh/core @spider-mesh/tcp
 ```
 
 or
 
 ```bash
-npm install @spider-mesh/tcp
+npm install @spider-mesh/core @spider-mesh/tcp
 ```
+
+Keep `@spider-mesh/tcp` on the same published version as `@spider-mesh/core` so the transporter contracts and runtime stay aligned.
 
 ## Exports
 

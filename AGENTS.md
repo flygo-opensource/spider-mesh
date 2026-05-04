@@ -25,6 +25,7 @@ Prefer `bun` commands over `npm` unless the user explicitly asks otherwise.
 ## Important Constraints
 
 - Do not reintroduce `@spider-mesh/types`.
+- Keep `@spider-mesh/tcp` and `@spider-mesh/core` on matching published versions when editing release metadata.
 - Keep internal imports ESM-safe with explicit `.js` extensions in TypeScript source.
 - `examples/` and `tests/` are excluded from the package build on purpose.
 - `src/types.ts` re-exports transporter contract types from `@spider-mesh/core`; core is the source of truth for those contracts.
