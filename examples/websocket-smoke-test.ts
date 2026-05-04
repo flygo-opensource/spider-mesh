@@ -195,7 +195,7 @@ async function main() {
             timeout(5000),
         ))
 
-        transporterA.close()
+        transporterA.close(serverWsUrl)
 
         await offlineEventC
 
@@ -224,8 +224,8 @@ async function main() {
 
         console.log('WebSocket binary smoke test passed')
     } finally {
-        transporterB.close()
-        transporterC.close()
+        transporterB.close(clientWsUrl)
+        transporterC.close(serverWsUrl)
         server.close()
     }
 }

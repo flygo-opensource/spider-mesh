@@ -1,5 +1,5 @@
 import { decode, encode } from '@msgpack/msgpack'
-import { BehaviorSubject, defer, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, tap, throwError, timer } from 'rxjs'
+import { BehaviorSubject, defer, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
 import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, PubsubTransporter, RpcEvent, RpcPacket, RpcTransporter, SpiderMeshNode } from '@spider-mesh/core'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayRawData, type ReceivedRelayFrame, type ReceivedRelayRpcFrame } from './websocketProtocol.js'
 
@@ -55,23 +55,25 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         return {}
     }
 
-    connect(url: string | string[]) {
-        for (const relayUrl of new Set(Array.isArray(url) ? url : [url])) {
-            if (this.#connections.has(relayUrl)) continue
-            this.#setConnectionStatus(relayUrl, 'connecting')
-            this.#connections.set(relayUrl, {
-                subscription: this.#createConnectionLoop(relayUrl).subscribe(),
-            })
-        }
+    connect(url: string) {
+        if (this.#connections.has(url)) return
+
+        this.#setConnectionStatus(url, 'connecting')
+        this.#connections.set(url, {
+            subscription: this.#createConnectionLoop(url).subscribe(),
+        })
     }
 
-    close(url?: string | string[]) {
-        const urls = url ? [...new Set(Array.isArray(url) ? url : [url])] : [...this.#connections.keys()]
+    close(url: string) {
+        const connection = this.#connections.get(url)
+        const socket = connection?.socket
 
-        for (const relayUrl of urls) {
-            this.#connections.get(relayUrl)?.subscription.unsubscribe()
-            this.#connections.delete(relayUrl)
-            this.#setConnectionStatus(relayUrl, 'not_connected')
+        this.#connections.delete(url)
+        this.#deleteConnectionStatus(url)
+
+        connection?.subscription.unsubscribe()
+        if (socket) {
+            this.#disconnectSocket(socket)
         }
     }
 
@@ -153,27 +155,21 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
 
                 const disconnection$ = merge(closed$, errored$).pipe(take(1))
 
-                const disconnect = () => {
+                const clearSocket = () => {
                     const connection = this.#connections.get(url)
                     if (connection && connection.socket === socket) {
                         delete connection.socket
                     }
                 }
 
-                return merge(
-                    fromEvent(socket as never, 'open').pipe(
-                        take(1),
-                        map(() => socket),
-                    ),
-                    disconnection$
-                ).pipe(
-                    take(1),
+                return fromEvent(socket as never, 'open').pipe(
+                    map(() => socket),
+                    takeUntil(disconnection$),
                     tap(() => {
                         const connection = this.#connections.get(url)
                         if (connection) {
                             connection.socket = socket
                         }
-
                         this.#setConnectionStatus(url, 'connected')
                     }),
                     switchMap(() => merge(
@@ -198,7 +194,6 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
                             }),
                             ignoreElements(),
                         ),
-                        disconnection$,
                         timer(0, this.options.heartbeatIntervalMs || 30000).pipe(
                             tap(() => {
                                 if (socket.readyState === WEBSOCKET_OPEN) {
@@ -208,15 +203,10 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
                             ignoreElements(),
                         ),
                     )),
+                    takeUntil(disconnection$),
                     finalize(() => {
-                        disconnect()
-
-                        if (socket.readyState === WEBSOCKET_OPEN) {
-                            socket.close()
-                        } else if (socket.readyState === WEBSOCKET_CONNECTING) {
-                            socket.terminate?.()
-                            socket.close()
-                        }
+                        clearSocket()
+                        this.#disconnectSocket(socket)
                     })
                 )
             }),
@@ -280,7 +270,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
 
     #selectRpcSocket(node: SpiderMeshNode) {
         const relayUrl = this.#nodes.get(node.node_id)?.relayUrl
-        const routedSocket = relayUrl ? this.#connections.get(relayUrl)?.socket : null
+        const routedSocket = relayUrl ? this.#connections.get(relayUrl)?.socket : undefined
 
         if (routedSocket?.readyState === WEBSOCKET_OPEN) {
             return routedSocket
@@ -293,25 +283,6 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         }
 
         throw new Error('WebSocket is not connected')
-    }
-
-    #resolveNode(nodeId?: string) {
-        if (nodeId) {
-            const knownNode = this.#nodes.get(nodeId)
-            if (knownNode) {
-                return knownNode.node
-            }
-        }
-
-        return {
-            host: '',
-            namespace: '',
-            node_id: nodeId || '',
-            services: {},
-            transporters: {},
-            nodes: {},
-            version: 0,
-        } satisfies SpiderMeshNode
     }
 
     async #announceLocalNode(localNode: SpiderMeshNode) {
@@ -383,6 +354,15 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
             : (event && typeof event === 'object' && 'data' in event ? event.data : event)
     }
 
+    #disconnectSocket(socket: WebSocketLike) {
+        if (socket.readyState === WEBSOCKET_OPEN) {
+            socket.close()
+        } else if (socket.readyState === WEBSOCKET_CONNECTING) {
+            socket.terminate?.()
+            socket.close()
+        }
+    }
+
     #setConnectionStatus(url: string, status: WebsocketConnectionStatus) {
         const currentStatus = this.status$.value.get(url)
         if (currentStatus === status) {
@@ -391,6 +371,16 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
 
         const nextStatuses = new Map(this.status$.value)
         nextStatuses.set(url, status)
+        this.status$.next(nextStatuses)
+    }
+
+    #deleteConnectionStatus(url: string) {
+        if (!this.status$.value.has(url)) {
+            return
+        }
+
+        const nextStatuses = new Map(this.status$.value)
+        nextStatuses.delete(url)
         this.status$.next(nextStatuses)
     }
 }

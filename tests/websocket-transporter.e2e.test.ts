@@ -67,10 +67,11 @@ test('websocket transporter exposes connection statuses', async () => {
     await waitFor(() => transporter.status$.value.get(failedUrl) === 'error')
     expect(transporter.status$.value.get(failedUrl)).toBe('error')
 
-    transporter.close([connectedUrl, failedUrl])
+    transporter.close(connectedUrl)
+    transporter.close(failedUrl)
 
-    expect(transporter.status$.value.get(connectedUrl)).toBe('not_connected')
-    expect(transporter.status$.value.get(failedUrl)).toBe('not_connected')
+    expect(transporter.status$.value.has(connectedUrl)).toBe(false)
+    expect(transporter.status$.value.has(failedUrl)).toBe(false)
 
     await new Promise<void>((resolve, reject) => {
         server.close(error => {
