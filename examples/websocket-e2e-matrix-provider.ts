@@ -1,15 +1,9 @@
 import { Observable, concat, of, throwError } from 'rxjs'
 import { delay } from 'rxjs/operators'
-import { Microservice, SpiderMesh } from '@spider-mesh/core'
-import { WebsocketTransporter } from '../src/node.js'
+import { Microservice } from '@spider-mesh/core'
+import { createMesh } from './helpers/createMesh.js'
 
 const wsUrl = process.env.WS_URL || 'ws://127.0.0.1:8787'
-
-const transporter = new WebsocketTransporter({
-    heartbeatIntervalMs: 1000,
-    reconnectIntervalMs: 500,
-})
-transporter.connect(wsUrl)
 
 @Microservice({ role: 'provider', mode: 'matrix-e2e' })
 class RpcMatrixService {
@@ -49,7 +43,11 @@ class RpcMatrixService {
 }
 
 new RpcMatrixService()
-new SpiderMesh({ transporters: [transporter] })
+createMesh({
+    wsUrl,
+    heartbeatIntervalMs: 1000,
+    reconnectIntervalMs: 500,
+})
 
 console.log(`WebSocket matrix e2e provider ready at ${wsUrl}`)
 

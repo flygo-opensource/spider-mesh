@@ -1,13 +1,7 @@
-import { Microservice, SpiderMesh } from '@spider-mesh/core'
-import { WebsocketTransporter } from '../src/node.js'
+import { Microservice } from '@spider-mesh/core'
+import { createMesh } from './helpers/createMesh.js'
 
 const wsUrl = process.env.WS_URL || 'ws://127.0.0.1:8787'
-
-const transporter = new WebsocketTransporter({
-    heartbeatIntervalMs: 5000,
-    reconnectIntervalMs: 1000,
-})
-transporter.connect(wsUrl)
 
 @Microservice({ role: 'provider' })
 class GreetingService {
@@ -17,6 +11,10 @@ class GreetingService {
 }
 
 new GreetingService()
-new SpiderMesh({ transporters: [transporter] })
+createMesh({
+    wsUrl,
+    heartbeatIntervalMs: 5000,
+    reconnectIntervalMs: 1000,
+})
 
 console.log(`WebSocket provider started at ${wsUrl}`)

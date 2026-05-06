@@ -1,15 +1,8 @@
 import { firstValueFrom, timeout, type Observable } from 'rxjs'
-import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
-import { WebsocketTransporter } from '../src/node.js'
+import { RemoteServiceLinker } from '@spider-mesh/core'
+import { createMesh } from './helpers/createMesh.js'
 
 const wsUrl = process.env.WS_URL || 'ws://127.0.0.1:8787'
-const transporterOptions = {
-    heartbeatIntervalMs: 1000,
-    reconnectIntervalMs: 500,
-}
-
-const transporter = new WebsocketTransporter(transporterOptions)
-transporter.connect(wsUrl)
 console.log('WebSocket e2e client connected')
 
 type GreetingService = {
@@ -17,7 +10,11 @@ type GreetingService = {
 }
 
 async function main() {
-    const mesh = new SpiderMesh({ transporters: [transporter] })
+    const { mesh } = createMesh({
+        wsUrl,
+        heartbeatIntervalMs: 1000,
+        reconnectIntervalMs: 500,
+    })
     const greeter = RemoteServiceLinker.link<GreetingService>(mesh, {
         service: 'GreetingService',
         timeout: 3000,

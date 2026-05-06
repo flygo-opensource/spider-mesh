@@ -1,5 +1,5 @@
 import { decode, encode } from '@msgpack/msgpack'
-import { BehaviorSubject, defer, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
+import { BehaviorSubject, defer, filter, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
 import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, PubsubTransporter, RpcEvent, RpcPacket, RpcTransporter, SpiderMeshNode } from '@spider-mesh/core'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayRawData, type ReceivedRelayFrame, type ReceivedRelayRpcFrame } from './websocketProtocol.js'
 
@@ -51,10 +51,6 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         super()
     }
 
-    get metadata() {
-        return {}
-    }
-
     connect(url: string) {
         if (this.#connections.has(url)) return
 
@@ -78,11 +74,11 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
     }
 
 
-    async send(packet: RpcPacket, node: SpiderMeshNode) {
-        const socket = this.#selectRpcSocket(node)
+    async send(packet: RpcPacket, node_id?: string) {
+        const socket = this.#selectRpcSocket(node_id || packet.target_node_id)
         await this.#sendFrame(socket, {
             type: packet.kind,
-            target_id: node.node_id,
+            target_id: node_id || packet.target_node_id,
             payload: this.#encodeRpcPacket(packet),
         })
     }
@@ -268,8 +264,8 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         }
     }
 
-    #selectRpcSocket(node: SpiderMeshNode) {
-        const relayUrl = this.#nodes.get(node.node_id)?.relayUrl
+    #selectRpcSocket(node_id?: string) {
+        const relayUrl = node_id ? this.#nodes.get(node_id)?.relayUrl : undefined
         const routedSocket = relayUrl ? this.#connections.get(relayUrl)?.socket : undefined
 
         if (routedSocket?.readyState === WEBSOCKET_OPEN) {

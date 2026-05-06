@@ -1,196 +1,103 @@
 # Spider Mesh WS Agent Guide
 
-Use this file as the canonical implementation guide when generating code for `@spider-mesh/ws` or when consuming this package from another codebase.
+Use this file as the canonical implementation guide for `@spider-mesh/ws`.
 
-## Purpose
+## Package Purpose
 
-`@spider-mesh/ws` provides the built-in WebSocket transport layer for Spider Mesh.
-
-This package contains:
+`@spider-mesh/ws` provides:
 
 - `WebsocketTransporter` for application nodes
-- `WebsocketRelayServer` for a dedicated relay process
+- `WebsocketRelayServer` for relay processes
 
-This package does not replace `@spider-mesh/core`.
-
-Use `@spider-mesh/core` for the runtime, service decorators, and remote service linking.
+Use `@spider-mesh/core` for runtime creation, decorators, and remote linking.
 
 ## Canonical Imports
 
-### Core runtime APIs
-
-Always import runtime-agnostic APIs from the core package:
-
 ```ts
-import {
-  SpiderMesh,
-  RemoteServiceLinker,
-  Microservice,
-  BeforeMicroserviceOnline,
-} from '@spider-mesh/core'
-```
-
-### WebSocket transporter
-
-Import the transporter from the runtime-appropriate entry point:
-
-```ts
-import { WebsocketTransporter as NodeWebsocketTransporter } from '@spider-mesh/ws/node'
-import { WebsocketTransporter as BrowserWebsocketTransporter } from '@spider-mesh/ws/browser'
-import { WebsocketTransporter as ReactNativeWebsocketTransporter } from '@spider-mesh/ws/react-native'
-```
-
-### Relay server
-
-Import the relay server from the relay subpath:
-
-```ts
+import { Registry, SpiderMesh, RemoteServiceLinker, Microservice } from '@spider-mesh/core'
+import { WebsocketTransporter } from '@spider-mesh/ws/node'
 import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
 ```
 
-## Import Rules
+Browser and React Native use their runtime-specific transporter subpaths.
 
-- Do not import `WebsocketTransporter` from `@spider-mesh/core`.
-- Do not import anything from `@spider-mesh/ws` root.
-- Use `@spider-mesh/ws/node` when you want an explicit Node.js or Bun transporter import.
-- Use `@spider-mesh/ws/browser` for browser runtimes.
-- Use `@spider-mesh/ws/react-native` for React Native runtimes that expose `globalThis.WebSocket`.
-- Do not import `WebsocketRelayServer` from `@spider-mesh/core`.
-- Do not import `WebsocketRelayServer` from `@spider-mesh/ws` root.
-- Use `@spider-mesh/ws/relay-server` for relay processes only.
-- Use `@spider-mesh/core` for service decorators, runtime creation, and remote linking.
+## Canonical Runtime Setup
 
-## Runtime Rules
+```ts
+const transporter = new WebsocketTransporter({
+  heartbeatIntervalMs: 5000,
+  reconnectIntervalMs: 1000,
+})
 
-### Node.js
+transporter.connect('ws://127.0.0.1:8787')
 
-Supported:
+const registry = new Registry()
+const mesh = new SpiderMesh(registry)
 
-- `@spider-mesh/core`
-- `@spider-mesh/ws/node`
-- `@spider-mesh/ws/relay-server`
+mesh.registerTransporter(transporter)
+```
 
-### Bun
+`SpiderMesh.registerTransporter()` links all supported capabilities on the shared WebSocket transporter instance.
 
-Supported:
+## Runtime Responsibilities
 
-- `@spider-mesh/core`
-- `@spider-mesh/ws/node`
-- `@spider-mesh/ws/relay-server`
+### `WebsocketTransporter`
 
-### Browser
+- maintains relay connections
+- exposes `status$`
+- sends and receives binary MsgPack frames
+- serves RPC, discovery, and pubsub through one shared transporter instance
 
-Supported:
+### `WebsocketRelayServer`
 
-- `@spider-mesh/core`
-- `@spider-mesh/ws/browser`
+- tracks connected nodes from `hello` frames
+- routes targeted RPC and cancel frames
+- synchronizes discovery state
+- tracks topic listeners and forwards pubsub payloads
+- emits offline events on disconnect
 
-Do not assume support for:
+## Runtime Support
 
-- `@spider-mesh/ws/relay-server`
+- Node.js: `@spider-mesh/ws/node` and `@spider-mesh/ws/relay-server`
+- Bun: `@spider-mesh/ws/node` and `@spider-mesh/ws/relay-server`
+- Browser: `@spider-mesh/ws/browser`
+- React Native: `@spider-mesh/ws/react-native`
 
-### React Native
+The package root is not exported. Use subpath imports.
 
-Use:
+## Source Of Truth
 
-- `@spider-mesh/core`
-- `@spider-mesh/ws/react-native`
+Prefer these files:
 
-Do not assume support for:
+- `src/BaseWebsocketTransporter.ts`
+- `src/WebsocketTransporter.ts`
+- `src/GlobalWebsocketTransporter.ts`
+- `src/WebsocketRelayServer.ts`
+- `src/websocketProtocol.ts`
 
-- `@spider-mesh/ws/relay-server`
+For behavior references, prefer:
 
-## Package Responsibilities
-
-`WebsocketTransporter` is responsible for:
-
-- opening and maintaining WebSocket connections
-- exposing `status$` connection state for each relay URL
-- reconnect and heartbeat behavior
-- forwarding RPC packets through relay frames
-- forwarding discovery hello and offline events
-- forwarding pubsub publish and subscription traffic
-
-`WebsocketRelayServer` is responsible for:
-
-- accepting WebSocket client connections
-- tracking node identity from hello frames
-- forwarding RPC and cancel frames to the target node
-- synchronizing discovery state to server-role connections
-- tracking topic listeners and forwarding pubsub messages
-- broadcasting offline events when a node disconnects
-
-## Canonical Usage Patterns
-
-### Provider node
-
-1. Import `Microservice` and `SpiderMesh` from `@spider-mesh/core`.
-2. Import `WebsocketTransporter` from `@spider-mesh/ws`.
-3. Create a transporter and call `connect(url)`.
-4. Decorate the service class with `@Microservice()`.
-5. Instantiate the service class.
-6. Create `new SpiderMesh({ transporters: [transporter] })`.
-
-### Client node
-
-1. Import `SpiderMesh` and `RemoteServiceLinker` from `@spider-mesh/core`.
-2. Import `WebsocketTransporter` from `@spider-mesh/ws`.
-3. Create a transporter and call `connect(url)`.
-4. Create `new SpiderMesh({ transporters: [transporter] })`.
-5. Create a typed proxy with `RemoteServiceLinker.link()`.
-6. Call `await proxy.wait()` before the first RPC call.
-
-### Relay process
-
-1. Import `WebsocketRelayServer` from `@spider-mesh/ws/relay-server`.
-2. Run it in a dedicated Node.js or Bun process.
-3. Do not mix relay responsibilities with application services unless that is explicitly intended.
-
-## Startup Order
-
-When using the built-in WebSocket transport, prefer this order:
-
-1. Start the relay server.
-2. Start provider processes.
-3. Start client processes.
-4. Wait for discovery before the first remote call.
-
-## Behavior To Preserve
-
-When editing this package, preserve these behaviors unless the task explicitly changes them:
-
-- RPC request, response, and cancel frames are binary MsgPack payloads.
-- `status$` remains a public `BehaviorSubject<Map<string, string>>` that reflects `connecting`, `connected`, `error`, and `not_connected` for each configured relay URL.
-- Observable-returning RPC methods must work correctly across package boundaries.
-- Discovery synchronization must emit `hello` and `offline` state consistently.
-- Pubsub listeners are tracked by topic and unsubscribed with delay semantics.
-- Relay logic must not permit client-role connections to send server-only RPC initiation frames unless explicitly designed.
-
-## Examples To Prefer
-
-When generating code, prefer these package examples as canonical references:
-
-- `examples/websocket-server.ts`
-- `examples/websocket-provider.ts`
-- `examples/websocket-client.ts`
 - `examples/websocket-smoke-test.ts`
 - `examples/websocket-e2e-test.ts`
+- `examples/websocket-e2e-reverse-test.ts`
 - `examples/websocket-e2e-matrix-test.ts`
 - `examples/websocket-e2e-round-robin-test.ts`
 
-## Do Not Infer
+## Important Notes
 
-- Do not assume the root core package exports WebSocket classes.
-- Do not assume the package root is available as an import target.
-- Do not treat the relay as an application service host.
-- Do not invent additional transport frame types without checking `src/websocketProtocol.ts`.
-- Do not replace binary frame encoding with JSON unless the task explicitly changes protocol semantics.
+- Keep binary frame encoding with `@msgpack/msgpack`.
+- Preserve `status$` behavior for connection states.
+- Preserve delayed unsubscribe behavior for pubsub listeners.
+- Relay logic should continue rejecting client-role RPC initiation paths when not allowed.
 
-## Preferred Agent Behavior
+## Validation
 
-If you are unsure where a feature belongs:
+Use the narrowest check that matches the change:
 
-1. Put service/runtime concerns in `@spider-mesh/core`.
-2. Put WebSocket transport concerns in `@spider-mesh/ws`.
-3. Put relay-only process concerns in `@spider-mesh/ws/relay-server`.
-4. Preserve the separation between runtime-agnostic APIs and Node/Bun-specific transport code.
+- `bun run build`
+- `bun test tests/websocket-transporter.e2e.test.ts`
+- `bun test tests/websocket-spidermesh.e2e.test.ts`
+- `bun test tests/websocket-spidermesh-reverse.e2e.test.ts`
+- `bun test tests/websocket-spidermesh-matrix.e2e.test.ts`
+- `bun test tests/websocket-spidermesh-round-robin.e2e.test.ts`
+- `bun run test:e2e`

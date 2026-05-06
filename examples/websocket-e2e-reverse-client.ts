@@ -1,14 +1,7 @@
-import { Microservice, SpiderMesh } from '@spider-mesh/core'
-import { WebsocketTransporter } from '../src/node.js'
+import { Microservice } from '@spider-mesh/core'
+import { createMesh } from './helpers/createMesh.js'
 
 const wsUrl = process.env.WS_URL || 'ws://127.0.0.1:8787'
-const transporterOptions = {
-    heartbeatIntervalMs: 1000,
-    reconnectIntervalMs: 500,
-}
-
-const transporter = new WebsocketTransporter(transporterOptions)
-transporter.connect(wsUrl)
 console.log('WebSocket reverse e2e client connected')
 
 @Microservice({ role: 'client', mode: 'reverse-e2e' })
@@ -19,6 +12,10 @@ class ClientResponderService {
 }
 
 new ClientResponderService()
-new SpiderMesh({ transporters: [transporter] })
+createMesh({
+    wsUrl,
+    heartbeatIntervalMs: 1000,
+    reconnectIntervalMs: 500,
+})
 
 setInterval(() => undefined, 1000)

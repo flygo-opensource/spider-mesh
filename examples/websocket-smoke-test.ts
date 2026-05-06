@@ -20,6 +20,7 @@ const nodeA: SpiderMeshNode = {
     namespace: 'test',
     version: 1,
     node_id: 'node-a',
+    topics: [],
     services: { GreetingService: {} },
     nodes: {},
     transporters: { websocket: {} },
@@ -30,6 +31,7 @@ const nodeB: SpiderMeshNode = {
     namespace: 'test',
     version: 1,
     node_id: 'node-b',
+    topics: [],
     services: {},
     nodes: {},
     transporters: { websocket: {} },
@@ -40,6 +42,7 @@ const nodeC: SpiderMeshNode = {
     namespace: 'test',
     version: 1,
     node_id: 'node-c',
+    topics: [],
     services: {},
     nodes: {},
     transporters: { websocket: {} },
@@ -124,7 +127,7 @@ async function main() {
             args: ['world'],
         }
 
-        await transporterA.send(packet, nodeB)
+        await transporterA.send(packet, nodeB.node_id)
 
         const rpcEvent = await rpcMessage
         if (JSON.stringify(rpcEvent.rpc?.packet) !== JSON.stringify(packet)) {
@@ -136,7 +139,7 @@ async function main() {
             request_id: 'allowed-cancel',
             source_node_id: nodeA.node_id,
             target_node_id: nodeB.node_id,
-        }, nodeB)
+        }, nodeB.node_id)
 
         await firstValueFrom(transporterB.pipe(
             filter(event => event?.rpc?.packet?.kind === 'cancel' && event.rpc.packet.request_id === 'allowed-cancel'),
@@ -151,7 +154,7 @@ async function main() {
             service: 'GreetingService',
             method: 'hello',
             args: ['blocked'],
-        }, nodeA)
+        }, nodeA.node_id)
 
         await expectNoEvent(transporterA.pipe(
             filter(event => event?.rpc?.packet?.request_id === 'blocked-request'),
@@ -162,7 +165,7 @@ async function main() {
             request_id: 'blocked-cancel',
             source_node_id: nodeB.node_id,
             target_node_id: nodeA.node_id,
-        }, nodeA)
+        }, nodeA.node_id)
 
         await expectNoEvent(transporterA.pipe(
             filter(event => event?.rpc?.packet?.kind === 'cancel' && event.rpc.packet.request_id === 'blocked-cancel'),
