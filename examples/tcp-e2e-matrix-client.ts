@@ -1,7 +1,7 @@
 import process from 'node:process'
-import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
+import { RemoteServiceLinker } from '@spider-mesh/core'
 import { Observable, firstValueFrom, lastValueFrom, timeout, toArray } from 'rxjs'
-import { createTransporters } from './helpers/createTransporters.js'
+import { createMesh } from './helpers/createMesh.js'
 
 type RpcMatrixService = {
     syncValue(name: string): Promise<string>
@@ -33,7 +33,7 @@ async function expectError(label: string, run: () => unknown, expectedMessage: s
 }
 
 async function main() {
-    const mesh = new SpiderMesh({ transporters: createTransporters() })
+    const { mesh } = createMesh()
     console.log('TCP matrix e2e client connected')
 
     const service = RemoteServiceLinker.link<RpcMatrixService>(mesh, {

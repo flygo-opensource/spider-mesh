@@ -1,5 +1,5 @@
-import { Microservice, SpiderMesh } from '@spider-mesh/core'
-import { createTransporters } from './helpers/createTransporters.js'
+import { Microservice } from '@spider-mesh/core'
+import { createMesh } from './helpers/createMesh.js'
 
 @Microservice({ role: 'client', mode: 'tcp-reverse-e2e' })
 class ClientResponderService {
@@ -9,7 +9,7 @@ class ClientResponderService {
 }
 
 new ClientResponderService()
-new SpiderMesh({ transporters: createTransporters() })
+createMesh()
 
 console.log('TCP reverse e2e client connected')
 

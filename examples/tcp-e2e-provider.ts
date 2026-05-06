@@ -1,5 +1,5 @@
-import { Microservice, SpiderMesh } from '@spider-mesh/core'
-import { createTransporters } from './helpers/createTransporters.js'
+import { Microservice } from '@spider-mesh/core'
+import { createMesh } from './helpers/createMesh.js'
 
 const providerId = process.env.PROVIDER_ID || 'provider'
 
@@ -11,7 +11,7 @@ class GreetingService {
 }
 
 new GreetingService()
-new SpiderMesh({ transporters: createTransporters() })
+createMesh()
 
 console.log(`TCP e2e provider ready (${providerId})`)
 

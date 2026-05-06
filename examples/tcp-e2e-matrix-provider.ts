@@ -1,6 +1,6 @@
-import { Microservice, SpiderMesh } from '@spider-mesh/core'
+import { Microservice } from '@spider-mesh/core'
 import { Observable, concat, of, throwError, delay } from './helpers/coreRxjs.js'
-import { createTransporters } from './helpers/createTransporters.js'
+import { createMesh } from './helpers/createMesh.js'
 
 @Microservice({ role: 'provider', mode: 'tcp-matrix-e2e' })
 class RpcMatrixService {
@@ -40,7 +40,7 @@ class RpcMatrixService {
 }
 
 new RpcMatrixService()
-new SpiderMesh({ transporters: createTransporters() })
+createMesh()
 
 console.log('TCP matrix e2e provider ready')
 

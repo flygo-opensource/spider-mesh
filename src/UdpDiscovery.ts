@@ -2,9 +2,8 @@ import { createSocket } from "node:dgram"
 import { networkInterfaces } from "node:os"
 import { finalize, firstValueFrom, fromEvent, map, merge, ReplaySubject, Subject, takeUntil, tap } from "rxjs"
 import { unpack, pack } from 'msgpackr'
-import type { DiscoveryEvent, DiscoveryTransporter, MdnsMessage, NodeMetadata, SpiderMeshNode } from "./types.js"
+import type { DiscoveryEvent, DiscoveryTransporter, MdnsMessage, NodeMetadata, SpiderMeshNode } from '@spider-mesh/core'
 import { SPIDERMESH_WHITELIST_ADDRESS, SPIDERMESH_MULTICAST_PORT, SPIDERMESH_MULTICAST_ADDRESS } from "./const.js"
-import { transportRuntime } from "./runtime.js"
 
 export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTransporter {
 
@@ -14,6 +13,7 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
     })
     #ready = new ReplaySubject<void>(1)
     #stop$ = new Subject<void>()
+    #localNode: SpiderMeshNode | null = null
 
     #localAddress = new Set(
         Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
@@ -84,7 +84,8 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
 
     async broadcast(data: MdnsMessage<NodeMetadata>) {
         await firstValueFrom(this.#ready)
-        const node = transportRuntime.updateLocalNode(transportRuntime.withTransporters(data.node as unknown as SpiderMeshNode))
+        const node = data.node as unknown as SpiderMeshNode
+        this.#localNode = node
         const msg = pack({
             ...data,
             node
@@ -104,7 +105,7 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
     async #onMessage(raw: Buffer, address: string) {
         try {
             const msg = unpack(raw) as MdnsMessage<SpiderMeshNode>
-            const me = transportRuntime.localNode
+            const me = this.#localNode
             if (!me) return
             if (msg.node.node_id === me.node_id) return
             if (msg.sender_id === me.node_id) return
@@ -112,10 +113,10 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
             if (msg.node.namespace !== me.namespace) return
 
             const isRemote = !this.#localAddress.has(address)
-            const node = transportRuntime.updateNode({
+            const node = {
                 ...msg.node,
                 host: msg.node.host || (isRemote ? address : 'localhost')
-            })
+            } satisfies SpiderMeshNode
 
             if (isRemote && !msg.forwarder_id) {
                 const forwarded = pack({

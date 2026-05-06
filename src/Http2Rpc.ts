@@ -3,8 +3,7 @@ import { connect, createServer, type ClientHttp2Session, type ClientHttp2Stream,
 import { SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE } from "./const.js"
 import { AddressInfo } from "node:net"
 import { unpack, pack } from 'msgpackr'
-import type { RpcEvent, RpcPacket, RpcTransporter, SpiderMeshError, SpiderMeshNode } from "./types.js"
-import { transportRuntime } from "./runtime.js"
+import type { Registry, RpcEvent, RpcPacket, RpcTransporter, SpiderMeshError, SpiderMeshNode } from '@spider-mesh/core'
 
 
 export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
@@ -14,6 +13,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
     #metadata: RpcEvent['endpoints'] | null = null
     #server = createServer({})
     #isDisposing = false
+    #registry?: Registry
 
     constructor() {
         super()
@@ -30,13 +30,16 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         }, () => {
             const { port } = this.#server.address() as AddressInfo
             this.#metadata = { port }
-            transportRuntime.setTransporterMetadata(this.constructor.name, this.#metadata)
             this.next({ endpoints: this.#metadata })
         })
     }
 
     get metadata() {
         return this.#metadata
+    }
+
+    linkRegistry(registry: Registry) {
+        this.#registry = registry
     }
 
     override unsubscribe() {
@@ -53,7 +56,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         super.unsubscribe()
     }
 
-    async send(packet: RpcPacket, node: SpiderMeshNode) {
+    async send(packet: RpcPacket, node_id?: string) {
         if (packet.kind === 'response') {
             const stream = this.#responseStreams.get(packet.request_id)
             if (stream) {
@@ -64,6 +67,8 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
                 return
             }
         }
+
+        const node = this.#resolveNode(node_id || packet.target_node_id)
 
         const connection = await this.#connect(node)
         const request = connection.request({
@@ -153,7 +158,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         }
         const e: SpiderMeshError = {
             code: 'MICROSERVICE_OFFLINE',
-            message: `All connection attempts to node ${node.node_id} failed` 
+            message: `All connection attempts to node ${node.node_id} failed` ,
         }
         throw e
     }
@@ -322,5 +327,19 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         return node.transporters?.[this.constructor.name]
             || node.transporters?.Http2Rpc
             || node.transporters?.http2rpc
+    }
+
+    #resolveNode(node_id?: string) {
+        const node = node_id ? this.#registry?.getPeer(node_id) : undefined
+        if (node) {
+            return node
+        }
+
+        throw {
+            code: 'MICROSERVICE_OFFLINE',
+            message: node_id
+                ? `Node ${node_id} is not available`
+                : 'RPC target node is not available'
+        } satisfies SpiderMeshError
     }
 } 

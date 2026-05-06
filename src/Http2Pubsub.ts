@@ -2,8 +2,7 @@ import { Subject } from "rxjs"
 import { connect, createServer, type ClientHttp2Session, type Http2Server } from "node:http2"
 import { AddressInfo } from "node:net"
 import { unpack, pack } from 'msgpackr'
-import type { PubsubTransporter, SpiderMeshNode } from "./types.js"
-import { transportRuntime } from "./runtime.js"
+import type { PubsubEvent, PubsubTransporter, Registry, SpiderMeshNode } from '@spider-mesh/core'
 
 export type PubsubMessage<T = any> = {
     namespace: string
@@ -13,15 +12,17 @@ export type PubsubMessage<T = any> = {
     data: T
 }
 
-export class Http2Pubsub implements PubsubTransporter {
+export class Http2Pubsub extends Subject<PubsubEvent> implements PubsubTransporter {
 
     #nodes = new Map<string, ClientHttp2Session>()
     #subscriptions = new Map<string, Subject<any>>()
     #port = 0
     #server: Http2Server
+    #registry?: Registry
 
 
     constructor() {
+        super()
         this.#server = createServer()
 
         this.#server.on('request', (req, res) => {
@@ -50,7 +51,7 @@ export class Http2Pubsub implements PubsubTransporter {
         this.#server.listen(0, () => {
             const address = this.#server.address() as AddressInfo
             this.#port = address.port
-            transportRuntime.setTransporterMetadata(this.constructor.name, { port: this.#port })
+            this.next({ endpoints: { port: this.#port } })
         })
     }
 
@@ -62,11 +63,14 @@ export class Http2Pubsub implements PubsubTransporter {
         return $ as Subject<T>
     }
 
+    linkRegistry(registry: Registry) {
+        this.#registry = registry
+    }
+
     async publish<T>(topic: string, data: T) {
         const buffer = pack(data)
-        const targets = [...transportRuntime.nodes.values()].filter(node => {
-            return node.node_id !== transportRuntime.localNode?.node_id
-                && !!this.#resolvePort(node)
+        const targets = (this.#registry?.listTopicNodes(topic) || []).filter(node => {
+            return !!this.#resolvePort(node)
         })
 
         for (const node of targets) {
@@ -140,5 +144,6 @@ export class Http2Pubsub implements PubsubTransporter {
         }
         this.#nodes.clear()
         this.#server.close()
+        super.unsubscribe()
     }
 }

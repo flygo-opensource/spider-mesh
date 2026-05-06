@@ -1,14 +1,14 @@
 import process from 'node:process'
-import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
+import { RemoteServiceLinker } from '@spider-mesh/core'
 import { firstValueFrom, timeout, type Observable } from 'rxjs'
-import { createTransporters } from './helpers/createTransporters.js'
+import { createMesh } from './helpers/createMesh.js'
 
 type GreetingService = {
     hello(name: string): Observable<string>
 }
 
 async function main() {
-    const mesh = new SpiderMesh({ transporters: createTransporters() })
+    const { mesh } = createMesh()
     console.log('TCP round-robin client connected')
 
     const greeter = RemoteServiceLinker.link<GreetingService>(mesh, {

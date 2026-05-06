@@ -1,10 +1,13 @@
 import { firstValueFrom, filter, timeout } from 'rxjs'
+import { Registry } from '@spider-mesh/core'
 import { Http2Rpc } from '../src/index.js'
 import type { RpcEvent, SpiderMeshNode } from '../src/types.js'
 
 async function main() {
     const server = new Http2Rpc()
     const client = new Http2Rpc()
+    const registry = new Registry()
+    client.linkRegistry(registry)
 
     const serverEndpoints = await firstValueFrom(
         server.pipe(
@@ -25,12 +28,15 @@ async function main() {
         namespace: 'tcp-contract',
         version: 1,
         node_id: 'rpc-contract-server',
+        topics: [],
         services: {},
         nodes: {},
         transporters: {
             Http2Rpc: { port: serverEndpoints.endpoints.port }
         }
     }
+
+    registry.upsertPeer(targetNode)
 
     await client.send({
         kind: 'request',
@@ -40,7 +46,7 @@ async function main() {
         service: 'ContractService',
         method: 'ping',
         args: ['ok']
-    }, targetNode)
+    }, targetNode.node_id)
 
     const event = await rpcEventPromise
     console.log(JSON.stringify({

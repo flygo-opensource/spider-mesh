@@ -1,4 +1,5 @@
 import process from 'node:process'
+import { Registry } from '@spider-mesh/core'
 import { firstValueFrom, filter, map, timeout } from 'rxjs'
 import { Http2Rpc } from '../src/index.js'
 import type { SpiderMeshNode } from '../src/types.js'
@@ -10,6 +11,8 @@ if (!targetPort) {
 }
 
 const rpc = new Http2Rpc()
+const registry = new Registry()
+rpc.linkRegistry(registry)
 
 await firstValueFrom(
     rpc.pipe(
@@ -24,12 +27,15 @@ const target: SpiderMeshNode = {
     namespace: 'tcp-contract',
     version: 1,
     node_id: 'rpc-contract-server',
+    topics: [],
     services: {},
     nodes: {},
     transporters: {
         Http2Rpc: { port: targetPort }
     }
 }
+
+registry.upsertPeer(target)
 
 await rpc.send({
     kind: 'request',
@@ -39,7 +45,7 @@ await rpc.send({
     service: 'ContractService',
     method: 'ping',
     args: ['ok']
-}, target)
+}, target.node_id)
 
 console.log('RPC_CLIENT_SENT')
 process.exit(0)

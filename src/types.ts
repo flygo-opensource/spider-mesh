@@ -3,6 +3,7 @@ export type {
     DiscoveryTransporter,
     MdnsMessage,
     NodeMetadata,
+    PubsubEvent,
     PubsubTransporter,
     RpcCancelPacket,
     RpcEvent,

@@ -1,6 +1,6 @@
 import process from 'node:process'
-import { Microservice, SpiderMesh } from '@spider-mesh/core'
-import { createTransporters } from './helpers/createTransporters.js'
+import { Microservice } from '@spider-mesh/core'
+import { createMesh } from './helpers/createMesh.js'
 
 class SmokeEvent {
     constructor(
@@ -18,7 +18,7 @@ class GreetingService {
 
 async function main() {
     new GreetingService()
-    const mesh = new SpiderMesh({ transporters: createTransporters() })
+    const { mesh } = createMesh()
     mesh.linkEvent(SmokeEvent).listen().subscribe(event => {
         console.log(JSON.stringify({ smokeEvent: event }))
         process.exit(0)
