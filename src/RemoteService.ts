@@ -69,10 +69,12 @@ export class RemoteServiceLinker<Service> {
     wait(checker: ServiceChecker = (nodes => nodes.length > 0), stop$: Observable<any> = EMPTY) {
         return firstValueFrom(this.watch().pipe(
             takeUntil(stop$),
-            filter(nodes => {
-                if (checker(nodes)) return true
-                return false
-            })
+            mergeMap(async nodes => ({
+                nodes,
+                ready: await checker(nodes)
+            })),
+            filter(result => result.ready),
+            map(result => result.nodes)
         ), { defaultValue: null })
     }
 

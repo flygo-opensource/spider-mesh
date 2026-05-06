@@ -1,0 +1,195 @@
+import { describe, expect, test } from 'bun:test'
+import { firstValueFrom, from, Observable, Subject, toArray } from 'rxjs'
+import { Registry } from '../src/Registry.js'
+import { RemoteServiceLinker } from '../src/RemoteService.js'
+import { SpiderMesh } from '../src/SpiderMesh.js'
+import { LOCAL_SERVICES$ } from '../src/decorators/Microservice.js'
+import type {
+    DiscoveryEvent,
+    DiscoveryTransporter,
+    MdnsMessage,
+    NodeMetadata,
+    PubsubTransporter,
+    RpcEvent,
+    RpcPacket,
+    RpcTransporter,
+    SpiderMeshNode,
+} from '../src/types.js'
+
+let sequence = 0
+
+const nextName = (prefix: string) => `${prefix}${++sequence}`
+
+const cloneNode = (node: SpiderMeshNode): SpiderMeshNode => ({
+    ...node,
+    topics: [...node.topics],
+    services: { ...node.services },
+    nodes: { ...node.nodes },
+    transporters: { ...node.transporters },
+})
+
+class NamedLoopbackRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
+    constructor(private readonly localNodeId: string) {
+        super()
+    }
+
+    async send(data: RpcPacket, node_id?: string) {
+        const targetNodeId = node_id || data.target_node_id || this.localNodeId
+        this.next({
+            rpc: {
+                node_id: targetNodeId,
+                packet: {
+                    ...data,
+                    target_node_id: targetNodeId,
+                },
+            },
+        })
+    }
+}
+
+class SilentRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
+    async send(_data: RpcPacket, _node_id?: string) {
+        return
+    }
+}
+
+class MockPubsubTransporter extends Subject<{ endpoints: Record<string, string | boolean | number> }> implements PubsubTransporter {
+    #topics = new Map<string, Subject<unknown>>()
+
+    constructor() {
+        super()
+    }
+
+    async publish<T>(topic: string, data: T) {
+        this.#getTopic(topic).next(data)
+    }
+
+    listen<T>(topic: string): Observable<T> {
+        return this.#getTopic(topic) as Subject<T>
+    }
+
+    #getTopic(topic: string) {
+        if (!this.#topics.has(topic)) {
+            this.#topics.set(topic, new Subject())
+        }
+
+        return this.#topics.get(topic)!
+    }
+}
+
+class MockDiscoveryTransporter extends Subject<DiscoveryEvent> implements DiscoveryTransporter {
+    broadcasts: Array<MdnsMessage<NodeMetadata>> = []
+
+    async broadcast(data: MdnsMessage<NodeMetadata>) {
+        this.broadcasts.push({
+            ...data,
+            node: cloneNode(data.node as SpiderMeshNode),
+        })
+    }
+}
+
+describe('mock e2e', () => {
+    test('routes rpc through explicit transporter name and class', async () => {
+        const mesh = new SpiderMesh()
+        const silent = new SilentRpcTransporter()
+        const loopback = new NamedLoopbackRpcTransporter(mesh.node_id)
+        const serviceName = nextName('EchoService')
+
+        mesh.registerTransporter(silent, 'SilentRpcTransporter')
+        mesh.registerTransporter(loopback)
+
+        LOCAL_SERVICES$.next({
+            name: serviceName,
+            metadata: {},
+            instance: {
+                echo(value: string) {
+                    return value
+                },
+                stream() {
+                    return from([1, 2, 3])
+                },
+            },
+        })
+
+        const byName = await firstValueFrom(mesh.callRemoteService<string, never>({
+            service: serviceName,
+            method: 'echo',
+            args: ['by-name'],
+            transporter: 'NamedLoopbackRpcTransporter',
+        }))
+
+        const byClass = await firstValueFrom(mesh.callRemoteService<string, never>({
+            service: serviceName,
+            method: 'echo',
+            args: ['by-class'],
+            transporter: NamedLoopbackRpcTransporter,
+        }))
+
+        const streamValues = await firstValueFrom(mesh.callRemoteService<number, never>({
+            service: serviceName,
+            method: 'stream',
+            args: [],
+            transporter: NamedLoopbackRpcTransporter,
+        }).pipe(toArray()))
+
+        expect(byName).toBe('by-name')
+        expect(byClass).toBe('by-class')
+        expect(streamValues).toEqual([1, 2, 3])
+    })
+
+    test('wait supports async checker functions', async () => {
+        const registry = new Registry()
+        const mesh = new SpiderMesh(registry)
+        const serviceName = nextName('AsyncWaitService')
+        const remote = RemoteServiceLinker.link<{ ping(): Promise<string> }>(mesh, { service: serviceName })
+
+        const waitPromise = remote.wait(async nodes => {
+            await Promise.resolve()
+            return nodes.length > 0
+        })
+
+        await Promise.resolve()
+
+        registry.upsertPeer({
+            host: '127.0.0.1',
+            namespace: mesh.namespace,
+            node_id: nextName('peer'),
+            topics: [],
+            services: {
+                [serviceName]: {},
+            },
+            nodes: {},
+            transporters: {
+                rpc: 'NamedLoopbackRpcTransporter',
+            },
+            version: 1,
+        })
+
+        const nodes = await waitPromise
+
+        expect(nodes).not.toBeNull()
+        expect(nodes).toHaveLength(1)
+        expect(nodes?.[0]?.services?.[serviceName]).toEqual({})
+    })
+
+    test('keeps topic metadata when discovery registers after listen and clears it on unsubscribe', async () => {
+        class TopicEvent {}
+
+        const mesh = new SpiderMesh()
+        const pubsub = new MockPubsubTransporter()
+        const discovery = new MockDiscoveryTransporter()
+        const event = mesh.linkEvent(TopicEvent)
+
+        mesh.registerTransporter(pubsub, 'MockPubsubTransporter')
+
+        const subscription = event.listen().subscribe(() => undefined)
+
+        mesh.registerTransporter(discovery, 'MockDiscoveryTransporter')
+
+        expect(discovery.broadcasts.at(-1)?.node.topics).toContain('TopicEvent')
+
+        subscription.unsubscribe()
+
+        expect(discovery.broadcasts.at(-1)?.node.topics).not.toContain('TopicEvent')
+    })
+})

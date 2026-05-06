@@ -1,5 +1,6 @@
 
 import { Observable } from "rxjs"
+import type { Registry } from './Registry.js'
 
 
 export type SpiderMeshErrorCode = ('MICROSERVICE_OFFLINE' | 'MICROSERVICE_NOT_FOUND' | 'MICROSERVICE_RPC_TIMEOUT');
@@ -16,6 +17,7 @@ export type SpiderMeshNode = {
     namespace: string;
     version: number;
     node_id: string;
+    topics: string[];
     services: {
         [name: string]: any;
     };
@@ -51,12 +53,19 @@ export type DiscoveryEvent = {
 };
 
 export type DiscoveryTransporter = Observable<DiscoveryEvent> & {
+    linkRegistry?(registry: Registry): void;
     broadcast(data: MdnsMessage<NodeMetadata>): Promise<void>;
 };
 
-export type PubsubTransporter = {
+
+export type PubsubEvent = {
+    endpoints: Record<string, string | boolean | number>;
+};
+
+export type PubsubTransporter = Observable<PubsubEvent> & {
     publish<T>(topic: string, data: T): Promise<void>;
     listen<T>(topic: string): Observable<T>;
+    linkRegistry?(registry: Registry): void;
 };
 
 export type RpcRoutingOptions = {
@@ -70,6 +79,7 @@ export type RpcOptions<T = any> = {
     timeout?: number;
     retry?: number;
     node_id?: string;
+    transporter?: string |  { name?: string } 
 };
 
 export type RpcRequestPacket = {
@@ -112,7 +122,10 @@ export type RpcEvent = Partial<{
     endpoints: Record<string, string | boolean | number>;
 }>;
 export type RpcTransporter = Observable<RpcEvent> & {
-    send(data: RpcPacket, node: SpiderMeshNode): Promise<void>;
+    linkRegistry?(registry: Registry): void;
+    send(data: RpcPacket, node_id?: string): Promise<void>;
 };
+
+export type MeshTransporter = RpcTransporter | PubsubTransporter | DiscoveryTransporter;
 
  

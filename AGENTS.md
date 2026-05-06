@@ -1,194 +1,178 @@
 # Spider Mesh Core Agent Guide
 
-Use this file as the canonical implementation guide when generating code for this repository or when consuming this package in another codebase.
+Use this file as the canonical implementation guide for this repository.
 
-## Purpose
+## Package Intent
 
-`@spider-mesh/core` is a microservice runtime for:
+`@spider-mesh/core` owns:
 
-- remote procedure calls between services
-- node discovery
-- pubsub events
-- transporter-driven communication
+- local microservice registration
+- remote service linking
+- RPC, pubsub, and discovery contracts
+- remote peer registry and RPC routing
+- NestJS helper adapters
 
-Prefer the APIs and imports described here over inference from symbol names alone.
+Concrete transport implementations belong in companion packages or custom transporters.
 
-## Canonical Imports
+## Canonical Runtime API
 
-Use these imports exactly.
-
-### Runtime-agnostic core APIs
-
-Import from the root package:
+### Runtime creation
 
 ```ts
-import {
-  SpiderMesh,
-  RemoteServiceLinker,
-  Microservice,
-  BeforeMicroserviceOnline,
-  NestJSExposeMicroservice,
-  NestJSLinkMicroservice,
-  NestJSLinkEvent,
-} from '@spider-mesh/core'
+import { Registry, SpiderMesh } from '@spider-mesh/core'
+
+const registry = new Registry()
+const mesh = new SpiderMesh(registry)
 ```
 
-### Transporter contracts from core
+`new SpiderMesh()` is also valid when no registry-backed remote routing is needed.
 
-If you are implementing or typing against transporter contracts, use the core package:
+### Transporter registration
 
 ```ts
-import type {
-  DiscoveryTransporter,
-  PubsubTransporter,
-  RpcTransporter,
-} from '@spider-mesh/core'
+mesh.registerTransporter(new MyDiscoveryTransporter())
+mesh.registerTransporter(new MyRpcTransporter())
+mesh.registerTransporter(new MyPubsubTransporter())
 ```
 
-### Companion transport packages
+Register transporter instances.
 
-If you need a companion transport package, use the package that matches your runtime and transport choice.
+Transport capability is inferred by instance shape:
 
-TCP package:
+- `send()` => RPC transporter
+- `publish()` => pubsub transporter
+- `broadcast()` => discovery transporter
+
+### Local services
 
 ```ts
-import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '@spider-mesh/tcp'
+import { BeforeMicroserviceOnline, Microservice } from '@spider-mesh/core'
+
+@Microservice({ version: '1.0.0' })
+class UserService {
+  @BeforeMicroserviceOnline()
+  async warmup() {}
+}
+
+new UserService()
 ```
 
-WebSocket package:
+`@Microservice()` emits the instance into `LOCAL_SERVICES$`.
+
+### Remote clients
 
 ```ts
-import { WebsocketTransporter } from '@spider-mesh/ws'
-import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
+import { RemoteServiceLinker } from '@spider-mesh/core'
+
+const users = RemoteServiceLinker.link<UserServiceContract>(mesh, {
+  service: 'UserService',
+})
+
+await users.wait()
+const user = await users.getUser('42')
 ```
 
-## Import Rules
+## RpcOptions Contract
 
-- Use `@spider-mesh/core` for runtime-agnostic APIs only.
-- Use `@spider-mesh/core` for shared transporter contracts and runtime creation.
-- Use `@spider-mesh/tcp` or `@spider-mesh/ws` when you explicitly want a concrete companion transport package.
-- Keep companion package versions aligned with the published `@spider-mesh/core` version when updating dependencies or release instructions.
-- Do not assume the core root package exports every concrete transporter implementation.
-- This package is ESM-only; when editing repository source, keep relative TypeScript imports on emitted `.js` specifiers.
-- Do not introduce new CommonJS runtime code such as `require()`, `module.exports`, or `__dirname` unless the file is intentionally bridging runtimes.
-- When documenting transporter contracts or packet shapes, treat `src/types.ts` as the source of truth.
+Use this shape:
 
-## Runtime Rules
+```ts
+type RpcOptions<T = any> = {
+  service: string
+  method: string
+  args: any[]
+  fallback?: T
+  timeout?: number
+  retry?: number
+  node_id?: string
+  transporter?: string | { name?: string }
+}
+```
 
-### Node.js
+`transporter` may be a registered transporter name or a class/object with a `name`.
 
-Supported:
+## Registry Scope
 
-- `@spider-mesh/core`
-- `@spider-mesh/tcp`
-- `@spider-mesh/ws`
+`Registry` manages remote peer and RPC routing state.
 
-### Bun
+Public methods:
 
-Supported:
+- `getPeer(nodeId)`
+- `upsertPeer(node)`
+- `removePeer(nodeId)`
+- `listPeers({ service? })`
+- `watch(service?)`
+- `pickRpcNode(service, { node_id? })`
+- `getRpcTransporterName(service, { node_id? })`
+- `listTopicNodes(topic)`
 
-- `@spider-mesh/core`
-- `@spider-mesh/tcp`
-- `@spider-mesh/ws`
+## Discovery Semantics
 
-### React Native
+Discovery transporters work with full node announcements.
 
-Use:
+Current `SpiderMesh` behavior:
 
-- `@spider-mesh/core`
+- local node metadata is stored in an internal `BehaviorSubject`
+- discovery transporters receive rebroadcasts whenever local metadata changes
+- discovery input is normalized into `Registry.upsertPeer(...)`
+- matching RPC transporter names are normalized into `transporters.rpc`
 
-Do not assume support for:
+`SpiderMeshNode` currently includes:
 
-- `@spider-mesh/tcp`
-- `@spider-mesh/ws`
+- `host`
+- `namespace`
+- `version`
+- `node_id`
+- `topics`
+- `services`
+- `nodes`
+- `transporters`
 
-If the runtime is React Native, prefer core APIs plus a runtime-appropriate custom transporter.
+## Event Semantics
 
-## Canonical Usage Patterns
+Use `SpiderMesh.linkEvent(EventClass)`.
 
-### Provider
+Current rules:
 
-1. Import `Microservice` and `SpiderMesh` from `@spider-mesh/core`.
-2. Choose a transporter implementation, for example from `@spider-mesh/tcp`, `@spider-mesh/ws`, or your own implementation of the core transporter contracts.
-3. Decorate the local service class with `@Microservice()`.
-4. Instantiate the service class.
-5. Create `new SpiderMesh({ transporters: [transporter] })`.
+- topic name is `EventClass.name`
+- `publish()` sends through all registered pubsub transporters
+- `listen()` returns a shared RxJS stream
+- first local subscriber adds the topic to local node metadata
+- last unsubscribe removes the topic from local node metadata
 
-### Client
+## NestJS Helpers
 
-1. Import `SpiderMesh` and `RemoteServiceLinker` from `@spider-mesh/core`.
-2. Choose a transporter implementation, for example from `@spider-mesh/tcp`, `@spider-mesh/ws`, or your own implementation of the core transporter contracts.
-3. Create `new SpiderMesh({ transporters: [transporter] })`.
-4. Create a typed proxy with `RemoteServiceLinker.link()`.
-5. Call `await proxy.wait()` before the first remote call.
+Current helpers:
 
-### Companion Packages
+- `NestJSExposeMicroservice(factory, metadata?)`
+- `NestJSLinkMicroservice(factory, transporter)`
+- `NestJSLinkEvent(factory)`
 
-TCP:
+`NestJSLinkMicroservice(factory, transporter)` forwards the transporter selector into the linked remote client.
 
-1. Import `UdpDiscovery`, `Http2Rpc`, and `Http2Pubsub` from `@spider-mesh/tcp`.
-2. Add those transporters to `new SpiderMesh({ transporters: [...] })`.
-3. Let discovery, RPC, and pubsub operate through the TCP package runtime pieces.
+## Source-Of-Truth Files
 
-WebSocket:
+Prefer these files when answering questions or generating code:
 
-1. Import `WebsocketTransporter` from `@spider-mesh/ws`.
-2. Create `new SpiderMesh({ transporters: [transporter] })` in providers and clients.
-3. Run `WebsocketRelayServer` from `@spider-mesh/ws/relay-server` as the relay process when using that transport.
+- `src/SpiderMesh.ts`
+- `src/Registry.ts`
+- `src/RemoteService.ts`
+- `src/types.ts`
+- `src/decorators/Microservice.ts`
 
-## Startup Order
+For behavior examples, prefer:
 
-When using any discovery-based transport package, prefer this order:
+- `tests/mock-e2e.test.ts`
+- `tests/process-e2e.test.ts`
 
-1. Start provider processes.
-2. Start client processes.
-3. Wait for discovery to converge.
-4. In clients, wait for service discovery before the first call.
+## Implementation Notes For Agents
 
-## API Map
+- keep repository source as ESM with `.js` relative specifiers
+- prefer `@spider-mesh/core` for runtime-agnostic imports
+- add `@spider-mesh/tcp` or `@spider-mesh/ws` only when concrete transport is explicitly needed
+- treat `src/types.ts` as the transporter contract source of truth
+- document runtime setup with `Registry`, `SpiderMesh`, and `mesh.registerTransporter(...)`
 
-- `SpiderMesh`: runtime coordinator
-- `RemoteServiceLinker.link()`: typed remote proxy
-- `@Microservice()`: expose a local class instance as a remote service
-- `SpiderMesh.linkEvent()`: event publish and subscribe binding
-- `RpcTransporter`: RPC transporter contract
-- `DiscoveryTransporter`: discovery transporter contract
-- `PubsubTransporter`: pubsub transporter contract
+## Known Architectural Constraint
 
-## Behavioral Notes
-
-- Remote calls are stream-first.
-- Remote methods may return observables, promises, or plain values.
-- RPC target selection is round-robin unless `node_id` or `ip` is forced.
-- Local services become available after class instantiation and any `@BeforeMicroserviceOnline()` hooks complete.
-- `randomUUID()` is expected to stay ESM-safe across Node.js, browser, and React Native runtimes.
-
-## Examples To Prefer
-
-When generating code, prefer these repository examples as canonical references:
-
-- `../tcp/examples/tcp-smoke-test.ts`
-- `../tcp/examples/tcp-e2e-test.ts`
-- `../tcp/examples/tcp-e2e-reverse-test.ts`
-- `../tcp/examples/tcp-e2e-matrix-test.ts`
-- `../tcp/examples/tcp-e2e-round-robin-test.ts`
-- `../ws/examples/websocket-smoke-test.ts`
-- `../ws/examples/websocket-e2e-test.ts`
-- `../ws/examples/websocket-e2e-reverse-test.ts`
-- `../ws/examples/websocket-e2e-matrix-test.ts`
-- `../ws/examples/websocket-e2e-round-robin-test.ts`
-
-## Do Not Infer
-
-- Do not assume the root package exports every transporter.
-- Do not assume the TCP package is the only valid transport strategy.
-- Do not assume the WebSocket package is the only valid transport strategy.
-- Do not invent helper APIs that are not present in this repository.
-
-## Preferred Agent Behavior
-
-If you are unsure which import to use:
-
-1. Default to `@spider-mesh/core`.
-2. Use transporter contracts exported by `@spider-mesh/core` when the implementation package is not yet decided.
-3. Add `@spider-mesh/tcp` or `@spider-mesh/ws` only when the code explicitly needs that concrete companion transport package.
+`LOCAL_SERVICES$` is process-global inside one process.
