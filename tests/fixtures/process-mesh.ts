@@ -8,10 +8,14 @@ import type {
     DiscoveryTransporter,
     MdnsMessage,
     NodeMetadata,
+    RpcCancelPacket,
     RpcEvent,
-    RpcPacket,
+    RpcRequestPacket,
+    RpcResponsePacket,
     RpcTransporter,
 } from '../../src/types.js'
+
+type RpcPacket = RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
 
 type HostMessage =
     | { kind: 'ready'; role: string; node_id: string }
@@ -96,10 +100,7 @@ rl.on('line', async line => {
 
     if (command.kind === 'rpc-deliver') {
         rpcTransporter.next({
-            rpc: {
-                node_id: command.packet.source_node_id,
-                packet: command.packet,
-            },
+            rpc: command.packet,
         })
         return
     }

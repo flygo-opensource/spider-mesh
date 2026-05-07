@@ -71,6 +71,7 @@ export type PubsubTransporter = Observable<PubsubEvent> & {
 export type RpcRoutingOptions = {
     [key: string]: string | number | boolean;
 };
+export type TransporterSelector = string | { name?: string } 
 export type RpcOptions<T = any> = {
     service: string;
     method: string;
@@ -79,24 +80,21 @@ export type RpcOptions<T = any> = {
     timeout?: number;
     retry?: number;
     node_id?: string;
-    transporter?: string |  { name?: string } 
+    transporter?: TransporterSelector
 };
 
 export type RpcRequestPacket = {
     kind: 'request'
     request_id: string
-    source_node_id: string
-    target_node_id: string
     service: string
     method: string
     args: any[]
+    sender_node_id: string
 }
 
 export type RpcResponsePacket = {
     kind: 'response'
     request_id: string
-    source_node_id: string
-    target_node_id: string
     data?: any
     error?: SpiderMeshError | { code?: string, message: string }
     completed?: boolean
@@ -105,27 +103,18 @@ export type RpcResponsePacket = {
 export type RpcCancelPacket = {
     kind: 'cancel'
     request_id: string
-    source_node_id: string
-    target_node_id: string
 }
 
-export type RpcPacket = RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
-
-export type RpcMessage = {
-    node_id: string;
-    packet: RpcPacket;
-};
 
 export type RpcEvent = Partial<{
-    rpc: RpcMessage;
+    rpc: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket;
     offline: string;
     endpoints: Record<string, string | boolean | number>;
 }>;
 export type RpcTransporter = Observable<RpcEvent> & {
     linkRegistry?(registry: Registry): void;
-    send(data: RpcPacket, node_id?: string): Promise<void>;
+    send(data: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket, node_id?: string): Promise<void>;
 };
 
 export type MeshTransporter = RpcTransporter | PubsubTransporter | DiscoveryTransporter;
 
- 

@@ -31,9 +31,7 @@
   "exclude": [
     "node_modules",
     "out",
-    "src/schema.ts",
     "bin",
-    "./build/**/*",
-    "tests/**/*"
+    "./build/**/*"
   ]
 }

@@ -100,10 +100,10 @@ Public methods:
 - `getPeer(nodeId)`
 - `upsertPeer(node)`
 - `removePeer(nodeId)`
-- `listPeers({ service? })`
+- `listPeers(service?)`
 - `watch(service?)`
 - `pickRpcNode(service, { node_id? })`
-- `getRpcTransporterName(service, { node_id? })`
+- `getRpcTransporterName(service)`
 - `listTopicNodes(topic)`
 
 ## Discovery Semantics
@@ -145,10 +145,76 @@ Current rules:
 Current helpers:
 
 - `NestJSExposeMicroservice(factory, metadata?)`
-- `NestJSLinkMicroservice(factory, transporter)`
+- `NestJSLinkMicroservice(factory, transporter?)`
 - `NestJSLinkEvent(factory)`
 
-`NestJSLinkMicroservice(factory, transporter)` forwards the transporter selector into the linked remote client.
+`NestJSLinkMicroservice(factory, transporter?)` forwards the optional transporter selector into the linked remote client.
+
+## Package Usage Playbook For Agents
+
+When an AI agent needs to show or generate usage of this package, prefer these patterns.
+
+### 1. Create a runtime
+
+Use `new SpiderMesh(new Registry())` when the example needs remote discovery, routing, or remote service watching.
+
+Use `new SpiderMesh()` only for local-only or single-process examples that do not depend on registry-backed peer state.
+
+### 2. Register transporters
+
+Always register transporter instances with `mesh.registerTransporter(...)`.
+
+Do not register classes or constructors.
+
+If the example needs concrete networking, import transporters from a companion package such as `@spider-mesh/tcp`.
+
+### 3. Expose a local service
+
+Use `@Microservice()` on the class and instantiate the class.
+
+If startup work is needed before the service should be considered online, use `@BeforeMicroserviceOnline()` on an async method.
+
+### 4. Link a remote service
+
+Use `RemoteServiceLinker.link(mesh, { service: 'ServiceName' })`.
+
+Call `await remote.wait()` before the first remote call when the example depends on discovery.
+
+Remote proxy methods are observable-backed and can be either subscribed to or awaited.
+
+### 5. Force a transporter only when needed
+
+Prefer letting the runtime resolve the RPC transporter automatically.
+
+Only pass `transporter` when the example or feature explicitly needs a specific registered transporter.
+
+Valid forms are a transporter name string or an object/class with a `name`.
+
+### 6. Use events
+
+Use `mesh.linkEvent(EventClass)`.
+
+Topic identity is `EventClass.name`.
+
+If an example subscribes locally, remember that the local topic is added on first subscribe and removed on last unsubscribe.
+
+### 7. Use NestJS helpers
+
+Provide `SpiderMesh` from a normal NestJS provider factory.
+
+Use `NestJSExposeMicroservice(ServiceClass, metadata?)` to expose a local provider.
+
+Use `NestJSLinkMicroservice(ServiceClass)` by default, and pass the optional transporter only when a specific RPC transporter must be selected.
+
+Use `NestJSLinkEvent(EventClass)` to inject an event binding.
+
+### 8. Prefer these example shapes in generated docs
+
+- runtime setup with `Registry`, `SpiderMesh`, and `mesh.registerTransporter(...)`
+- service exposure with `@Microservice()` and `new ServiceClass()`
+- remote linking with `RemoteServiceLinker.link(...)`
+- direct RPC examples with `firstValueFrom(mesh.callRemoteService(...))`
+- ESM imports and emitted `.js` relative specifiers inside repository source
 
 ## Source-Of-Truth Files
 

@@ -3,15 +3,17 @@ import { firstValueFrom, from, Observable, Subject, toArray } from 'rxjs'
 import { Registry } from '../src/Registry.js'
 import { RemoteServiceLinker } from '../src/RemoteService.js'
 import { SpiderMesh } from '../src/SpiderMesh.js'
+import { NestJSLinkMicroservice } from '../src/decorators/NestJSLinkMicroservice.js'
 import { LOCAL_SERVICES$ } from '../src/decorators/Microservice.js'
 import type {
     DiscoveryEvent,
     DiscoveryTransporter,
     MdnsMessage,
-    NodeMetadata,
     PubsubTransporter,
     RpcEvent,
-    RpcPacket,
+    RpcCancelPacket,
+    RpcRequestPacket,
+    RpcResponsePacket,
     RpcTransporter,
     SpiderMeshNode,
 } from '../src/types.js'
@@ -33,22 +35,16 @@ class NamedLoopbackRpcTransporter extends Subject<RpcEvent> implements RpcTransp
         super()
     }
 
-    async send(data: RpcPacket, node_id?: string) {
-        const targetNodeId = node_id || data.target_node_id || this.localNodeId
+    async send(data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket, node_id?: string) {
+        const targetNodeId = node_id || this.localNodeId
         this.next({
-            rpc: {
-                node_id: targetNodeId,
-                packet: {
-                    ...data,
-                    target_node_id: targetNodeId,
-                },
-            },
+            rpc: 'sender_node_id' in data ? { ...data, sender_node_id: targetNodeId } : data,
         })
     }
 }
 
 class SilentRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
-    async send(_data: RpcPacket, _node_id?: string) {
+    async send(_data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket, _node_id?: string) {
         return
     }
 }
@@ -78,9 +74,9 @@ class MockPubsubTransporter extends Subject<{ endpoints: Record<string, string |
 }
 
 class MockDiscoveryTransporter extends Subject<DiscoveryEvent> implements DiscoveryTransporter {
-    broadcasts: Array<MdnsMessage<NodeMetadata>> = []
+    broadcasts: Array<MdnsMessage<SpiderMeshNode>> = []
 
-    async broadcast(data: MdnsMessage<NodeMetadata>) {
+    async broadcast(data: MdnsMessage<any>) {
         this.broadcasts.push({
             ...data,
             node: cloneNode(data.node as SpiderMeshNode),
@@ -191,5 +187,37 @@ describe('mock e2e', () => {
         subscription.unsubscribe()
 
         expect(discovery.broadcasts.at(-1)?.node.topics).not.toContain('TopicEvent')
+    })
+
+    test('NestJSLinkMicroservice links a remote service without requiring transporter', async () => {
+        class BillingService {
+            charge(orderId: string): Promise<{ orderId: string }> {
+                throw new Error('typing only')
+            }
+        }
+
+        const mesh = new SpiderMesh()
+        const loopback = new NamedLoopbackRpcTransporter(mesh.node_id)
+
+        mesh.registerTransporter(loopback)
+
+        LOCAL_SERVICES$.next({
+            name: BillingService.name,
+            metadata: {},
+            instance: {
+                charge(orderId: string) {
+                    return { orderId }
+                },
+            },
+        })
+
+        const provider = NestJSLinkMicroservice(BillingService)
+        const remote = provider.useFactory(mesh) as unknown as Pick<BillingService, 'charge'>
+
+        const result = await remote.charge('order-1')
+
+        expect(provider.provide).toBe(BillingService)
+        expect(provider.inject).toEqual([SpiderMesh])
+        expect(result).toEqual({ orderId: 'order-1' })
     })
 })

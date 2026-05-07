@@ -8,7 +8,7 @@ export type RegistryPickRpcTargetOptions = {
 export class Registry {
 
     public readonly nodes$ = new BehaviorSubject<Map<string, SpiderMeshNode>>(new Map())
-
+    #transporters = new Map<string, string>()
     #rrIndexes = new Map<string, number>()
 
     getPeer(nodeId: string) {
@@ -16,6 +16,9 @@ export class Registry {
     }
 
     upsertPeer(node: SpiderMeshNode) {
+        node.transporters.rpc && Object.keys(node.services).forEach(service => {
+            this.#transporters.set(service, node.transporters.rpc)
+        })
         const nodes = new Map(this.nodes$.value)
         const current = nodes.get(node.node_id)
         nodes.set(node.node_id, {
@@ -48,16 +51,16 @@ export class Registry {
         return deleted
     }
 
-    listPeers(options: { service?: string } = {}) {
+    listPeers(service?: string) {
         return [...this.nodes$.value.values()].filter(node => {
-            if (options.service && node.services[options.service] == undefined) return false
+            if (service && node.services[service] == undefined) return false
             return true
         })
     }
 
     watch(service?: string) {
         return this.nodes$.pipe(
-            map(() => this.listPeers({ service }))
+            map(() => this.listPeers(service))
         )
     }
 
@@ -69,20 +72,16 @@ export class Registry {
             return node.node_id
         }
 
-        const targets = this.listPeers({ service })
+        const targets = this.listPeers(service)
         if (targets.length === 0) return null
 
-        const index = this.#rrIndexes.get(service) || 0
-        this.#rrIndexes.set(service, (index + 1) % targets.length)
-        return targets[index % targets.length]?.node_id || null
+        const index = ((this.#rrIndexes.get(service) || 0) + 1) % targets.length
+        this.#rrIndexes.set(service, index)
+        return targets[index]?.node_id
     }
 
-    getRpcTransporterName(service: string, options: RegistryPickRpcTargetOptions = {}) {
-        const nodeId = options.node_id || this.pickRpcNode(service, options)
-        if (!nodeId) return null
-        const node = this.getPeer(nodeId)
-        const transporter = node?.transporters?.rpc
-        return typeof transporter === 'string' ? transporter : null
+    getRpcTransporterName(service: string) {
+        return this.#transporters.get(service)
     }
 
     listTopicNodes(topic: string) {

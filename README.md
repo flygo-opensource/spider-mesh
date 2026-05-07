@@ -147,14 +147,16 @@ type RpcOptions<T = any> = {
 Examples:
 
 ```ts
+import { firstValueFrom } from 'rxjs'
+
 await users.set({ timeout: 3000, retry: 2 }).getUser('42')
 
-await mesh.callRemoteService({
+await firstValueFrom(mesh.callRemoteService({
   service: 'UserService',
   method: 'getUser',
   args: ['42'],
   transporter: 'Http2Rpc',
-})
+}))
 ```
 
 `transporter` may be:
@@ -202,10 +204,10 @@ Current public methods:
 - `getPeer(nodeId)`
 - `upsertPeer(node)`
 - `removePeer(nodeId)`
-- `listPeers({ service? })`
+- `listPeers(service?)`
 - `watch(service?)`
 - `pickRpcNode(service, { node_id? })`
-- `getRpcTransporterName(service, { node_id? })`
+- `getRpcTransporterName(service)`
 - `listTopicNodes(topic)`
 
 ## Transporter Contracts
@@ -224,7 +226,7 @@ type RpcTransporter = Observable<RpcEvent> & {
 ### Pubsub transporter
 
 ```ts
-type PubsubTransporter = {
+type PubsubTransporter = Observable<PubsubEvent> & {
   publish<T>(topic: string, data: T): Promise<void>
   listen<T>(topic: string): Observable<T>
   linkRegistry?(registry: Registry): void
@@ -245,10 +247,10 @@ type DiscoveryTransporter = Observable<DiscoveryEvent> & {
 The package exports:
 
 - `NestJSExposeMicroservice(factory, metadata?)`
-- `NestJSLinkMicroservice(factory, transporter)`
+- `NestJSLinkMicroservice(factory, transporter?)`
 - `NestJSLinkEvent(factory)`
 
-`NestJSLinkMicroservice(factory, transporter)` forwards the transporter selector into `RemoteServiceLinker.link()`.
+`NestJSLinkMicroservice(factory, transporter?)` forwards the optional transporter selector into `RemoteServiceLinker.link()`.
 
 ## Companion Packages
 
@@ -280,37 +282,30 @@ Build with:
 bun run build
 ```
 
-## Notes
-
-- This package is ESM-only.
-- Repository source uses emitted `.js` relative specifiers.
-- `LOCAL_SERVICES$` is process-global inside one process.
-
-await userCreated.publish(new UserCreatedEvent('42', 'ada@example.com'))
-
-userCreated.listen().subscribe(event => {
-  console.log(event.id)
-})
-```
-
 ## NestJS Integration
 
 ### Register `SpiderMesh` as a provider
 
 ```ts
 import { Module } from '@nestjs/common'
-import { SpiderMesh } from '@spider-mesh/core'
+import { Registry, SpiderMesh } from '@spider-mesh/core'
 import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '@spider-mesh/tcp'
 
 @Module({
   providers: [
-    SpiderMesh.asProvider({
-      transporters: [
-        UdpDiscovery,
-        Http2Rpc,
-        Http2Pubsub,
-      ],
-    }),
+    {
+      provide: SpiderMesh,
+      useFactory: () => {
+        const registry = new Registry()
+        const mesh = new SpiderMesh(registry)
+
+        mesh.registerTransporter(new UdpDiscovery())
+        mesh.registerTransporter(new Http2Rpc())
+        mesh.registerTransporter(new Http2Pubsub())
+
+        return mesh
+      },
+    },
   ],
   exports: [SpiderMesh],
 })
@@ -372,6 +367,12 @@ export class CheckoutService {
 export class CheckoutModule {}
 ```
 
+Pass a transporter only when you need to force a specific RPC transporter:
+
+```ts
+NestJSLinkMicroservice(BillingService, 'Http2Rpc')
+```
+
 ### Inject an event binding in NestJS
 
 ```ts
@@ -402,85 +403,6 @@ export class AuditService {
 export class AuditModule {}
 ```
 
-## Transporter Contract
-
-Concrete transport implementations can live in companion packages such as `@spider-mesh/tcp` and `@spider-mesh/ws`, or in your own application code.
-
-You can also provide your own classes that implement one or more transporter contracts exported by `@spider-mesh/core`.
-
-### Public API map
-
-- `SpiderMesh`: runtime coordinator for services, events, discovery, and transporters
-- `RemoteServiceLinker.link()`: creates a typed remote proxy
-- `@Microservice()`: exposes a local class instance as a remote service
-- `SpiderMesh.linkEvent()`: creates a topic binding for publish and subscribe
-- `RpcTransporter`: RPC transporter contract
-- `DiscoveryTransporter`: discovery transporter contract
-- `PubsubTransporter`: pubsub transporter contract
-
-### RPC transporter
-
-```ts
-type RpcMessage = {
-  node_id: string
-  packet: RpcPacket
-}
-
-type RpcEvent = Partial<{
-  rpc: RpcMessage
-  offline: string
-  endpoints: Record<string, string | boolean | number>
-}>
-
-type RpcTransporter = Observable<RpcEvent> & {
-  send(data: RpcPacket, node: SpiderMeshNode): Promise<void>
-}
-```
-
-The RPC observable can emit:
-
-- `rpc`: inbound RPC message shaped as `{ node_id, packet }`
-- `offline`: node offline event
-- `endpoints`: transporter metadata to attach to the current node
-
-The internal RPC wire protocol supports:
-
-- `request`
-- `response`
-- `cancel`
-
-`response` packets can carry:
-
-- `data`
-- `error`
-- `completed`
-
-### Discovery transporter
-
-```ts
-type DiscoveryEvent = {
-  discovered: SpiderMeshNode
-}
-
-type DiscoveryTransporter = Observable<DiscoveryEvent> & {
-  broadcast(
-    data: MdnsMessage<NodeMetadata>,
-    ips: string[],
-  ): Promise<void>
-}
-```
-
-Discovery transporters stream remote node snapshots into the mesh, and `SpiderMesh` itself calls `broadcast()` whenever local node metadata changes.
-
-### Pubsub transporter
-
-```ts
-type PubsubTransporter = {
-  publish<T>(topic: string, data: T): Promise<void>
-  listen<T>(topic: string): Observable<T>
-}
-```
-
 ## Error Model
 
 The core defines these error codes for RPC flows:
@@ -499,21 +421,17 @@ The core defines these error codes for RPC flows:
 The package also exports:
 
 - `LimitConcurrency(limit)` and `LimitConcurrentRunning(limit)` for throttling async method execution
-- `randomUUID()` for Node.js, browser, and React Native compatible UUID generation using ESM-safe runtime detection
-- `MicroserviceException` types for common RPC error codes
-
-## Build
-
-```bash
-bun run build
-```
+- `MicroserviceError` for common RPC error codes
 
 ## Notes
 
+- This package is ESM-only.
+- Repository source uses emitted `.js` relative specifiers.
+- `LOCAL_SERVICES$` is process-global inside one process.
 - Local services are registered when their class instances are constructed.
 - Service identity is based on the class name.
 - Event topic identity is based on the event class name.
-- RPC target selection is round-robin unless you force `node_id` or `ip`.
+- RPC target selection is round-robin unless you force `node_id`.
 - `SpiderMesh` owns RPC stream lifecycle, timeout, retry, and cancel behavior.
 - Transporters focus on byte transport, pubsub topic IO, and discovery broadcasts.
 - The root package entry intentionally focuses on runtime-agnostic APIs and shared contracts.
