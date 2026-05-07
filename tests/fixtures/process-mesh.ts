@@ -49,6 +49,7 @@ class ProcessRpcTransporter extends Subject<RpcEvent> implements RpcTransporter 
             packet,
             node_id,
         })
+        return { cancel: () => {} }
     }
 }
 

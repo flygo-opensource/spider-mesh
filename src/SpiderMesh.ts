@@ -146,6 +146,7 @@ export class SpiderMesh {
         this.#rpc.running.delete(request_id)
     }
 
+    #index = 1
     callRemoteService<R, T>(options: RpcOptions<T>) {
         return of(1).pipe(
             switchMap(() => this.registry ? firstValueFrom(this.registry.watch(options.service)) : of(1)),
@@ -154,7 +155,7 @@ export class SpiderMesh {
                 const transporter = this.#selectRpcTransport(options)
                 if (!transporter) throw { code: 'MICROSERVICE_OFFLINE', message: `No transporter available for service ${options.service}` }
                 return new Observable<R>(subscriber => {
-                    const request_id = `${this.node_id}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`
+                    const request_id = `${this.node_id}:${Date.now().toString(36)}:${(this.#index++).toString(36)}`
                     const pending = {
                         stream: new Subject<R>(),
                         finished: false
@@ -173,14 +174,18 @@ export class SpiderMesh {
                         }
                     })
 
+                    let cancelSend: (() => void) | undefined
                     transporter.send({
                         kind: 'request',
                         request_id,
                         sender_node_id: this.node_id,
+                        destination_node_id: options.node_id,
                         service: options.service,
                         method: options.method,
                         args: options.args
-                    }, options.node_id).catch((error: any) => {
+                    }).then(({ cancel }) => {
+                        cancelSend = cancel
+                    }).catch((error: any) => {
                         pending.finished = true
                         pending.stream.error(this.#normalizeRpcError(error))
                         this.#completePendingRpc(request_id)
@@ -188,14 +193,9 @@ export class SpiderMesh {
 
                     return () => {
                         subscription.unsubscribe()
-                        // if (!pending.finished && this.#rpc.pending.has(request_id) && options.node_id) {
-                        //     void target.transporter.send({
-                        //         kind: 'cancel',
-                        //         request_id,
-                        //         source_node_id: this.node_id,
-                        //         target_node_id: target.node_id,
-                        //     } satisfies RpcCancelPacket, target.node_id).catch(() => undefined)
-                        // }
+                        if (!pending.finished) {
+                            cancelSend?.()
+                        }
                         this.#completePendingRpc(request_id)
                     }
                 })
@@ -238,12 +238,13 @@ export class SpiderMesh {
                     const packet = rpc
 
                     if (packet.kind == 'request') {
-                        const reply = async (response: Omit<RpcResponsePacket, 'kind' | 'request_id' | 'source_node_id' | 'target_node_id'>) => {
+                        const reply = async (response: Omit<RpcResponsePacket, 'kind' | 'request_id' | 'destination_node_id'>) => {
                             await transporter.send({
                                 kind: 'response',
                                 request_id: packet.request_id,
+                                destination_node_id: packet.sender_node_id,
                                 ...response
-                            }, packet.sender_node_id)
+                            })
                         }
 
                         const handleResponse = (response: any) => {

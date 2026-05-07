@@ -162,7 +162,8 @@ await firstValueFrom(mesh.callRemoteService({
 `transporter` may be:
 
 - a registered transporter name string
-- a class or object with a `name`
+- a class constructor (e.g. `Http2Rpc`)
+- an object with a `name` property
 
 ## Events
 
@@ -219,7 +220,40 @@ The contract source of truth is `src/types.ts`.
 ```ts
 type RpcTransporter = Observable<RpcEvent> & {
   linkRegistry?(registry: Registry): void
-  send(data: RpcPacket, node_id?: string): Promise<void>
+  send(data: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
+}
+```
+
+`send()` returns a `cancel` function. For `request` packets, calling `cancel()` sends a `RpcCancelPacket` to the destination node, which causes the provider to stop any running stream. For `response` and `cancel` packets the returned `cancel` is a no-op.
+
+`SpiderMesh` calls `cancel()` automatically when a subscriber unsubscribes from a stream that has not yet completed.
+
+### Packet types
+
+```ts
+type RpcRequestPacket = {
+  kind: 'request'
+  request_id: string
+  service: string
+  method: string
+  args: any[]
+  sender_node_id: string
+  destination_node_id?: string  // explicit target; transporter falls back to registry round-robin when omitted
+}
+
+type RpcResponsePacket = {
+  kind: 'response'
+  request_id: string
+  data?: any
+  error?: SpiderMeshError | { code?: string; message: string }
+  completed?: boolean
+  destination_node_id?: string
+}
+
+type RpcCancelPacket = {
+  kind: 'cancel'
+  request_id: string
+  destination_node_id?: string
 }
 ```
 
@@ -432,7 +466,7 @@ The package also exports:
 - Service identity is based on the class name.
 - Event topic identity is based on the event class name.
 - RPC target selection is round-robin unless you force `node_id`.
-- `SpiderMesh` owns RPC stream lifecycle, timeout, retry, and cancel behavior.
+- `SpiderMesh` owns RPC stream lifecycle, timeout, retry, and cancel behavior. When a subscriber unsubscribes before a stream completes, `SpiderMesh` calls the `cancel()` function returned by `transporter.send()`, which causes the provider to stop the running Observable.
 - Transporters focus on byte transport, pubsub topic IO, and discovery broadcasts.
 - The root package entry intentionally focuses on runtime-agnostic APIs and shared contracts.
 - If an AI agent is uncertain which import to use, prefer `@spider-mesh/core` first, then opt into a companion transport package such as `@spider-mesh/tcp` or `@spider-mesh/ws` only when a concrete transport is needed.

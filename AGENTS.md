@@ -85,11 +85,13 @@ type RpcOptions<T = any> = {
   timeout?: number
   retry?: number
   node_id?: string
-  transporter?: string | { name?: string }
+  transporter?: TransporterSelector
 }
+
+type TransporterSelector = string | { name?: string } | (abstract new (...args: any[]) => any)
 ```
 
-`transporter` may be a registered transporter name or a class/object with a `name`.
+`transporter` may be a registered transporter name string, a class constructor (e.g. `Http2Rpc`), or an object with a `name` property.
 
 ## Registry Scope
 
@@ -238,6 +240,25 @@ For behavior examples, prefer:
 - add `@spider-mesh/tcp` or `@spider-mesh/ws` only when concrete transport is explicitly needed
 - treat `src/types.ts` as the transporter contract source of truth
 - document runtime setup with `Registry`, `SpiderMesh`, and `mesh.registerTransporter(...)`
+
+## Transporter Contract
+
+The RPC transporter contract (source of truth: `src/types.ts`):
+
+```ts
+type RpcTransporter = Observable<RpcEvent> & {
+  linkRegistry?(registry: Registry): void
+  send(data: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
+}
+```
+
+Key points for implementing a custom transporter:
+
+- `send()` must return `Promise<{ cancel: () => void }>`.
+- For `request` packets: `cancel()` should send a `RpcCancelPacket` to `destination_node_id`. The provider will unsubscribe from the running Observable when it receives the cancel.
+- For `response` and `cancel` packets: return `{ cancel: () => {} }` (no-op).
+- `destination_node_id` in the packet identifies the target node. Fall back to `registry.pickRpcNode(service)` when it is absent on `request` packets.
+- Emit `{ offline: node_id }` into the Subject when a connection to a node closes unexpectedly. `SpiderMesh` calls `registry.removePeer(node_id)` in response.
 
 ## Known Architectural Constraint
 

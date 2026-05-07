@@ -40,12 +40,13 @@ class NamedLoopbackRpcTransporter extends Subject<RpcEvent> implements RpcTransp
         this.next({
             rpc: 'sender_node_id' in data ? { ...data, sender_node_id: targetNodeId } : data,
         })
+        return { cancel: () => {} }
     }
 }
 
 class SilentRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
     async send(_data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket, _node_id?: string) {
-        return
+        return { cancel: () => {} }
     }
 }
 

@@ -71,7 +71,7 @@ export type PubsubTransporter = Observable<PubsubEvent> & {
 export type RpcRoutingOptions = {
     [key: string]: string | number | boolean;
 };
-export type TransporterSelector = string | { name?: string } 
+export type TransporterSelector = string | { name?: string } | (abstract new (...args: any[]) => any)
 export type RpcOptions<T = any> = {
     service: string;
     method: string;
@@ -90,6 +90,7 @@ export type RpcRequestPacket = {
     method: string
     args: any[]
     sender_node_id: string
+    destination_node_id?: string
 }
 
 export type RpcResponsePacket = {
@@ -98,11 +99,13 @@ export type RpcResponsePacket = {
     data?: any
     error?: SpiderMeshError | { code?: string, message: string }
     completed?: boolean
+    destination_node_id?: string
 }
 
 export type RpcCancelPacket = {
     kind: 'cancel'
     request_id: string
+    destination_node_id?: string
 }
 
 
@@ -113,7 +116,7 @@ export type RpcEvent = Partial<{
 }>;
 export type RpcTransporter = Observable<RpcEvent> & {
     linkRegistry?(registry: Registry): void;
-    send(data: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket, node_id?: string): Promise<void>;
+    send(data: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>;
 };
 
 export type MeshTransporter = RpcTransporter | PubsubTransporter | DiscoveryTransporter;
