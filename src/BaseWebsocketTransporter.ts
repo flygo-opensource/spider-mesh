@@ -1,6 +1,6 @@
 import { decode, encode } from '@msgpack/msgpack'
 import { BehaviorSubject, defer, filter, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
-import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, PubsubTransporter, RpcEvent, RpcPacket, RpcTransporter, SpiderMeshNode } from '@spider-mesh/core'
+import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, PubsubTransporter, RpcCancelPacket, RpcEvent, RpcRequestPacket, RpcResponsePacket, RpcTransporter, SpiderMeshNode, Registry } from '@spider-mesh/core'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayRawData, type ReceivedRelayFrame, type ReceivedRelayRpcFrame } from './websocketProtocol.js'
 
 export type WebsocketTransporterOptions = {
@@ -45,10 +45,15 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
     #topics = new Map<string, TopicStream>()
     #nodes = new Map<string, KnownNode>()
     #me$ = new ReplaySubject<SpiderMeshNode>(1)
+    #registry?: Registry
     public readonly status$ = new BehaviorSubject<Map<string, string>>(new Map())
 
     constructor(protected options: WebsocketTransporterOptions = {}) {
         super()
+    }
+
+    linkRegistry(registry: Registry) {
+        this.#registry = registry
     }
 
     connect(url: string) {
@@ -74,13 +79,36 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
     }
 
 
-    async send(packet: RpcPacket, node_id?: string) {
-        const socket = this.#selectRpcSocket(node_id || packet.target_node_id)
+    async send(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }> {
+        // destination_node_id is embedded in the packet; fall back to registry round-robin for requests.
+        const resolvedNodeId = packet.destination_node_id
+            ?? (packet.kind === 'request' ? (this.#registry?.pickRpcNode(packet.service) ?? undefined) : undefined)
+
+        // When registry is linked but no node is available, fail fast like TCP does instead of broadcasting.
+        if (packet.kind === 'request' && !resolvedNodeId && this.#registry) {
+            throw { code: 'MICROSERVICE_OFFLINE', message: `No available node for service ${packet.service}` }
+        }
+
+        const socket = this.#selectRpcSocket(resolvedNodeId)
         await this.#sendFrame(socket, {
             type: packet.kind,
-            target_id: node_id || packet.target_node_id,
+            target_id: resolvedNodeId,
             payload: this.#encodeRpcPacket(packet),
         })
+
+        if (packet.kind === 'request') {
+            return {
+                cancel: () => {
+                    void this.send({
+                        kind: 'cancel',
+                        request_id: packet.request_id,
+                        destination_node_id: resolvedNodeId,
+                    }).catch(() => undefined)
+                }
+            }
+        }
+
+        return { cancel: () => {} }
     }
 
     async broadcast(data: MdnsMessage<NodeMetadata>) {
@@ -227,12 +255,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         const packet = this.#decodeRpcPacket(frame)
         if (!packet) return
 
-        this.next({
-            rpc: {
-                node_id: frame.sender_id,
-                packet
-            }
-        } satisfies RpcEvent)
+        this.next({ rpc: packet } satisfies RpcEvent)
     }
 
     private on_hello(url: string, frame: Extract<ReceivedRelayFrame, { type: 'hello' }>) {
@@ -304,7 +327,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         })
     }
 
-    #encodeRpcPacket(packet: RpcPacket) {
+    #encodeRpcPacket(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket) {
         const { kind: _, ...payload } = packet
         return encode(payload)
     }
@@ -314,7 +337,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
             return {
                 kind: frame.type,
                 ...(decode(frame.payload) as Record<string, unknown>),
-            } as RpcPacket
+            } as RpcRequestPacket | RpcCancelPacket | RpcResponsePacket
         } catch {
             return null
         }

@@ -1,10 +1,10 @@
 import { decode, encode } from '@msgpack/msgpack'
-import type { RpcPacket, SpiderMeshNode } from '@spider-mesh/core'
+import type { SpiderMeshNode } from '@spider-mesh/core'
 
 export type RelayRawData = Uint8Array | ArrayBuffer | ArrayBufferView | string | RelayRawData[]
 
 export type RelayRpcFrame = {
-    type: RpcPacket['kind']
+    type: 'request' | 'response' | 'cancel'
     payload: Uint8Array
     target_id?: string
 }

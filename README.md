@@ -120,12 +120,22 @@ console.log(await greeter.hello('world'))
 
 Current responsibilities:
 
-- maintain relay connections
+- maintain relay connections with automatic reconnect
 - expose `status$` for per-URL connection status
-- send and receive RPC frames
+- send and receive RPC frames, routing by `destination_node_id` embedded in the packet; falls back to `registry.pickRpcNode(service)` for round-robin when absent
 - propagate discovery `hello` and `offline` frames
 - forward pubsub messages and subscription changes
 - integrate directly with `mesh.registerTransporter(transporter)`
+
+Current send contract:
+
+```ts
+send(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
+```
+
+For `request` packets, the returned `cancel()` sends a `RpcCancelPacket` through the relay to the same destination node. The provider stops the running Observable on receipt. `SpiderMesh` calls `cancel()` automatically when a subscriber unsubscribes before the stream completes.
+
+Throws `MICROSERVICE_OFFLINE` immediately when a registry is linked but no node is available for the requested service.
 
 Supported options:
 
@@ -149,16 +159,22 @@ Supported options:
 The package includes:
 
 - binary transporter smoke coverage
-- connection status coverage
+- WebSocket connection status coverage
 - SpiderMesh RPC e2e coverage
 - reverse RPC coverage
-- matrix coverage for sync/async/observable/error paths
-- multi-provider routing coverage
+- matrix coverage for sync / async / Observable / error return paths
+- multi-provider round-robin routing coverage
+- RPC timeout coverage
+- fallback value coverage
+- provider disconnect / offline detection coverage
+- concurrent RPC coverage
+- provider reconnect coverage
+- failover coverage (3 nodes → kill 1 → 2 nodes continue serving)
 
 Run the full suite with:
 
 ```bash
-bun run test:e2e
+bun test
 ```
 
 Build with:
