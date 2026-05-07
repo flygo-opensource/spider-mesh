@@ -1,0 +1,49 @@
+import process from 'node:process'
+import { RemoteServiceLinker } from '@spider-mesh/core'
+import { firstValueFrom } from 'rxjs'
+import { createMesh } from './helpers/createMesh.js'
+
+type SlowService = {
+    hang(input: string): Promise<string>
+}
+
+async function main() {
+    const { mesh } = createMesh()
+    console.log('TCP timeout client connected')
+
+    // timeout: 2000 — call should be cancelled and throw MICROSERVICE_RPC_TIMEOUT
+    const service = RemoteServiceLinker.link<SlowService>(mesh, {
+        service: 'SlowService',
+        timeout: 2000,
+        retry: 0,
+    })
+
+    const guard = setTimeout(() => {
+        console.error('TCP timeout client guard exceeded')
+        process.exit(1)
+    }, 12000)
+
+    try {
+        await service.wait(() => mesh.listRpcNodes('SlowService').length > 0)
+
+        try {
+            await firstValueFrom(service.hang('trigger-timeout'))
+            console.error('Expected MICROSERVICE_RPC_TIMEOUT but received a result')
+            process.exit(1)
+        } catch (error: any) {
+            if (error?.code === 'MICROSERVICE_RPC_TIMEOUT') {
+                console.log(JSON.stringify({ timeoutDetected: true, code: error.code }))
+                process.exit(0)
+            }
+            console.error('Unexpected error (expected MICROSERVICE_RPC_TIMEOUT):', error)
+            process.exit(1)
+        }
+    } catch (error) {
+        console.error(error)
+        process.exit(1)
+    } finally {
+        clearTimeout(guard)
+    }
+}
+
+await main()

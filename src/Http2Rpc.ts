@@ -3,7 +3,7 @@ import { connect, createServer, type ClientHttp2Session, type ClientHttp2Stream,
 import { SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE } from "./const.js"
 import { AddressInfo } from "node:net"
 import { unpack, pack } from 'msgpackr'
-import type { Registry, RpcEvent, RpcPacket, RpcTransporter, SpiderMeshError, SpiderMeshNode } from '@spider-mesh/core'
+import type { Registry, RpcCancelPacket, RpcEvent, RpcRequestPacket, RpcResponsePacket, RpcTransporter, SpiderMeshError, SpiderMeshNode } from '@spider-mesh/core'
 
 
 export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
@@ -56,7 +56,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         super.unsubscribe()
     }
 
-    async send(packet: RpcPacket, node_id?: string) {
+    async send(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }> {
         if (packet.kind === 'response') {
             const stream = this.#responseStreams.get(packet.request_id)
             if (stream) {
@@ -64,11 +64,23 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
                 if (packet.completed || packet.error != undefined) {
                     this.#responseStreams.delete(packet.request_id)
                 }
-                return
+                return { cancel: () => {} }
             }
+            return { cancel: () => {} }
         }
 
-        const node = this.#resolveNode(node_id || packet.target_node_id)
+        if (packet.kind === 'request' && !this.#registry) {
+            throw {
+                code: 'MICROSERVICE_OFFLINE',
+                message: 'Http2Rpc requires a registry to route RPC requests'
+            } satisfies SpiderMeshError
+        }
+
+        // destination_node_id is embedded in the packet; fall back to registry round-robin for requests.
+        const resolvedNodeId = packet.destination_node_id
+            ?? (packet.kind === 'request' ? (this.#registry?.pickRpcNode(packet.service) ?? undefined) : undefined)
+
+        const node = this.#resolveNode(resolvedNodeId)
 
         const connection = await this.#connect(node)
         const request = connection.request({
@@ -113,6 +125,20 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
 
             request.end(pack(packet))
         })
+
+        if (packet.kind === 'request') {
+            return {
+                cancel: () => {
+                    void this.send({
+                        kind: 'cancel',
+                        request_id: packet.request_id,
+                        destination_node_id: resolvedNodeId,
+                    }).catch(() => undefined)
+                }
+            }
+        }
+
+        return { cancel: () => {} }
     }
 
     async #connect(node: SpiderMeshNode) {
@@ -176,7 +202,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
                 )
             )
 
-            const packet = unpack(Buffer.concat(buffers)) as RpcPacket
+            const packet = unpack(Buffer.concat(buffers)) as RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
 
             if (packet.kind === 'request') {
                 stream.respond({
@@ -192,12 +218,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
                 stream.end()
             }
 
-            this.next({
-                rpc: {
-                    node_id: packet.source_node_id,
-                    packet
-                }
-            })
+            this.next({ rpc: packet })
         } catch {
             if (!stream.headersSent) {
                 stream.respond({ ':status': 400 })
@@ -206,7 +227,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         }
     }
 
-    async #writeResponsePacket(stream: ServerHttp2Stream, packet: RpcPacket) {
+    async #writeResponsePacket(stream: ServerHttp2Stream, packet: RpcResponsePacket) {
         const frame = this.#encodeFrame(packet)
         const isTerminal = packet.kind === 'response' && (packet.completed || packet.error != undefined)
 
@@ -228,22 +249,17 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         })
     }
 
-    #bindResponseStream(packet: Extract<RpcPacket, { kind: 'request' }>, node: SpiderMeshNode, request: ClientHttp2Stream) {
+    #bindResponseStream(packet: RpcRequestPacket, node: SpiderMeshNode, request: ClientHttp2Stream) {
         let buffer = Buffer.alloc(0)
         let completed = false
         let accepted = false
 
-        const emitResponse = (response: RpcPacket) => {
+        const emitResponse = (response: RpcResponsePacket) => {
             if (this.#isDisposing || this.closed) {
                 return
             }
 
-            this.next({
-                rpc: {
-                    node_id: node.node_id,
-                    packet: response
-                }
-            })
+            this.next({ rpc: response })
         }
 
         request.on('response', (headers: IncomingHttpHeaders) => {
@@ -263,7 +279,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
                 const frame = buffer.subarray(4, size + 4)
                 buffer = buffer.subarray(size + 4)
 
-                const response = unpack(frame) as RpcPacket
+                const response = unpack(frame) as RpcResponsePacket
                 if (response.kind !== 'response') {
                     continue
                 }
@@ -284,8 +300,6 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             emitResponse({
                 kind: 'response',
                 request_id: packet.request_id,
-                source_node_id: node.node_id,
-                target_node_id: packet.source_node_id,
                 error: {
                     code: 'MICROSERVICE_OFFLINE',
                     message: 'RPC response stream ended unexpectedly'
@@ -303,8 +317,6 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             emitResponse({
                 kind: 'response',
                 request_id: packet.request_id,
-                source_node_id: node.node_id,
-                target_node_id: packet.source_node_id,
                 error: {
                     code: 'MICROSERVICE_OFFLINE',
                     message: error.message || 'RPC response stream failed'
@@ -314,7 +326,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         })
     }
 
-    #encodeFrame(packet: RpcPacket) {
+    #encodeFrame(packet: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket) {
         const payload = pack(packet)
         const frame = Buffer.allocUnsafe(payload.length + 4)
         frame.writeUInt32BE(payload.length, 0)

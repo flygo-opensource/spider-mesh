@@ -40,12 +40,12 @@ registry.upsertPeer(target)
 await rpc.send({
     kind: 'request',
     request_id: `req-${Date.now().toString(36)}`,
-    source_node_id: 'rpc-contract-client',
-    target_node_id: target.node_id,
+    sender_node_id: 'rpc-contract-client',
+    destination_node_id: target.node_id,
     service: 'ContractService',
     method: 'ping',
     args: ['ok']
-}, target.node_id)
+})
 
 console.log('RPC_CLIENT_SENT')
 process.exit(0)

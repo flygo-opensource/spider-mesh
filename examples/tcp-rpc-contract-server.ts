@@ -18,10 +18,8 @@ rpc.subscribe(event => {
             type: 'rpc',
             hasRpc: 'rpc' in event,
             hasMessage: 'message' in (event as Record<string, unknown>),
-            packetKind: event.rpc.packet.kind,
-            senderNodeId: event.rpc.node_id,
-            sourceNodeId: event.rpc.packet.source_node_id,
-            targetNodeId: event.rpc.packet.target_node_id,
+            packetKind: event.rpc.kind,
+            senderNodeId: event.rpc.kind === 'request' ? event.rpc.sender_node_id : undefined,
         }))
         clearTimeout(guard)
         process.exit(0)

@@ -41,22 +41,20 @@ async function main() {
     await client.send({
         kind: 'request',
         request_id: `req-${Date.now().toString(36)}`,
-        source_node_id: 'rpc-contract-client',
-        target_node_id: targetNode.node_id,
+        sender_node_id: 'rpc-contract-client',
+        destination_node_id: targetNode.node_id,
         service: 'ContractService',
         method: 'ping',
         args: ['ok']
-    }, targetNode.node_id)
+    })
 
     const event = await rpcEventPromise
     console.log(JSON.stringify({
         type: 'rpc',
         hasRpc: 'rpc' in event,
         hasMessage: 'message' in (event as Record<string, unknown>),
-        packetKind: event.rpc.packet.kind,
-        senderNodeId: event.rpc.node_id,
-        sourceNodeId: event.rpc.packet.source_node_id,
-        targetNodeId: event.rpc.packet.target_node_id,
+        packetKind: event.rpc.kind,
+        senderNodeId: event.rpc.kind === 'request' ? event.rpc.sender_node_id : undefined,
     }))
     console.log('TCP RPC contract test passed')
 

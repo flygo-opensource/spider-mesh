@@ -7,8 +7,6 @@ export type {
     PubsubTransporter,
     RpcCancelPacket,
     RpcEvent,
-    RpcMessage,
-    RpcPacket,
     RpcRequestPacket,
     RpcResponsePacket,
     RpcTransporter,

@@ -70,13 +70,17 @@ Responsibilities:
 - accept inbound RPC packets
 - connect to remote nodes discovered by core
 - preserve streaming request/response behavior
-- route packets by `node_id`
+- route packets by `destination_node_id` embedded in the packet; falls back to `registry.pickRpcNode(service)` for round-robin when `destination_node_id` is absent
 
 Current send contract:
 
 ```ts
-send(packet: RpcPacket, node_id?: string): Promise<void>
+send(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
 ```
+
+For `request` packets, the returned `cancel()` sends a `RpcCancelPacket` to the same destination node over the existing HTTP/2 connection. The provider stops the running Observable on receipt. `SpiderMesh` calls `cancel()` automatically when a subscriber unsubscribes before the stream completes.
+
+Requires a `Registry` to be linked via `linkRegistry()` before sending `request` packets. Throws `MICROSERVICE_OFFLINE` immediately when no registry is linked.
 
 ### `Http2Pubsub`
 
@@ -135,18 +139,23 @@ console.log(await greeter.hello('tcp'))
 
 The package includes:
 
-- transporter smoke coverage
-- RPC contract coverage
-- discovery contract coverage
+- transporter smoke coverage (RPC + PubSub)
+- RPC transporter contract coverage
+- discovery transporter contract coverage
 - SpiderMesh RPC e2e coverage
 - reverse RPC coverage
-- matrix coverage for sync/async/observable/error paths
-- multi-provider routing coverage
+- matrix coverage for sync / async / Observable / error return paths
+- multi-provider round-robin routing coverage
+- RPC timeout coverage
+- fallback value coverage
+- provider crash / offline detection coverage
+- concurrent RPC coverage
+- failover coverage (3 nodes → kill 1 → 2 nodes continue serving)
 
 Run the full suite with:
 
 ```bash
-bun run test:e2e
+bun test
 ```
 
 Build with:
