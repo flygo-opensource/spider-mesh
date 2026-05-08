@@ -122,18 +122,18 @@ Current responsibilities:
 
 - maintain relay connections with automatic reconnect
 - expose `status$` for per-URL connection status
-- send and receive RPC frames, routing by `destination_node_id` embedded in the packet; falls back to `registry.pickRpcNode(service)` for round-robin when absent
-- propagate discovery `hello` and `offline` frames
+- send and receive RPC frames; the relay routes by `destination_node_id` when present, otherwise selects a provider by service name with round-robin
+- propagate discovery `hello` and `offline` frames; suppresses duplicate `discovered` events for already-known nodes
 - forward pubsub messages and subscription changes
 - integrate directly with `mesh.registerTransporter(transporter)`
 
 Current send contract:
 
 ```ts
-send(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
+send(packet: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
 ```
 
-For `request` packets, the returned `cancel()` sends a `RpcCancelPacket` through the relay to the same destination node. The provider stops the running Observable on receipt. `SpiderMesh` calls `cancel()` automatically when a subscriber unsubscribes before the stream completes.
+For `request` packets, the returned `cancel()` sends a cancel frame to the relay over the same socket. The relay routes it to the provider via an internal `request_id → socket` map. The provider stops the running Observable on receipt. `SpiderMesh` calls `cancel()` automatically when a subscriber unsubscribes before the stream completes.
 
 Throws `MICROSERVICE_OFFLINE` immediately when a registry is linked but no node is available for the requested service.
 

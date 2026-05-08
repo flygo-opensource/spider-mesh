@@ -1,12 +1,11 @@
 import { decode, encode } from '@msgpack/msgpack'
-import type { SpiderMeshNode } from '@spider-mesh/core'
+import type { RpcCancelPacket, RpcRequestPacket, RpcResponsePacket, SpiderMeshNode } from '@spider-mesh/core'
 
 export type RelayRawData = Uint8Array | ArrayBuffer | ArrayBufferView | string | RelayRawData[]
 
 export type RelayRpcFrame = {
-    type: 'request' | 'response' | 'cancel'
-    payload: Uint8Array
-    target_id?: string
+    type: 'rpc'
+    data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
 }
 
 export type RelayPublishFrame = {
@@ -38,22 +37,14 @@ export type RelayOfflineFrame = {
 
 export type RelayFrame = RelayRpcFrame | RelayPublishFrame | RelaySubscribeFrame | RelayUnsubscribeFrame | RelayHelloFrame | RelayOfflineFrame
 
-export type ReceivedRelayRpcFrame = RelayRpcFrame & { sender_id: string }
-export type ReceivedRelayPublishFrame = RelayPublishFrame & { sender_id: string }
-export type ReceivedRelaySubscribeFrame = RelaySubscribeFrame & { sender_id: string }
-export type ReceivedRelayUnsubscribeFrame = RelayUnsubscribeFrame & { sender_id: string }
-export type ReceivedRelayHelloFrame = RelayHelloFrame & { sender_id: string }
-export type ReceivedRelayOfflineFrame = RelayOfflineFrame & { sender_id: string }
 
-export type ReceivedRelayFrame = ReceivedRelayRpcFrame | ReceivedRelayPublishFrame | ReceivedRelaySubscribeFrame | ReceivedRelayUnsubscribeFrame | ReceivedRelayHelloFrame | ReceivedRelayOfflineFrame
-
-export function encodeRelayFrame(frame: RelayFrame | ReceivedRelayFrame) {
+export function encodeRelayFrame(frame: RelayFrame) {
     return encode(frame)
 }
 
 export function decodeRelayFrame(raw: Uint8Array) {
     try {
-        return decode(raw) as RelayFrame | ReceivedRelayFrame
+        return decode(raw) as RelayFrame
     } catch {
         return null
     }

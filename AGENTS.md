@@ -83,12 +83,51 @@ For behavior references, prefer:
 - `examples/websocket-e2e-matrix-test.ts`
 - `examples/websocket-e2e-round-robin-test.ts`
 
+## Wire Protocol
+
+All frames are MsgPack-encoded `RelayFrame` objects (source of truth: `src/websocketProtocol.ts`).
+
+Frame types:
+
+| `type`        | Direction            | Purpose |
+|---------------|----------------------|---------|
+| `hello`       | node → relay → nodes | node discovery |
+| `offline`     | relay → nodes        | node disconnect |
+| `rpc`         | node ↔ relay ↔ node  | request / response / cancel |
+| `publish`     | node → relay → nodes | pubsub payload |
+| `subscribe`   | node → relay         | topic subscription |
+| `unsubscribe` | node → relay         | topic unsubscription |
+
+`sender_id` is **not** included in any wire frame. The relay resolves the sender from the socket state.
+
+### RPC frame shape
+
+```ts
+type RelayRpcFrame = {
+  type: 'rpc'
+  data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
+}
+```
+
+The full packet (including `kind`, `request_id`, `service`, `destination_node_id`) lives inside `data`. No top-level routing fields are duplicated.
+
+### Cancel routing
+
+The relay maintains `#pendingRequests: Map<string, WebSocket>` — a map from `request_id` to the provider socket currently handling that request. When a cancel frame arrives the relay looks up the provider socket and forwards the cancel directly. When the provider responds with `completed: true` or `error` the entry is removed.
+
+The `cancel()` function returned by `send()` reuses the same relay socket that sent the original request; no `destination_node_id` is needed.
+
+### Discovery deduplication
+
+`BaseWebsocketTransporter.on_hello` only emits a `discovered` event when the node is genuinely new or its service list has changed. Re-sends caused by relay sync (`#syncServerConnections`) are silently absorbed. A node never emits a `discovered` event for itself.
+
 ## Important Notes
 
 - Keep binary frame encoding with `@msgpack/msgpack`.
 - Preserve `status$` behavior for connection states.
 - Preserve delayed unsubscribe behavior for pubsub listeners.
-- Relay logic should continue rejecting client-role RPC initiation paths when not allowed.
+- Relay logic rejects request and cancel frames from non-server connections (`isServerConnection === false`).
+- Use `port: 0` in tests so the OS assigns a free port; the relay constructor uses `options.port ?? 8787`.
 
 ## Validation
 
@@ -100,4 +139,5 @@ Use the narrowest check that matches the change:
 - `bun test tests/websocket-spidermesh-reverse.e2e.test.ts`
 - `bun test tests/websocket-spidermesh-matrix.e2e.test.ts`
 - `bun test tests/websocket-spidermesh-round-robin.e2e.test.ts`
+- `bun test tests/node-online-spam.e2e.test.ts`
 - `bun run test:e2e`

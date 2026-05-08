@@ -1,7 +1,7 @@
 import { decode, encode } from '@msgpack/msgpack'
-import { BehaviorSubject, defer, filter, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
-import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, PubsubTransporter, RpcCancelPacket, RpcEvent, RpcRequestPacket, RpcResponsePacket, RpcTransporter, SpiderMeshNode, Registry } from '@spider-mesh/core'
-import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayRawData, type ReceivedRelayFrame, type ReceivedRelayRpcFrame } from './websocketProtocol.js'
+import { BehaviorSubject, defer, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
+import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, PubsubTransporter, RpcEvent, RpcRequestPacket, RpcResponsePacket, RpcTransporter, SpiderMeshNode } from '@spider-mesh/core'
+import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayRawData } from './websocketProtocol.js'
 
 export type WebsocketTransporterOptions = {
     heartbeatIntervalMs?: number
@@ -45,15 +45,11 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
     #topics = new Map<string, TopicStream>()
     #nodes = new Map<string, KnownNode>()
     #me$ = new ReplaySubject<SpiderMeshNode>(1)
-    #registry?: Registry
+    #localNodeId?: string
     public readonly status$ = new BehaviorSubject<Map<string, string>>(new Map())
 
     constructor(protected options: WebsocketTransporterOptions = {}) {
         super()
-    }
-
-    linkRegistry(registry: Registry) {
-        this.#registry = registry
     }
 
     connect(url: string) {
@@ -79,30 +75,19 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
     }
 
 
-    async send(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }> {
-        // destination_node_id is embedded in the packet; fall back to registry round-robin for requests.
-        const resolvedNodeId = packet.destination_node_id
-            ?? (packet.kind === 'request' ? (this.#registry?.pickRpcNode(packet.service) ?? undefined) : undefined)
-
-        // When registry is linked but no node is available, fail fast like TCP does instead of broadcasting.
-        if (packet.kind === 'request' && !resolvedNodeId && this.#registry) {
-            throw { code: 'MICROSERVICE_OFFLINE', message: `No available node for service ${packet.service}` }
-        }
-
-        const socket = this.#selectRpcSocket(resolvedNodeId)
+    async send(packet: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }> {
+        const socket = this.#selectRpcSocket(packet.destination_node_id)
         await this.#sendFrame(socket, {
-            type: packet.kind,
-            target_id: resolvedNodeId,
-            payload: this.#encodeRpcPacket(packet),
+            type: 'rpc',
+            data: packet,
         })
 
         if (packet.kind === 'request') {
             return {
                 cancel: () => {
-                    void this.send({
-                        kind: 'cancel',
-                        request_id: packet.request_id,
-                        destination_node_id: resolvedNodeId,
+                    void this.#sendFrame(socket, {
+                        type: 'rpc',
+                        data: { kind: 'cancel', request_id: packet.request_id },
                     }).catch(() => undefined)
                 }
             }
@@ -111,11 +96,12 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         return { cancel: () => {} }
     }
 
-    async broadcast(data: MdnsMessage<NodeMetadata>) {
+    async broadcast(data: MdnsMessage<SpiderMeshNode>) {
         const localNode = {
-            ...(data.node as unknown as SpiderMeshNode),
+            ...data.node,
             node_id: data.sender_id,
         } satisfies SpiderMeshNode
+        this.#localNodeId = localNode.node_id
         this.#me$.next(localNode)
     }
 
@@ -211,7 +197,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
                                 const frame = this.#parseFrame(raw)
                                 if (!frame) return
 
-                                const handler = this[`on_${frame.type}` as keyof BaseWebsocketTransporter] as ((url: string, frame: ReceivedRelayFrame) => void) | undefined
+                                const handler = this[`on_${frame.type}` as keyof BaseWebsocketTransporter] as ((url: string, frame: RelayFrame) => void) | undefined
                                 if (!handler) return
 
                                 handler.call(this, url, frame)
@@ -239,35 +225,30 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         }))
     }
 
-    private on_request(_url: string, frame: ReceivedRelayRpcFrame) {
-        this.on_rpc(frame)
+    private on_rpc(_url: string, frame: RelayFrame) {
+        if (frame.type !== 'rpc') return
+        this.next({ rpc: frame.data } satisfies RpcEvent)
     }
 
-    private on_response(_url: string, frame: ReceivedRelayRpcFrame) {
-        this.on_rpc(frame)
-    }
-
-    private on_cancel(_url: string, frame: ReceivedRelayRpcFrame) {
-        this.on_rpc(frame)
-    }
-
-    private on_rpc(frame: ReceivedRelayRpcFrame) {
-        const packet = this.#decodeRpcPacket(frame)
-        if (!packet) return
-
-        this.next({ rpc: packet } satisfies RpcEvent)
-    }
-
-    private on_hello(url: string, frame: Extract<ReceivedRelayFrame, { type: 'hello' }>) {
+    private on_hello(url: string, frame: Extract<RelayFrame, { type: 'hello' }>) {
         const node = frame.me
-        this.#nodes.set(node.node_id, {
-            node,
-            relayUrl: url,
-        })
+        if (node.node_id === this.#localNodeId) return
+
+        const existing = this.#nodes.get(node.node_id)
+        this.#nodes.set(node.node_id, { node, relayUrl: url })
+
+        if (existing && this.#hasSameServices(existing.node, node)) return
         this.next({ discovered: node })
     }
 
-    private on_offline(url: string, frame: Extract<ReceivedRelayFrame, { type: 'offline' }>) {
+    #hasSameServices(a: SpiderMeshNode, b: SpiderMeshNode): boolean {
+        const aKeys = Object.keys(a.services || {}).sort()
+        const bKeys = Object.keys(b.services || {}).sort()
+        if (aKeys.length !== bKeys.length) return false
+        return aKeys.every((k, i) => k === bKeys[i])
+    }
+
+    private on_offline(url: string, frame: Extract<RelayFrame, { type: 'offline' }>) {
         const current = this.#nodes.get(frame.node_id)
         if (current?.relayUrl === url) {
             this.#nodes.delete(frame.node_id)
@@ -276,7 +257,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         this.next({ offline: frame.node_id } satisfies RpcEvent)
     }
 
-    private on_publish(_url: string, frame: Extract<ReceivedRelayFrame, { type: 'publish' }>) {
+    private on_publish(_url: string, frame: Extract<RelayFrame, { type: 'publish' }>) {
         const topic = this.#topics.get(frame.topic)
         if (!topic) return
 
@@ -327,22 +308,6 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         })
     }
 
-    #encodeRpcPacket(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket) {
-        const { kind: _, ...payload } = packet
-        return encode(payload)
-    }
-
-    #decodeRpcPacket(frame: ReceivedRelayRpcFrame) {
-        try {
-            return {
-                kind: frame.type,
-                ...(decode(frame.payload) as Record<string, unknown>),
-            } as RpcRequestPacket | RpcCancelPacket | RpcResponsePacket
-        } catch {
-            return null
-        }
-    }
-
     async #sendFrame(socket: WebSocketLike | null | undefined, frame: RelayFrame) {
         if (!socket || socket.readyState !== WEBSOCKET_OPEN) {
             throw new Error('WebSocket is not connected')
@@ -364,7 +329,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
     }
 
     #parseFrame(raw: RelayRawData) {
-        return decodeRelayFrame(normalizeRelayRawData(raw)) as ReceivedRelayFrame | null
+        return decodeRelayFrame(normalizeRelayRawData(raw)) as RelayFrame | null
     }
 
     #getMessageData(event: SocketMessageEvent) {

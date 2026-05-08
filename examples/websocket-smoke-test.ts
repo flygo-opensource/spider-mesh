@@ -3,7 +3,7 @@ import WebSocket from 'ws'
 import { WebsocketRelayServer } from '../src/relay-server.js'
 import { WebsocketTransporter } from '../src/node.js'
 import { encodeRelayFrame } from '../src/websocketProtocol.js'
-import type { DiscoveryEvent, MdnsMessage, RpcCancelPacket, RpcRequestPacket, SpiderMeshNode } from '@spider-mesh/core'
+import type { DiscoveryEvent, MdnsMessage, RpcRequestPacket, SpiderMeshNode } from '@spider-mesh/core'
 
 const port = 8800 + Math.floor(Math.random() * 200)
 const baseWsUrl = `ws://127.0.0.1:${port}`
@@ -134,17 +134,27 @@ async function main() {
             throw new Error(`Unexpected RPC payload: ${JSON.stringify(rpcEvent.rpc)}`)
         }
 
-        await transporterA.send({
-            kind: 'cancel',
-            request_id: 'allowed-cancel',
-            destination_node_id: nodeB.node_id,
-        } satisfies RpcCancelPacket)
-
-        await firstValueFrom(transporterB.pipe(
-            filter(event => event?.rpc?.kind === 'cancel' && event.rpc.request_id === 'allowed-cancel'),
+        // Test cancel: send a request, then cancel it via the returned cancel()
+        const cancelMessage = firstValueFrom(transporterB.pipe(
+            filter(event => event?.rpc?.kind === 'cancel' && event.rpc.request_id === 'cancel-test'),
             timeout(5000),
         ))
 
+        const { cancel } = await transporterA.send({
+            kind: 'request',
+            request_id: 'cancel-test',
+            sender_node_id: nodeA.node_id,
+            destination_node_id: nodeB.node_id,
+            service: 'GreetingService',
+            method: 'hello',
+            args: [],
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        cancel()
+        await cancelMessage
+
+        // Non-server-connected nodes cannot send requests
         await transporterB.send({
             kind: 'request',
             request_id: 'blocked-request',
@@ -157,16 +167,6 @@ async function main() {
 
         await expectNoEvent(transporterA.pipe(
             filter(event => event?.rpc?.request_id === 'blocked-request'),
-        ))
-
-        await transporterB.send({
-            kind: 'cancel',
-            request_id: 'blocked-cancel',
-            destination_node_id: nodeA.node_id,
-        } satisfies RpcCancelPacket)
-
-        await expectNoEvent(transporterA.pipe(
-            filter(event => event?.rpc?.kind === 'cancel' && event.rpc.request_id === 'blocked-cancel'),
         ))
 
         const sharedStreamA = transporterA.listen<{ ok: boolean, via: string }>('updates')

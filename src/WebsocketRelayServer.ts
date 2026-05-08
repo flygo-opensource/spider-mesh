@@ -1,6 +1,6 @@
 import { WebSocket, WebSocketServer as WsServer } from 'ws'
 import { fromEvent, ignoreElements, merge, mergeMap, Subscription, take, tap } from 'rxjs'
-import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type ReceivedRelayFrame, type ReceivedRelayHelloFrame, type ReceivedRelayPublishFrame, type ReceivedRelaySubscribeFrame, type ReceivedRelayUnsubscribeFrame, type RelayHelloFrame } from './websocketProtocol.js'
+import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayHelloFrame, type RelayPublishFrame, type RelaySubscribeFrame, type RelayUnsubscribeFrame } from './websocketProtocol.js'
 
 type RelayServerConnectionRequest = {
     url?: string
@@ -11,7 +11,7 @@ const relaySocketState = Symbol('relaySocketState')
 type RelaySocket = WebSocket & {
     [relaySocketState]?: {
         isServerConnection: boolean
-        metadata?: ReceivedRelayHelloFrame['me']
+        metadata?: RelayHelloFrame['me']
     }
 }
 
@@ -27,12 +27,15 @@ export class WebsocketRelayServer {
     #subscription = Subscription.EMPTY
     #nodes = new Map<string, WebSocket>()
     #listeners = new Map<string, Set<string>>()
+    #services = new Map<string, Set<string>>()
+    #serviceRrIndex = new Map<string, number>()
+    #pendingRequests = new Map<string, WebSocket>()
 
     constructor(options: WebsocketRelayServerOptions = {}) {
         this.#server = new WsServer({
             host: options.host,
             path: options.path,
-            port: options.port || 8787,
+            port: options.port ?? 8787,
         })
 
         this.#subscription = fromEvent<[WebSocket, RelayServerConnectionRequest]>(this.#server, 'connection').pipe(
@@ -84,41 +87,73 @@ export class WebsocketRelayServer {
         if (!frame) return
 
         if (frame.type === 'hello') {
-            const normalized = this.#normalizeHelloFrame(socket, frame)
-            if (!normalized) return
+            const nodeId = frame.me?.node_id
+            if (!nodeId) return
 
-            const previous = this.#getSocketMetadata(this.#nodes.get(normalized.sender_id))
-            this.#registerNode(socket, normalized)
+            const previous = this.#getSocketMetadata(this.#nodes.get(nodeId))
+            this.#registerNode(socket, frame, nodeId)
 
-            if (this.#shouldSyncDiscovery(previous, normalized.me)) {
+            if (this.#shouldSyncDiscovery(previous, frame.me)) {
                 this.#syncServerConnections()
             }
             return
         }
 
-        const senderId = this.#resolveSenderId(socket)
-        if (!senderId) return
-        const normalized = { ...frame, sender_id: senderId } as ReceivedRelayFrame
+        if (frame.type === 'rpc') {
+            const packet = frame.data
 
-        if (this.#hasTargetId(normalized) && normalized.target_id) {
-            if (this.#requiresServerRole(normalized) && !isServerConnection) {
+            if (packet.kind === 'response') {
+                if (packet.destination_node_id) {
+                    const target = this.#nodes.get(packet.destination_node_id)
+                    if (target?.readyState === WebSocket.OPEN) {
+                        target.send(encodeRelayFrame(frame), { binary: true })
+                    }
+                }
+                if (packet.completed || packet.error) {
+                    this.#pendingRequests.delete(packet.request_id)
+                }
                 return
             }
 
-            const target = this.#nodes.get(normalized.target_id)
-            if (target?.readyState === WebSocket.OPEN) {
-                target.send(encodeRelayFrame(normalized), { binary: true })
+            if (!isServerConnection) return
+
+            if (packet.kind === 'request') {
+                const targetNodeId = packet.destination_node_id ?? this.#pickServiceNode(packet.service)
+                if (!targetNodeId) {
+                    this.#sendOfflineError(socket, packet.request_id, packet.service)
+                    return
+                }
+                const target = this.#nodes.get(targetNodeId)
+                if (target?.readyState === WebSocket.OPEN) {
+                    this.#pendingRequests.set(packet.request_id, target)
+                    target.send(encodeRelayFrame(frame), { binary: true })
+                }
+                return
             }
+
+            if (packet.kind === 'cancel') {
+                const providerSocket = this.#pendingRequests.get(packet.request_id)
+                if (!providerSocket) return
+                this.#pendingRequests.delete(packet.request_id)
+                if (providerSocket.readyState === WebSocket.OPEN) {
+                    providerSocket.send(encodeRelayFrame(frame), { binary: true })
+                }
+                return
+            }
+
             return
         }
 
-        const handler = this[`on_${normalized.type}` as keyof WebsocketRelayServer] as ((frame: ReceivedRelayFrame, sender: WebSocket) => void) | undefined
+        const senderId = this.#resolveSenderId(socket)
+        if (!senderId) return
+
+        const handler = this[`on_${frame.type}` as keyof WebsocketRelayServer] as ((frame: RelayFrame, sender: WebSocket) => void) | undefined
         if (!handler) {
-            this.on_broadcast(normalized, socket)
+            this.on_broadcast(frame, socket)
             return
         }
 
-        handler.call(this, normalized, socket)
+        handler.call(this, frame, socket)
     }
 
     private on_close(socket: WebSocket) {
@@ -127,36 +162,92 @@ export class WebsocketRelayServer {
 
         this.#nodes.delete(nodeId)
         this.#removeTopicListeners(nodeId)
+        this.#removeFromServiceIndex(nodeId)
+
+        for (const [requestId, providerSocket] of this.#pendingRequests) {
+            if (providerSocket === socket) {
+                this.#pendingRequests.delete(requestId)
+            }
+        }
+
         this.on_broadcast({
             type: 'offline',
-            sender_id: nodeId,
             node_id: nodeId,
         }, socket)
         this.#syncServerConnections()
     }
 
-    #registerNode(socket: WebSocket, discovery: ReceivedRelayHelloFrame) {
-        const nodeId = discovery.sender_id
+    #registerNode(socket: WebSocket, frame: RelayHelloFrame, nodeId: string) {
         const previousNodeId = this.#resolveSenderId(socket)
         if (previousNodeId && previousNodeId !== nodeId) {
             this.#nodes.delete(previousNodeId)
             this.#removeTopicListeners(previousNodeId)
+            this.#removeFromServiceIndex(previousNodeId)
             this.on_broadcast({
                 type: 'offline',
-                sender_id: previousNodeId,
                 node_id: previousNodeId,
             }, socket)
         }
 
         this.#nodes.set(nodeId, socket)
-        this.#setSocketMetadata(socket, discovery.me)
+        this.#setSocketMetadata(socket, frame.me)
+        this.#updateServiceIndex(nodeId, frame.me)
+    }
+
+    #updateServiceIndex(nodeId: string, metadata: RelayHelloFrame['me']) {
+        for (const nodes of this.#services.values()) {
+            nodes.delete(nodeId)
+        }
+
+        for (const service of Object.keys(metadata.services || {})) {
+            const nodes = this.#services.get(service) ?? new Set<string>()
+            nodes.add(nodeId)
+            this.#services.set(service, nodes)
+        }
+    }
+
+    #removeFromServiceIndex(nodeId: string) {
+        for (const [service, nodes] of this.#services) {
+            nodes.delete(nodeId)
+            if (nodes.size === 0) {
+                this.#services.delete(service)
+                this.#serviceRrIndex.delete(service)
+            }
+        }
+    }
+
+    #pickServiceNode(service: string): string | null {
+        const nodeIds = this.#services.get(service)
+        if (!nodeIds || nodeIds.size === 0) return null
+
+        const candidates = [...nodeIds].filter(id => this.#nodes.get(id)?.readyState === WebSocket.OPEN)
+        if (candidates.length === 0) return null
+
+        const current = this.#serviceRrIndex.get(service) ?? -1
+        const next = (current + 1) % candidates.length
+        this.#serviceRrIndex.set(service, next)
+        return candidates[next]
+    }
+
+    #sendOfflineError(socket: WebSocket, requestId: string, service: string) {
+        if (socket.readyState !== WebSocket.OPEN) return
+
+        socket.send(encodeRelayFrame({
+            type: 'rpc',
+            data: {
+                kind: 'response',
+                request_id: requestId,
+                error: { code: 'MICROSERVICE_OFFLINE', message: `No available node for service ${service}` },
+                completed: true,
+            },
+        } satisfies RelayFrame), { binary: true })
     }
 
     #isServerConnection(socket: WebSocket) {
         return (socket as RelaySocket)[relaySocketState]?.isServerConnection === true
     }
 
-    #setSocketMetadata(socket: WebSocket, metadata: ReceivedRelayHelloFrame['me']) {
+    #setSocketMetadata(socket: WebSocket, metadata: RelayHelloFrame['me']) {
         const relaySocket = socket as RelaySocket
         const current = relaySocket[relaySocketState]
         if (!current) return
@@ -171,28 +262,7 @@ export class WebsocketRelayServer {
         return socket ? (socket as RelaySocket)[relaySocketState]?.metadata : undefined
     }
 
-    #requiresServerRole(frame: RelayFrame | ReceivedRelayFrame) {
-        return frame.type === 'request' || frame.type === 'cancel'
-    }
-
-    #hasTargetId(frame: RelayFrame | ReceivedRelayFrame): frame is (RelayFrame | ReceivedRelayFrame) & { target_id?: string } {
-        return 'target_id' in frame
-    }
-
-    #normalizeHelloFrame(socket: WebSocket, frame: RelayHelloFrame) {
-        const senderId = frame.me?.node_id
-        if (!senderId) return null
-
-        return {
-            ...frame,
-            sender_id: senderId,
-            me: {
-                ...frame.me,
-            },
-        } satisfies ReceivedRelayHelloFrame
-    }
-
-    #shouldSyncDiscovery(previous: ReceivedRelayHelloFrame['me'] | undefined, next: ReceivedRelayHelloFrame['me']) {
+    #shouldSyncDiscovery(previous: RelayHelloFrame['me'] | undefined, next: RelayHelloFrame['me']) {
         if (!previous) return true
         return !this.#hasSameServiceList(previous.services || {}, next.services || {})
     }
@@ -227,13 +297,13 @@ export class WebsocketRelayServer {
     #syncClientState(socket: WebSocket) {
         if (!this.#isServerConnection(socket)) return
 
-        for (const [node_id, client] of this.#nodes) {
+        for (const [, client] of this.#nodes) {
             if (socket.readyState !== WebSocket.OPEN) return
+            if (client === socket) continue
             const metadata = this.#getSocketMetadata(client)
             if (!metadata) continue
             socket.send(encodeRelayFrame({
                 type: 'hello',
-                sender_id: node_id,
                 me: metadata,
             }), { binary: true })
         }
@@ -247,29 +317,35 @@ export class WebsocketRelayServer {
         }
     }
 
-    private on_subscribe(frame: ReceivedRelaySubscribeFrame) {
-        this.#removeTopicListeners(frame.sender_id)
+    private on_subscribe(frame: RelaySubscribeFrame, sender: WebSocket) {
+        const senderId = this.#resolveSenderId(sender)
+        if (!senderId) return
+
+        this.#removeTopicListeners(senderId)
 
         for (const topic of new Set(frame.topics.filter(Boolean))) {
             const listeners = this.#listeners.get(topic) || new Set<string>()
-            listeners.add(frame.sender_id)
+            listeners.add(senderId)
             this.#listeners.set(topic, listeners)
         }
     }
 
-    private on_unsubscribe(frame: ReceivedRelayUnsubscribeFrame) {
+    private on_unsubscribe(frame: RelayUnsubscribeFrame, sender: WebSocket) {
+        const senderId = this.#resolveSenderId(sender)
+        if (!senderId) return
+
         for (const topic of new Set(frame.topics.filter(Boolean))) {
             const listeners = this.#listeners.get(topic)
             if (!listeners) continue
 
-            listeners.delete(frame.sender_id)
+            listeners.delete(senderId)
             if (listeners.size === 0) {
                 this.#listeners.delete(topic)
             }
         }
     }
 
-    private on_publish(frame: ReceivedRelayPublishFrame) {
+    private on_publish(frame: RelayPublishFrame) {
         const listeners = this.#listeners.get(frame.topic)
         if (!listeners || listeners.size === 0) return
 
@@ -284,7 +360,7 @@ export class WebsocketRelayServer {
         }
     }
 
-    private on_broadcast(frame: ReceivedRelayFrame, sender: WebSocket) {
+    private on_broadcast(frame: RelayFrame, sender: WebSocket) {
         const message = encodeRelayFrame(frame)
         for (const client of this.#server.clients) {
             if (client === sender || client.readyState !== WebSocket.OPEN) continue
