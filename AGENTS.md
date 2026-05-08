@@ -248,16 +248,16 @@ The RPC transporter contract (source of truth: `src/types.ts`):
 ```ts
 type RpcTransporter = Observable<RpcEvent> & {
   linkRegistry?(registry: Registry): void
-  send(data: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
+  send(data: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
 }
 ```
 
 Key points for implementing a custom transporter:
 
 - `send()` must return `Promise<{ cancel: () => void }>`.
-- For `request` packets: `cancel()` should send a `RpcCancelPacket` to `destination_node_id`. The provider will unsubscribe from the running Observable when it receives the cancel.
-- For `response` and `cancel` packets: return `{ cancel: () => {} }` (no-op).
-- `destination_node_id` in the packet identifies the target node. Fall back to `registry.pickRpcNode(service)` when it is absent on `request` packets.
+- `RpcCancelPacket` is **not** passed to `send()` directly. For `request` packets the returned `cancel()` function is responsible for delivering the cancel signal through the underlying transport. The provider unsubscribes from its running Observable when it receives the cancel.
+- For `response` packets: return `{ cancel: () => {} }` (no-op).
+- `destination_node_id` in the packet identifies the target node. Fall back to service-based routing when it is absent on `request` packets.
 - Emit `{ offline: node_id }` into the Subject when a connection to a node closes unexpectedly. `SpiderMesh` calls `registry.removePeer(node_id)` in response.
 
 ## Known Architectural Constraint

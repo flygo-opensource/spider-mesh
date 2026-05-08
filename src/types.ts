@@ -116,7 +116,7 @@ export type RpcEvent = Partial<{
 }>;
 export type RpcTransporter = Observable<RpcEvent> & {
     linkRegistry?(registry: Registry): void;
-    send(data: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>;
+    send(data: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }>;
 };
 
 export type MeshTransporter = RpcTransporter | PubsubTransporter | DiscoveryTransporter;

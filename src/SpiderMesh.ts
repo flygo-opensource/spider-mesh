@@ -56,7 +56,7 @@ export class SpiderMesh {
         running: new Map<string, Subscription>()
     }
 
-    constructor(readonly registry?: Registry) {
+    constructor(private readonly registry?: Registry) {
         LOCAL_SERVICES$.pipe(
             mergeMap(async service => {
                 const list = listBeforeMicroserviceOnlineMethods(service.instance)

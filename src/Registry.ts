@@ -1,4 +1,4 @@
-import { BehaviorSubject, map } from 'rxjs'
+import { BehaviorSubject, distinctUntilChanged, map } from 'rxjs'
 import type { SpiderMeshNode } from './types.js'
 
 export type RegistryPickRpcTargetOptions = {
@@ -60,7 +60,12 @@ export class Registry {
 
     watch(service?: string) {
         return this.nodes$.pipe(
-            map(() => this.listPeers(service))
+            map(() => this.listPeers(service)),
+            distinctUntilChanged((prev, curr) => {
+                if (prev.length !== curr.length) return false
+                const prevIds = new Set(prev.map(n => n.node_id))
+                return curr.every(n => prevIds.has(n.node_id))
+            })
         )
     }
 
