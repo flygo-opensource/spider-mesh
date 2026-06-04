@@ -6,9 +6,9 @@ It provides:
 
 - local microservice registration with decorators
 - typed remote service linking through proxies
-- RPC, discovery, and pubsub transporter contracts
-- a `Registry` for remote peer state and RPC routing
-- a `SpiderMesh` runtime for local services, transporters, and node metadata
+- RPC, discovery, pubsub, and `ServiceDirectory` transporter contracts
+- a `SpiderMesh` runtime for local services, transporters, and node metadata (no registry required)
+- a `Registry` helper for transports that route client-side
 - NestJS helper adapters
 
 Concrete transport implementations live in companion packages such as `@spider-mesh/tcp` and `@spider-mesh/ws`, or in your own custom transporters.
@@ -23,23 +23,28 @@ For TypeScript projects using decorators, enable decorator metadata in your comp
 
 ## Runtime Setup
 
-Create a registry when you need remote peer discovery and RPC routing.
+`SpiderMesh` takes no constructor arguments — it does not own a registry. Availability
+(`wait()`/`watch()`/`nodes`) is sourced from each transporter's `ServiceDirectory`, and
+routing is owned by the transport.
 
 ```ts
-import { Registry, SpiderMesh } from '@spider-mesh/core'
+import { SpiderMesh } from '@spider-mesh/core'
 
-const registry = new Registry()
-const mesh = new SpiderMesh(registry)
+const mesh = new SpiderMesh()
 ```
 
-Register transporter instances on the runtime:
+Register transporter instances on the runtime. Transports that route client-side (like
+`@spider-mesh/tcp`) keep their own peer table — construct one `Registry` and inject it
+into them; relay-based transports (like `@spider-mesh/ws`) need nothing:
 
 ```ts
+import { Registry } from '@spider-mesh/core'
 import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '@spider-mesh/tcp'
 
-mesh.registerTransporter(new UdpDiscovery())
-mesh.registerTransporter(new Http2Rpc())
-mesh.registerTransporter(new Http2Pubsub())
+const registry = new Registry()
+mesh.registerTransporter(new UdpDiscovery(registry))
+mesh.registerTransporter(new Http2Rpc(registry))
+mesh.registerTransporter(new Http2Pubsub(registry))
 ```
 
 Transporter capability is inferred by instance shape:
@@ -47,6 +52,7 @@ Transporter capability is inferred by instance shape:
 - `send()` => RPC transporter
 - `publish()` => pubsub transporter
 - `broadcast()` => discovery transporter
+- `watchService()` + `listNodes()` => `ServiceDirectory` (availability source for `wait()`/`watch()`/`nodes`)
 
 ## Local Services
 
@@ -196,11 +202,15 @@ Current event behavior:
 - last unsubscribe removes the topic from local node metadata
 - discovery transporters rebroadcast node metadata after topic changes
 
-## Registry
+## Registry (transport helper)
 
-`Registry` stores remote peer and RPC routing state.
+`SpiderMesh` no longer owns or depends on a `Registry`. It is exported as an optional
+**helper for transports that route client-side**: such a transport constructs its own
+`Registry`, feeds it from its discovery stream, and exposes it to core as a
+`ServiceDirectory`. `@spider-mesh/tcp` does exactly this; relay transports
+(`@spider-mesh/ws`) need no registry at all.
 
-Current public methods:
+Public methods:
 
 - `getPeer(nodeId)`
 - `upsertPeer(node)`
@@ -211,6 +221,19 @@ Current public methods:
 - `getRpcTransporterName(service)`
 - `listTopicNodes(topic)`
 
+## ServiceDirectory
+
+A transporter MAY implement `ServiceDirectory` to tell core which nodes serve a service.
+Core merges this across all registered transporters to answer `wait()` / `watch()` / `nodes`,
+without owning any peer state itself.
+
+```ts
+type ServiceDirectory = {
+  watchService(service: string): Observable<NodeRef[]>  // emit current state promptly (BehaviorSubject semantics)
+  listNodes(service: string): NodeRef[]                  // sync snapshot; [] if the transport cannot enumerate
+}
+```
+
 ## Transporter Contracts
 
 The contract source of truth is `src/types.ts`.
@@ -219,10 +242,11 @@ The contract source of truth is `src/types.ts`.
 
 ```ts
 type RpcTransporter = Observable<RpcEvent> & {
-  linkRegistry?(registry: Registry): void
-  send(data: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
+  send(data: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
 }
 ```
+
+The core contract `send()` accepts only `request` and `response` packets. Cancellation is exposed through the `cancel()` function returned by `send()`, not by passing a `RpcCancelPacket` to `send()`. A concrete transporter may translate that `cancel()` into a `RpcCancelPacket` on the wire (for example `@spider-mesh/tcp`), but that is a transport-internal detail.
 
 `send()` returns a `cancel` function. For `request` packets, calling `cancel()` sends a `RpcCancelPacket` to the destination node, which causes the provider to stop any running stream. For `response` and `cancel` packets the returned `cancel` is a no-op.
 
@@ -263,7 +287,6 @@ type RpcCancelPacket = {
 type PubsubTransporter = Observable<PubsubEvent> & {
   publish<T>(topic: string, data: T): Promise<void>
   listen<T>(topic: string): Observable<T>
-  linkRegistry?(registry: Registry): void
 }
 ```
 
@@ -271,7 +294,6 @@ type PubsubTransporter = Observable<PubsubEvent> & {
 
 ```ts
 type DiscoveryTransporter = Observable<DiscoveryEvent> & {
-  linkRegistry?(registry: Registry): void
   broadcast(data: MdnsMessage<NodeMetadata>): Promise<void>
 }
 ```
@@ -330,12 +352,12 @@ import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '@spider-mesh/tcp'
     {
       provide: SpiderMesh,
       useFactory: () => {
+        const mesh = new SpiderMesh()
         const registry = new Registry()
-        const mesh = new SpiderMesh(registry)
 
-        mesh.registerTransporter(new UdpDiscovery())
-        mesh.registerTransporter(new Http2Rpc())
-        mesh.registerTransporter(new Http2Pubsub())
+        mesh.registerTransporter(new UdpDiscovery(registry))
+        mesh.registerTransporter(new Http2Rpc(registry))
+        mesh.registerTransporter(new Http2Pubsub(registry))
 
         return mesh
       },
@@ -454,14 +476,37 @@ The core defines these error codes for RPC flows:
 
 The package also exports:
 
-- `LimitConcurrency(limit)` and `LimitConcurrentRunning(limit)` for throttling async method execution
-- `MicroserviceError` for common RPC error codes
+- `LimitConcurrency(limit)` and `LimitConcurrentRunning(limit)` for throttling async method execution (`LimitConcurrentRunning` is an alias of `LimitConcurrency`)
+- `MicroserviceError` — a TypeScript **type only** describing the RPC error shape (`{ code: SpiderMeshErrorCode; message?: string }`). There is no runtime class or error-code constants object; the code strings live in the `SpiderMeshErrorCode` union (see [Error Model](#error-model)). Do not `import` it as a value.
+
+## Usage Guidance
+
+### Should
+
+- **Keep `@spider-mesh/core` runtime-agnostic.** Put RPC/business contracts and runtime wiring here; import a concrete transport (`@spider-mesh/tcp`, `@spider-mesh/ws`, or your own) only at the composition root where you build `SpiderMesh`.
+- **Construct local services to register them.** `@Microservice()` self-registers on construction — just call `new UserService()` (or let your DI container instantiate it). There is no separate `register()` call.
+- **`await linker.wait()` before the first remote call.** Linking is lazy; `wait()` resolves once at least one provider node is known (or your predicate passes). Calling a remote method before a provider exists relies on `timeout`/`fallback` instead.
+- **Define a typed contract for `RemoteServiceLinker.link<T>()`.** The proxy is only as safe as the `T` you give it; the runtime does not validate the remote signature.
+- **Tune reliability per call with `.set({ timeout, retry, fallback })`** rather than hard-coding values, and provide a `fallback` when a degraded result is acceptable — `callRemoteService` short-circuits to `of(fallback)` on *any* caught error when `fallback !== undefined`.
+- **Use `linkEvent(EventClass)` for pub/sub fan-out** and treat the event class name as the topic identity. Keep event classes stable across services.
+- **Unsubscribe from remote streams you no longer need.** `SpiderMesh` cancels the in-flight provider stream when the last subscriber unsubscribes — leaked subscriptions keep provider work alive.
+- **Force `node_id` only when you need sticky routing** (e.g. a stateful provider). Default routing is round-robin and that is what you want most of the time.
+
+### Should not
+
+- **Do not put socket/wire logic in core.** Transporters own byte transport, topic IO, and discovery broadcasts; core owns lifecycle, routing, timeout, retry, and cancel.
+- **Do not `import { LOCAL_SERVICES$ }` or `MicroserviceList` from the package root** — they are internal module exports, not part of the public API.
+- **Do not treat `MicroserviceError` as a runtime value.** It is a type alias; there is no class to `new` and no constants object to read codes from.
+- **Do not assume `@Microservice({ version })` (or any service metadata) affects routing.** Metadata is free-form and opaque to selection; routing keys on the class name only. The typed node-level `version` is an internal monotonic counter, unrelated to this field.
+- **Do not rely on multiple `SpiderMesh` instances in one process for isolation.** `LOCAL_SERVICES$` is process-global, so every mesh sees every local service. Use separate processes (and `SPIDERMESH_NAMESPACE`) to isolate.
+- **Do not rename a service class casually.** Service identity — and therefore every remote link and route — is the class name. Renaming is a breaking change across the mesh.
+- **Do not mutate `Registry` peer state directly** unless you are implementing a transporter; let discovery transporters populate it.
 
 ## Notes
 
 - This package is ESM-only.
 - Repository source uses emitted `.js` relative specifiers.
-- `LOCAL_SERVICES$` is process-global inside one process.
+- `LOCAL_SERVICES$` is process-global inside one process. It is an internal module stream, not re-exported from the package root — every `SpiderMesh` in the same process sees every `@Microservice()` instance constructed in that process.
 - Local services are registered when their class instances are constructed.
 - Service identity is based on the class name.
 - Event topic identity is based on the event class name.

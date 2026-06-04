@@ -1,6 +1,5 @@
 
 import { Observable } from "rxjs"
-import type { Registry } from './Registry.js'
 
 
 export type SpiderMeshErrorCode = ('MICROSERVICE_OFFLINE' | 'MICROSERVICE_NOT_FOUND' | 'MICROSERVICE_RPC_TIMEOUT');
@@ -34,6 +33,27 @@ export type NodesMap = {
     last_updated_node_id: string;
 };
 
+/**
+ * Minimal node identity used for availability/enumeration queries.
+ * `SpiderMeshNode` is structurally assignable to `NodeRef`, so any peer table
+ * (e.g. tcp's `Registry`) can satisfy a `ServiceDirectory` without conversion.
+ */
+export type NodeRef = Pick<SpiderMeshNode, 'node_id' | 'host' | 'services' | 'transporters'>;
+
+/**
+ * Availability/discovery surface a transporter MAY expose so core can answer
+ * `wait()` / `watch()` / `nodes` without owning a registry. A transporter that
+ * implements this declares itself the source of truth for "which nodes serve a
+ * service". Core detects it structurally (`typeof t.watchService === 'function'`)
+ * and merges across all transporters that provide it.
+ */
+export type ServiceDirectory = {
+    /** Stream the set of nodes serving `service`. Emit `[]` when none/unknown. */
+    watchService(service: string): Observable<NodeRef[]>;
+    /** Synchronous snapshot of nodes serving `service`. Return `[]` if the transport cannot enumerate. */
+    listNodes(service: string): NodeRef[];
+};
+
 
 export type NodeMetadata<T = {}> = T & {
     host: string;
@@ -53,7 +73,6 @@ export type DiscoveryEvent = {
 };
 
 export type DiscoveryTransporter = Observable<DiscoveryEvent> & {
-    linkRegistry?(registry: Registry): void;
     broadcast(data: MdnsMessage<NodeMetadata>): Promise<void>;
 };
 
@@ -65,7 +84,6 @@ export type PubsubEvent = {
 export type PubsubTransporter = Observable<PubsubEvent> & {
     publish<T>(topic: string, data: T): Promise<void>;
     listen<T>(topic: string): Observable<T>;
-    linkRegistry?(registry: Registry): void;
 };
 
 export type RpcRoutingOptions = {
@@ -115,7 +133,6 @@ export type RpcEvent = Partial<{
     endpoints: Record<string, string | boolean | number>;
 }>;
 export type RpcTransporter = Observable<RpcEvent> & {
-    linkRegistry?(registry: Registry): void;
     send(data: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }>;
 };
 

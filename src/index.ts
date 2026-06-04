@@ -28,4 +28,6 @@ export type {
 	SpiderMeshError,
 	SpiderMeshErrorCode,
 	SpiderMeshNode,
+	NodeRef,
+	ServiceDirectory,
 } from './types.js'

@@ -13,6 +13,7 @@ import type {
     RpcRequestPacket,
     RpcResponsePacket,
     RpcTransporter,
+    ServiceDirectory,
 } from '../../src/types.js'
 
 type RpcPacket = RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
@@ -53,7 +54,16 @@ class ProcessRpcTransporter extends Subject<RpcEvent> implements RpcTransporter 
     }
 }
 
-class ProcessDiscoveryTransporter extends Subject<DiscoveryEvent> implements DiscoveryTransporter {
+class ProcessDiscoveryTransporter extends Subject<DiscoveryEvent> implements DiscoveryTransporter, ServiceDirectory {
+    #registry = new Registry()
+
+    constructor() {
+        super()
+        this.subscribe(event => {
+            if (event.discovered) this.#registry.upsertPeer(event.discovered)
+        })
+    }
+
     async broadcast(data: MdnsMessage<NodeMetadata>) {
         sendHostMessage({
             kind: 'discovery-broadcast',
@@ -61,10 +71,17 @@ class ProcessDiscoveryTransporter extends Subject<DiscoveryEvent> implements Dis
             node: data.node,
         })
     }
+
+    watchService(service: string) {
+        return this.#registry.watch(service)
+    }
+
+    listNodes(service: string) {
+        return this.#registry.listPeers(service)
+    }
 }
 
-const registry = role === 'client' ? new Registry() : undefined
-const mesh = new SpiderMesh(registry)
+const mesh = new SpiderMesh()
 const rpcTransporter = new ProcessRpcTransporter()
 const discoveryTransporter = new ProcessDiscoveryTransporter()
 

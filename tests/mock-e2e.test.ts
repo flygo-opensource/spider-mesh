@@ -15,6 +15,7 @@ import type {
     RpcRequestPacket,
     RpcResponsePacket,
     RpcTransporter,
+    ServiceDirectory,
     SpiderMeshNode,
 } from '../src/types.js'
 
@@ -85,6 +86,27 @@ class MockDiscoveryTransporter extends Subject<DiscoveryEvent> implements Discov
     }
 }
 
+// Discovery transporter that owns its own peer table and exposes it as a
+// ServiceDirectory — mirrors how real transporters (tcp/ws) supply availability
+// to core now that core no longer holds a registry.
+class MockDirectoryTransporter extends Subject<DiscoveryEvent> implements DiscoveryTransporter, ServiceDirectory {
+    #registry = new Registry()
+
+    async broadcast(_data: MdnsMessage<any>) {}
+
+    watchService(service: string) {
+        return this.#registry.watch(service)
+    }
+
+    listNodes(service: string) {
+        return this.#registry.listPeers(service)
+    }
+
+    upsertPeer(node: SpiderMeshNode) {
+        return this.#registry.upsertPeer(node)
+    }
+}
+
 describe('mock e2e', () => {
     test('routes rpc through explicit transporter name and class', async () => {
         const mesh = new SpiderMesh()
@@ -135,8 +157,9 @@ describe('mock e2e', () => {
     })
 
     test('wait supports async checker functions', async () => {
-        const registry = new Registry()
-        const mesh = new SpiderMesh(registry)
+        const mesh = new SpiderMesh()
+        const directory = new MockDirectoryTransporter()
+        mesh.registerTransporter(directory, 'MockDirectoryTransporter')
         const serviceName = nextName('AsyncWaitService')
         const remote = RemoteServiceLinker.link<{ ping(): Promise<string> }>(mesh, { service: serviceName })
 
@@ -147,7 +170,7 @@ describe('mock e2e', () => {
 
         await Promise.resolve()
 
-        registry.upsertPeer({
+        directory.upsertPeer({
             host: '127.0.0.1',
             namespace: mesh.namespace,
             node_id: nextName('peer'),
@@ -220,5 +243,47 @@ describe('mock e2e', () => {
         expect(provider.provide).toBe(BillingService)
         expect(provider.inject).toEqual([SpiderMesh])
         expect(result).toEqual({ orderId: 'order-1' })
+    })
+
+    test('listRpcNodes and __batch__ are honestly empty without a ServiceDirectory', async () => {
+        const mesh = new SpiderMesh()
+        // An RPC transporter that is NOT a ServiceDirectory — core has no availability source.
+        const loopback = new NamedLoopbackRpcTransporter(mesh.node_id)
+        mesh.registerTransporter(loopback)
+
+        expect(mesh.listRpcNodes('AnyService')).toEqual([])
+
+        const remote = RemoteServiceLinker.link<{ ping(): Promise<string> }>(mesh, { service: 'AnyService' })
+        const batched = await firstValueFrom(
+            (remote as any).__batch__ping().pipe(toArray())
+        )
+        expect(batched).toEqual([])
+    })
+
+    test('pickRpcNode skips peers rejected by the filter (RPC-not-ready)', () => {
+        const registry = new Registry()
+        const service = nextName('FilterService')
+        const base = {
+            namespace: 'test',
+            host: '127.0.0.1',
+            topics: [] as string[],
+            nodes: {},
+            version: 1,
+            services: { [service]: {} },
+        }
+
+        // A ready provider (has an Http2Rpc endpoint port) and a half-formed one (no port yet).
+        registry.upsertPeer({ ...base, node_id: 'ready', transporters: { Http2Rpc: { port: 5000 } } })
+        registry.upsertPeer({ ...base, node_id: 'half', transporters: { Http2Rpc: true } })
+
+        const isReady = (node: SpiderMeshNode) => Number((node.transporters?.Http2Rpc as { port?: number } | undefined)?.port) > 0
+
+        const picks = new Set<string | null | undefined>()
+        for (let i = 0; i < 25; i++) {
+            picks.add(registry.pickRpcNode(service, { filter: isReady }))
+        }
+
+        // Round-robin must never land on the half-formed peer.
+        expect([...picks]).toEqual(['ready'])
     })
 })

@@ -3,8 +3,23 @@ import type { SpiderMeshNode } from './types.js'
 
 export type RegistryPickRpcTargetOptions = {
     node_id?: string
+    /**
+     * Optional routability predicate. When provided, round-robin selection only considers
+     * peers that pass it. A transport uses this to skip peers it cannot actually reach yet
+     * (e.g. a provider that has advertised its service but not yet its RPC endpoint port).
+     */
+    filter?: (node: SpiderMeshNode) => boolean
 }
 
+/**
+ * In-memory peer table with client-side RPC routing (round-robin) and topic lookup.
+ *
+ * NOTE: `SpiderMesh` no longer owns or depends on a `Registry`. Availability for
+ * `wait()`/`watch()`/`nodes` now comes from each transporter's `ServiceDirectory`.
+ * `Registry` remains exported as a **transport helper**: transports that route
+ * client-side (e.g. `@spider-mesh/tcp`) construct their own `Registry` internally,
+ * feed it from their discovery stream, and expose it as a `ServiceDirectory`.
+ */
 export class Registry {
 
     public readonly nodes$ = new BehaviorSubject<Map<string, SpiderMeshNode>>(new Map())
@@ -77,7 +92,9 @@ export class Registry {
             return node.node_id
         }
 
-        const targets = this.listPeers(service)
+        const targets = options.filter
+            ? this.listPeers(service).filter(options.filter)
+            : this.listPeers(service)
         if (targets.length === 0) return null
 
         const index = ((this.#rrIndexes.get(service) || 0) + 1) % targets.length

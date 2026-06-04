@@ -1,12 +1,11 @@
-import { BehaviorSubject, catchError, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, mergeMap, NEVER, Observable, of, retry, share, Subject, Subscription, switchMap, take, tap, throwError, timeout, timer } from "rxjs"
+import { BehaviorSubject, catchError, combineLatest, distinctUntilChanged, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, mergeMap, NEVER, Observable, of, retry, share, Subject, Subscription, switchMap, take, tap, throwError, timeout, timer } from "rxjs"
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { LOCAL_SERVICES$ } from "./decorators/Microservice.js";
 import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME } from "../const.js";
-import { SpiderMeshNode, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions, SpiderMeshError, RpcEvent, RpcResponsePacket, DiscoveryEvent, MeshTransporter, RpcCancelPacket } from './types.js'
-import { Registry } from './Registry.js'
+import { SpiderMeshNode, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions, SpiderMeshError, RpcEvent, RpcResponsePacket, MeshTransporter, RpcCancelPacket, NodeRef, ServiceDirectory } from './types.js'
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
-export type ServiceChecker = (nodes: SpiderMeshNode[]) => Promise<boolean> | boolean
+export type ServiceChecker = (nodes: NodeRef[]) => Promise<boolean> | boolean
 export type NodesMap = {
     nodes: Map<string, SpiderMeshNode>,
     last_updated_node_id: string
@@ -56,7 +55,7 @@ export class SpiderMesh {
         running: new Map<string, Subscription>()
     }
 
-    constructor(private readonly registry?: Registry) {
+    constructor() {
         LOCAL_SERVICES$.pipe(
             mergeMap(async service => {
                 const list = listBeforeMicroserviceOnlineMethods(service.instance)
@@ -82,10 +81,6 @@ export class SpiderMesh {
             || 'AnonymousTransporter'
         const subscription = new Subscription()
 
-        if (this.registry && typeof meshTransporter.linkRegistry === 'function') {
-            meshTransporter.linkRegistry(this.registry)
-        }
-
         if (this.#isRpcTransporter(meshTransporter)) {
             subscription.add(this.#linkRpcTransporter(resolvedName, meshTransporter).subscribe())
         }
@@ -99,16 +94,75 @@ export class SpiderMesh {
         return subscription
     }
 
-    listRpcNodes(service: string) {
-        if (!this.registry) return []
-        return this.registry.listPeers(service).filter(node => !!node.transporters.rpc)
+    /**
+     * Unique transporter instances that expose a `ServiceDirectory` (availability source).
+     * A single instance may appear in several capability maps (e.g. a WS transporter that
+     * serves rpc + pubsub + discovery), so we de-duplicate by instance identity.
+     */
+    #serviceDirectories(): ServiceDirectory[] {
+        const seen = new Set<unknown>()
+        const directories: ServiceDirectory[] = []
+        for (const map of [this.#transporters.discoveries, this.#transporters.rpcs, this.#transporters.pubsubs]) {
+            for (const transporter of map.values()) {
+                if (seen.has(transporter)) continue
+                seen.add(transporter)
+                const candidate = transporter as Partial<ServiceDirectory>
+                if (typeof candidate.watchService === 'function' && typeof candidate.listNodes === 'function') {
+                    directories.push(transporter as unknown as ServiceDirectory)
+                }
+            }
+        }
+        return directories
     }
 
-    watchService(service: string) {
-        if (!this.registry) return EMPTY
-        return this.registry.watch(service).pipe(
-            map(() => this.listRpcNodes(service))
+    listRpcNodes(service: string): NodeRef[] {
+        const seen = new Set<string>()
+        const nodes: NodeRef[] = []
+        for (const directory of this.#serviceDirectories()) {
+            for (const node of directory.listNodes(service)) {
+                if (seen.has(node.node_id)) continue
+                seen.add(node.node_id)
+                nodes.push(node)
+            }
+        }
+        return nodes
+    }
+
+    watchService(service: string): Observable<NodeRef[]> {
+        const directories = this.#serviceDirectories()
+        if (!directories.length) return EMPTY
+        // ServiceDirectory.watchService is expected to emit current state promptly
+        // (BehaviorSubject semantics), so combineLatest does not stall. We deliberately
+        // do NOT startWith([]) — a synthetic empty emission would masquerade as "no
+        // providers" and break offline/availability gating.
+        return combineLatest(
+            directories.map(directory => directory.watchService(service))
+        ).pipe(
+            map(lists => {
+                const seen = new Set<string>()
+                const merged: NodeRef[] = []
+                for (const node of lists.flat()) {
+                    if (seen.has(node.node_id)) continue
+                    seen.add(node.node_id)
+                    merged.push(node)
+                }
+                return merged
+            }),
+            distinctUntilChanged((prev, curr) => {
+                if (prev.length !== curr.length) return false
+                const prevIds = new Set(prev.map(n => n.node_id))
+                return curr.every(n => prevIds.has(n.node_id))
+            })
         )
+    }
+
+    /** Best-effort: which RPC transporter serves `service`, derived from advertised peer metadata. */
+    #rpcTransporterNameForService(service: string): string | undefined {
+        for (const node of this.listRpcNodes(service)) {
+            const name = node.transporters?.rpc
+            if (typeof name === 'string') return name
+        }
+        return undefined
     }
 
     #selectRpcTransport(filters: Partial<Pick<RpcOptions<any>, 'node_id' | 'service' | 'transporter'>> = {}): RpcTransporter | undefined {
@@ -118,13 +172,13 @@ export class SpiderMesh {
             if (!name) return
             return this.#transporters.rpcs.get(name)
         }
-        if (!this.registry) {
-            return this.#transporters.rpcs.values().next().value
+        const name = this.#rpcTransporterNameForService(filters.service)
+        if (name) {
+            const transporter = this.#transporters.rpcs.get(name)
+            if (transporter) return transporter
         }
-        const name = this.registry.getRpcTransporterName(filters.service)
-        if (!name) return
-        const transporter = this.#transporters.rpcs.get(name)
-        return transporter
+        // Fallback: the only/first RPC transporter (typical single-transport / relay setup).
+        return this.#transporters.rpcs.values().next().value
     }
 
     #normalizeRpcError(error: any): SpiderMeshError | { code?: string, message: string } {
@@ -149,7 +203,7 @@ export class SpiderMesh {
     #index = 1
     callRemoteService<R, T>(options: RpcOptions<T>) {
         return of(1).pipe(
-            switchMap(() => this.registry ? firstValueFrom(this.registry.watch(options.service)) : of(1)),
+            switchMap(() => firstValueFrom(this.watchService(options.service), { defaultValue: [] as NodeRef[] })),
             take(1),
             mergeMap(() => {
                 const transporter = this.#selectRpcTransport(options)
@@ -328,10 +382,6 @@ export class SpiderMesh {
                     }
                 }
 
-                if (offline) {
-                    this.registry?.removePeer(offline)
-                }
-
                 if (endpoints) {
                     this.#refresh({
                         transporters: {
@@ -372,22 +422,10 @@ export class SpiderMesh {
             }).catch(() => undefined)
         })
 
+        // Core no longer ingests discovered peers — each discovery-capable transporter
+        // owns its peer table and exposes it via ServiceDirectory. We only keep the
+        // outbound self-announce alive for the lifetime of this subscription.
         return transporter.pipe(
-            tap(({ discovered: node }: DiscoveryEvent) => {
-                if (!node || typeof node !== 'object' || !('node_id' in node) || !('services' in node)) return
-                const rpcTransporterName = this.#resolveDiscoveredRpcTransporterName(node)
-                const peer = this.registry?.upsertPeer(
-                    rpcTransporterName ? {
-                        ...node,
-                        transporters: {
-                            ...(node.transporters || {}),
-                            rpc: rpcTransporterName
-                        }
-                    } : node
-                )
-
-                if (!this.registry || !peer) return
-            }),
             finalize(() => {
                 announce.unsubscribe()
             })
@@ -436,13 +474,6 @@ export class SpiderMesh {
                 [name]: true
             }
         })
-    }
-
-    #resolveDiscoveredRpcTransporterName(node: SpiderMeshNode) {
-        for (const [name] of this.#transporters.rpcs.entries()) {
-            if (node.transporters && Object.hasOwn(node.transporters, name)) return name
-        }
-        return null
     }
 
     #registerTopic(topic: string) {
