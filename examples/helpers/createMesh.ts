@@ -1,4 +1,4 @@
-import { Registry, SpiderMesh } from '@spider-mesh/core'
+import { SpiderMesh } from '@spider-mesh/core'
 import { WebsocketTransporter } from '../../src/node.js'
 
 export type CreateMeshOptions = {
@@ -17,13 +17,11 @@ export function createMesh(options: CreateMeshOptions = {}) {
 
     transporter.connect(options.wsUrl || 'ws://127.0.0.1:8787')
 
-    const registry = new Registry()
-    const mesh = new SpiderMesh(registry)
+    const mesh = new SpiderMesh()
     mesh.registerTransporter(transporter)
 
     return {
         mesh,
-        registry,
         transporter,
     }
 }

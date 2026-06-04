@@ -9,6 +9,8 @@ It contains:
 
 The package is ESM-only.
 
+> **New here?** Start with the [Getting Started walkthrough](GETTING_STARTED.md) — a 3-terminal runnable example (relay + provider + client, no registry).
+
 ## Install
 
 ```bash
@@ -47,8 +49,11 @@ import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
 
 Create one `WebsocketTransporter`, connect it to the relay, then register that shared transporter directly on `SpiderMesh`.
 
+No registry is needed — the relay does the routing, and the transporter exposes relay
+discovery to core as a `ServiceDirectory`.
+
 ```ts
-import { Registry, SpiderMesh } from '@spider-mesh/core'
+import { SpiderMesh } from '@spider-mesh/core'
 import { WebsocketTransporter } from '@spider-mesh/ws/node'
 
 const transporter = new WebsocketTransporter({
@@ -58,13 +63,11 @@ const transporter = new WebsocketTransporter({
 
 transporter.connect('ws://127.0.0.1:8787')
 
-const registry = new Registry()
-const mesh = new SpiderMesh(registry)
-
+const mesh = new SpiderMesh()
 mesh.registerTransporter(transporter)
 ```
 
-`SpiderMesh.registerTransporter()` now links all supported capabilities on the same transporter instance, so one `WebsocketTransporter` can serve RPC, discovery, and pubsub together.
+`SpiderMesh.registerTransporter()` links all supported capabilities on the same transporter instance, so one `WebsocketTransporter` serves RPC, discovery, pubsub, and `ServiceDirectory` (availability) together — no `Registry` required.
 
 ## Relay Server
 
@@ -80,6 +83,17 @@ console.log(`WebSocket relay listening on ws://127.0.0.1:${server.port}`)
 ```
 
 The relay forwards discovery, RPC, and pubsub frames. It does not host application services.
+
+Options:
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `port` | `number` | `8787` | Port the relay listens on. `server.port` returns the bound port (`number \| null`). |
+| `host` | `string` | unset | Host/interface to bind. |
+| `path` | `string` | unset | HTTP path the underlying `ws` server accepts upgrades on. |
+| `isServerConnection` | `(socket, request) => boolean` | unset | Gate / classify each incoming connection. Return `true` for connections that participate in discovery and RPC routing (i.e. real mesh nodes), `false` for passive clients. This is the relay's access-control hook — there is no separate `auth` option. |
+
+Call `server.close()` to stop the relay.
 
 ## Provider Example
 
@@ -123,7 +137,7 @@ Current responsibilities:
 - maintain relay connections with automatic reconnect
 - expose `status$` for per-URL connection status
 - send and receive RPC frames; the relay routes by `destination_node_id` when present, otherwise selects a provider by service name with round-robin
-- propagate discovery `hello` and `offline` frames; suppresses duplicate `discovered` events for already-known nodes
+- propagate discovery `hello` and `offline` frames; re-emits a `discovered` event only when a known node's advertised service list actually changes (duplicate `hello`s with an unchanged service list are suppressed)
 - forward pubsub messages and subscription changes
 - integrate directly with `mesh.registerTransporter(transporter)`
 
@@ -135,13 +149,15 @@ send(packet: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void
 
 For `request` packets, the returned `cancel()` sends a cancel frame to the relay over the same socket. The relay routes it to the provider via an internal `request_id → socket` map. The provider stops the running Observable on receipt. `SpiderMesh` calls `cancel()` automatically when a subscriber unsubscribes before the stream completes.
 
-Throws `MICROSERVICE_OFFLINE` immediately when a registry is linked but no node is available for the requested service.
+`MICROSERVICE_OFFLINE` is produced by the **relay**, not the transporter: when the relay cannot route a `request` to any provider for the service, it returns a `MICROSERVICE_OFFLINE` RPC response. It therefore arrives **asynchronously as a response packet**. The transporter itself is not registry-aware and does not throw synchronously — it forwards every frame to the relay over an open socket.
 
-Supported options:
+Supported options (all optional, with defaults):
 
-- `heartbeatIntervalMs`
-- `reconnectIntervalMs`
-- `unsubscribeDelayMs`
+- `heartbeatIntervalMs` — default `30000`
+- `reconnectIntervalMs` — default `1000`
+- `unsubscribeDelayMs` — default `10000`
+
+`connect(url)` is idempotent per URL and may be called for **multiple relay URLs**; the transporter maintains one connection per URL and keys `status$` by URL. Call `close(url)` to drop a specific relay connection.
 
 `status$` is a `BehaviorSubject<Map<string, string>>` with values such as `connecting`, `connected`, `error`, and `not_connected`.
 
@@ -171,10 +187,10 @@ The package includes:
 - provider reconnect coverage
 - failover coverage (3 nodes → kill 1 → 2 nodes continue serving)
 
-Run the full suite with:
+Run the e2e suite with:
 
 ```bash
-bun test
+bun run test:e2e
 ```
 
 Build with:
@@ -182,6 +198,27 @@ Build with:
 ```bash
 bun run build
 ```
+
+> There is no bare `test` script. The canonical command is `bun run test:e2e`; individual scripts are available as `test:websocket`, `test:websocket:e2e`, `test:websocket:e2e:matrix`, and `test:websocket:e2e:reverse`.
+
+## Usage Guidance
+
+### Should
+
+- **Start the relay before any provider or client.** Nodes discover each other through the relay; with no relay up, `connect()` just retries on `reconnectIntervalMs`.
+- **Use WebSocket transport when nodes cannot share multicast** — across subnets, cloud VPCs, browsers, mobile apps, or the public internet. This is the right choice where `@spider-mesh/tcp` cannot reach.
+- **Import the entry point that matches the runtime:** `/node` for Node and Bun, `/browser` for web, `/react-native` for RN, `/relay-server` for the relay process (Node/Bun only). All three transporter entries export a class named `WebsocketTransporter`.
+- **Gate connections with `isServerConnection`** on any relay exposed beyond localhost. Treat it as the authentication/authorization hook — validate a token from the upgrade `request` and return `false` to reject or down-classify untrusted sockets.
+- **Reuse one `WebsocketTransporter` per node** for RPC, discovery, and pubsub; `registerTransporter()` links all three capabilities on the same instance. You may `connect()` it to several relays for redundancy.
+- **Call `transporter.close(url)` / `server.close()` on shutdown** to release sockets cleanly.
+
+### Should not
+
+- **Do not run the relay in the browser or React Native.** `/relay-server` needs a server runtime (Node/Bun); only the transporter runs in those environments.
+- **Do not expect `send()` to throw `MICROSERVICE_OFFLINE` synchronously.** Offline is reported by the relay as an asynchronous RPC response — handle it via the RPC result/timeout path, not a `try/catch` around the call site.
+- **Do not expose a relay without `isServerConnection` on an untrusted network.** Without it, any client that can reach the port joins routing.
+- **Do not assume a single relay.** The transporter supports multiple relay URLs and per-URL `status$`; design reconnection/monitoring around the per-URL map, not one global flag.
+- **Do not import from the package root.** There is no `.` export — always use a runtime-specific subpath.
 
 ## Notes
 

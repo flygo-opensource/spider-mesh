@@ -1,143 +1,68 @@
-# Spider Mesh WS Agent Guide
+# @spider-mesh/ws — Agent / Contributor Guide
 
-Use this file as the canonical implementation guide for `@spider-mesh/ws`.
+How to build, test, and work inside this package. This file is the operating
+guide for anyone (human or agent) **editing** `@spider-mesh/ws`.
 
-## Package Purpose
+- **Using the package?** → [README.md](README.md)
+- **Understanding the internals?** → [ARCHITECTURE.md](ARCHITECTURE.md)
 
-`@spider-mesh/ws` provides:
+## Build & Test
 
-- `WebsocketTransporter` for application nodes
-- `WebsocketRelayServer` for relay processes
-
-Use `@spider-mesh/core` for runtime creation, decorators, and remote linking.
-
-## Canonical Imports
-
-```ts
-import { Registry, SpiderMesh, RemoteServiceLinker, Microservice } from '@spider-mesh/core'
-import { WebsocketTransporter } from '@spider-mesh/ws/node'
-import { WebsocketRelayServer } from '@spider-mesh/ws/relay-server'
+```bash
+bun run build        # tsc -b
+bun run test:e2e     # runs the tests/*.e2e suites in sequence
 ```
 
-Browser and React Native use their runtime-specific transporter subpaths.
+There is **no bare `test` script**. Narrower commands:
 
-## Canonical Runtime Setup
+```bash
+bun run test:websocket             # smoke runner (examples/)
+bun run test:websocket:e2e         # full e2e runner (examples/)
+bun run test:websocket:e2e:matrix  # sync/async/observable/error return paths
+bun run test:websocket:e2e:reverse # reverse RPC
 
-```ts
-const transporter = new WebsocketTransporter({
-  heartbeatIntervalMs: 5000,
-  reconnectIntervalMs: 1000,
-})
-
-transporter.connect('ws://127.0.0.1:8787')
-
-const registry = new Registry()
-const mesh = new SpiderMesh(registry)
-
-mesh.registerTransporter(transporter)
+# manual three-process run:
+bun run example:websocket:server
+bun run example:websocket:provider
+bun run example:websocket:client
 ```
 
-`SpiderMesh.registerTransporter()` links all supported capabilities on the shared WebSocket transporter instance.
+Individual e2e files (use the narrowest that matches your change):
 
-## Runtime Responsibilities
-
-### `WebsocketTransporter`
-
-- maintains relay connections
-- exposes `status$`
-- sends and receives binary MsgPack frames
-- serves RPC, discovery, and pubsub through one shared transporter instance
-
-### `WebsocketRelayServer`
-
-- tracks connected nodes from `hello` frames
-- routes targeted RPC and cancel frames
-- synchronizes discovery state
-- tracks topic listeners and forwards pubsub payloads
-- emits offline events on disconnect
-
-## Runtime Support
-
-- Node.js: `@spider-mesh/ws/node` and `@spider-mesh/ws/relay-server`
-- Bun: `@spider-mesh/ws/node` and `@spider-mesh/ws/relay-server`
-- Browser: `@spider-mesh/ws/browser`
-- React Native: `@spider-mesh/ws/react-native`
-
-The package root is not exported. Use subpath imports.
-
-## Source Of Truth
-
-Prefer these files:
-
-- `src/BaseWebsocketTransporter.ts`
-- `src/WebsocketTransporter.ts`
-- `src/GlobalWebsocketTransporter.ts`
-- `src/WebsocketRelayServer.ts`
-- `src/websocketProtocol.ts`
-
-For behavior references, prefer:
-
-- `examples/websocket-smoke-test.ts`
-- `examples/websocket-e2e-test.ts`
-- `examples/websocket-e2e-reverse-test.ts`
-- `examples/websocket-e2e-matrix-test.ts`
-- `examples/websocket-e2e-round-robin-test.ts`
-
-## Wire Protocol
-
-All frames are MsgPack-encoded `RelayFrame` objects (source of truth: `src/websocketProtocol.ts`).
-
-Frame types:
-
-| `type`        | Direction            | Purpose |
-|---------------|----------------------|---------|
-| `hello`       | node → relay → nodes | node discovery |
-| `offline`     | relay → nodes        | node disconnect |
-| `rpc`         | node ↔ relay ↔ node  | request / response / cancel |
-| `publish`     | node → relay → nodes | pubsub payload |
-| `subscribe`   | node → relay         | topic subscription |
-| `unsubscribe` | node → relay         | topic unsubscription |
-
-`sender_id` is **not** included in any wire frame. The relay resolves the sender from the socket state.
-
-### RPC frame shape
-
-```ts
-type RelayRpcFrame = {
-  type: 'rpc'
-  data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
-}
+```bash
+bun test tests/websocket-transporter.e2e.test.ts
+bun test tests/websocket-spidermesh.e2e.test.ts
+bun test tests/websocket-spidermesh-reverse.e2e.test.ts
+bun test tests/websocket-spidermesh-matrix.e2e.test.ts
+bun test tests/websocket-spidermesh-round-robin.e2e.test.ts
 ```
 
-The full packet (including `kind`, `request_id`, `service`, `destination_node_id`) lives inside `data`. No top-level routing fields are duplicated.
+## Conventions
 
-### Cancel routing
+- **ESM-only**, `.js` relative specifiers in TypeScript source.
+- **No root export** — four subpaths only: `./node`, `./browser`, `./react-native`, `./relay-server`. Always edit/import via a subpath.
+- **`src/types`/contracts come from `@spider-mesh/core`** — keep both packages on matching versions.
+- **Keep binary frames on `@msgpack/msgpack`.** Don't switch encoders without updating both transporter and relay.
+- **Preserve `status$` semantics** (per-URL connection state) and the **delayed-unsubscribe** behavior for pubsub listeners.
+- **The relay runs on a server runtime only** (`ws` library). Browser/RN code paths live in `GlobalWebsocketTransporter`; keep `browser.ts` and `react-native.ts` in sync (currently identical).
+- **Tests bind `port: 0`** so the OS assigns a free port (relay uses `options.port ?? 8787`).
+- The relay **rejects RPC/cancel frames from non-server connections** (`isServerConnection === false`); preserve that gate.
 
-The relay maintains `#pendingRequests: Map<string, WebSocket>` — a map from `request_id` to the provider socket currently handling that request. When a cancel frame arrives the relay looks up the provider socket and forwards the cancel directly. When the provider responds with `completed: true` or `error` the entry is removed.
+## Where things live
 
-The `cancel()` function returned by `send()` reuses the same relay socket that sent the original request; no `destination_node_id` is needed.
+| Concern | File |
+| --- | --- |
+| Shared transporter (all 3 contracts, connection mgmt) | `src/BaseWebsocketTransporter.ts` |
+| Node/Bun socket backend (`ws`) | `src/WebsocketTransporter.ts` |
+| Browser/RN socket backend (`globalThis.WebSocket`) | `src/GlobalWebsocketTransporter.ts` |
+| Relay routing + discovery | `src/WebsocketRelayServer.ts` |
+| Frame definitions + msgpack | `src/websocketProtocol.ts` |
+| Entry points | `src/{node,browser,react-native,relay-server}.ts` |
 
-### Discovery deduplication
+## Known issues to keep in mind
 
-`BaseWebsocketTransporter.on_hello` only emits a `discovered` event when the node is genuinely new or its service list has changed. Re-sends caused by relay sync (`#syncServerConnections`) are silently absorbed. A node never emits a `discovered` event for itself.
+- `browser.ts` and `react-native.ts` are byte-identical — if they diverge, split `GlobalWebsocketTransporter`.
+- `MICROSERVICE_OFFLINE` is produced by the **relay** as an async RPC response, not thrown by the transporter — don't relocate it without checking call sites.
+- `RelayHelloFrame.target_id` is currently an unused field.
 
-## Important Notes
-
-- Keep binary frame encoding with `@msgpack/msgpack`.
-- Preserve `status$` behavior for connection states.
-- Preserve delayed unsubscribe behavior for pubsub listeners.
-- Relay logic rejects request and cancel frames from non-server connections (`isServerConnection === false`).
-- Use `port: 0` in tests so the OS assigns a free port; the relay constructor uses `options.port ?? 8787`.
-
-## Validation
-
-Use the narrowest check that matches the change:
-
-- `bun run build`
-- `bun test tests/websocket-transporter.e2e.test.ts`
-- `bun test tests/websocket-spidermesh.e2e.test.ts`
-- `bun test tests/websocket-spidermesh-reverse.e2e.test.ts`
-- `bun test tests/websocket-spidermesh-matrix.e2e.test.ts`
-- `bun test tests/websocket-spidermesh-round-robin.e2e.test.ts`
-- `bun test tests/node-online-spam.e2e.test.ts`
-- `bun run test:e2e`
+For the full module map, topology, and protocol detail, see [ARCHITECTURE.md](ARCHITECTURE.md).

@@ -1,6 +1,6 @@
 import { decode, encode } from '@msgpack/msgpack'
-import { BehaviorSubject, defer, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
-import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, PubsubTransporter, RpcEvent, RpcRequestPacket, RpcResponsePacket, RpcTransporter, SpiderMeshNode } from '@spider-mesh/core'
+import { BehaviorSubject, defer, distinctUntilChanged, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
+import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, NodeRef, PubsubTransporter, RpcEvent, RpcRequestPacket, RpcResponsePacket, RpcTransporter, ServiceDirectory, SpiderMeshNode } from '@spider-mesh/core'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayRawData } from './websocketProtocol.js'
 
 export type WebsocketTransporterOptions = {
@@ -40,10 +40,11 @@ export type WebsocketConnectionStatus = 'connecting' | 'connected' | 'error' | '
 const WEBSOCKET_CONNECTING = 0
 const WEBSOCKET_OPEN = 1
 
-export abstract class BaseWebsocketTransporter extends Subject<any> implements RpcTransporter, DiscoveryTransporter, PubsubTransporter {
+export abstract class BaseWebsocketTransporter extends Subject<any> implements RpcTransporter, DiscoveryTransporter, PubsubTransporter, ServiceDirectory {
     #connections = new Map<string, RelayConnection>()
     #topics = new Map<string, TopicStream>()
     #nodes = new Map<string, KnownNode>()
+    #nodes$ = new BehaviorSubject<KnownNode[]>([])
     #me$ = new ReplaySubject<SpiderMeshNode>(1)
     #localNodeId?: string
     public readonly status$ = new BehaviorSubject<Map<string, string>>(new Map())
@@ -236,6 +237,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
 
         const existing = this.#nodes.get(node.node_id)
         this.#nodes.set(node.node_id, { node, relayUrl: url })
+        this.#publishNodes()
 
         if (existing && this.#hasSameServices(existing.node, node)) return
         this.next({ discovered: node })
@@ -252,9 +254,37 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         const current = this.#nodes.get(frame.node_id)
         if (current?.relayUrl === url) {
             this.#nodes.delete(frame.node_id)
+            this.#publishNodes()
         }
 
         this.next({ offline: frame.node_id } satisfies RpcEvent)
+    }
+
+    // --- ServiceDirectory: relay-backed availability for core's wait()/watch()/nodes ---
+
+    #publishNodes() {
+        this.#nodes$.next([...this.#nodes.values()])
+    }
+
+    #nodesForService(nodes: KnownNode[], service: string): NodeRef[] {
+        return nodes
+            .filter(known => !!known.node.services && service in known.node.services)
+            .map(known => known.node)
+    }
+
+    watchService(service: string): Observable<NodeRef[]> {
+        return this.#nodes$.pipe(
+            map(nodes => this.#nodesForService(nodes, service)),
+            distinctUntilChanged((prev, curr) => {
+                if (prev.length !== curr.length) return false
+                const prevIds = new Set(prev.map(n => n.node_id))
+                return curr.every(n => prevIds.has(n.node_id))
+            })
+        )
+    }
+
+    listNodes(service: string): NodeRef[] {
+        return this.#nodesForService([...this.#nodes.values()], service)
     }
 
     private on_publish(_url: string, frame: Extract<RelayFrame, { type: 'publish' }>) {
