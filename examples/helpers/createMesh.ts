@@ -3,9 +3,9 @@ import { createTransporters } from './createTransporters.js'
 
 export function createMesh() {
     const registry = new Registry()
-    const mesh = new SpiderMesh(registry)
+    const mesh = new SpiderMesh()
 
-    for (const transporter of createTransporters()) {
+    for (const transporter of createTransporters(registry)) {
         mesh.registerTransporter(transporter)
     }
 

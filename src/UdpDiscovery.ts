@@ -1,11 +1,11 @@
 import { createSocket } from "node:dgram"
 import { networkInterfaces } from "node:os"
-import { finalize, firstValueFrom, fromEvent, map, merge, ReplaySubject, Subject, takeUntil, tap } from "rxjs"
+import { distinctUntilChanged, EMPTY, finalize, firstValueFrom, fromEvent, map, merge, Observable, ReplaySubject, Subject, takeUntil, tap } from "rxjs"
 import { unpack, pack } from 'msgpackr'
-import type { DiscoveryEvent, DiscoveryTransporter, MdnsMessage, NodeMetadata, SpiderMeshNode } from '@spider-mesh/core'
+import type { DiscoveryEvent, DiscoveryTransporter, MdnsMessage, NodeMetadata, NodeRef, Registry, ServiceDirectory, SpiderMeshNode } from '@spider-mesh/core'
 import { SPIDERMESH_WHITELIST_ADDRESS, SPIDERMESH_MULTICAST_PORT, SPIDERMESH_MULTICAST_ADDRESS } from "./const.js"
 
-export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTransporter {
+export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTransporter, ServiceDirectory {
 
     #udp4 = createSocket({
         type: 'udp4',
@@ -14,6 +14,7 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
     #ready = new ReplaySubject<void>(1)
     #stop$ = new Subject<void>()
     #localNode: SpiderMeshNode | null = null
+    #registry?: Registry
 
     #localAddress = new Set(
         Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
@@ -30,8 +31,9 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
         }).flat(2)
     ])
 
-    constructor() {
+    constructor(registry?: Registry) {
         super()
+        this.#registry = registry
         merge(
             fromEvent(this.#udp4, 'listening').pipe(
                 tap(() => {
@@ -139,9 +141,52 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
                 this.#send(reply, [isRemote ? address : SPIDERMESH_MULTICAST_ADDRESS])
             }
 
+            // tcp owns its peer table: ingest into the shared registry so Http2Rpc /
+            // Http2Pubsub can route, and so core can read availability via ServiceDirectory.
+            this.#registry?.upsertPeer(node)
             this.next({ discovered: node })
         } catch {
             return
         }
+    }
+
+    // --- ServiceDirectory: expose the registry-backed peer table to core ---
+    //
+    // Only nodes that are actually RPC-routable are reported, i.e. those whose Http2Rpc
+    // endpoint port has been announced. A provider broadcasts its service before its HTTP/2
+    // port finishes binding, so a half-formed peer (service known, no port yet) must NOT be
+    // counted — otherwise `wait()` resolves early and the first call hits "metadata missing".
+    //
+    // We subscribe to `nodes$` directly (not `registry.watch`, which de-dupes by node_id and
+    // would swallow the half-formed → ready transition of the same node).
+
+    // NOTE (known coupling): this keys on the 'Http2Rpc' transporter name. It matches both
+    // Http2Rpc#getTransporterMetadata and the default registered name (the class name), so a
+    // standard setup is consistent. Registering Http2Rpc under a CUSTOM name would defeat this
+    // readiness check (the metadata would live under that custom key) — keep the three in sync.
+    #isRpcReady(node: SpiderMeshNode): boolean {
+        const meta = node.transporters?.Http2Rpc ?? node.transporters?.http2rpc
+        return Number((meta as { port?: number } | undefined)?.port) > 0
+    }
+
+    #readyNodes(service: string): NodeRef[] {
+        return (this.#registry?.listPeers(service) ?? []).filter(node => this.#isRpcReady(node))
+    }
+
+    watchService(service: string): Observable<NodeRef[]> {
+        const registry = this.#registry
+        if (!registry) return EMPTY
+        return registry.nodes$.pipe(
+            map(() => this.#readyNodes(service)),
+            distinctUntilChanged((prev, curr) => {
+                if (prev.length !== curr.length) return false
+                const prevIds = new Set(prev.map(n => n.node_id))
+                return curr.every(n => prevIds.has(n.node_id))
+            })
+        )
+    }
+
+    listNodes(service: string): NodeRef[] {
+        return this.#readyNodes(service)
     }
 }

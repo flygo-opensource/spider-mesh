@@ -15,8 +15,9 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
     #isDisposing = false
     #registry?: Registry
 
-    constructor() {
+    constructor(registry?: Registry) {
         super()
+        this.#registry = registry
 
         fromEvent(this.#server, 'stream').subscribe(args => {
             const [stream] = args as [ServerHttp2Stream]
@@ -36,10 +37,6 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
 
     get metadata() {
         return this.#metadata
-    }
-
-    linkRegistry(registry: Registry) {
-        this.#registry = registry
     }
 
     override unsubscribe() {
@@ -76,9 +73,13 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             } satisfies SpiderMeshError
         }
 
-        // destination_node_id is embedded in the packet; fall back to registry round-robin for requests.
+        // destination_node_id is embedded in the packet; fall back to registry round-robin for
+        // requests. Skip peers that have advertised the service but not yet their Http2Rpc port,
+        // so a half-formed provider mid-startup is never picked (it would throw "metadata missing").
         const resolvedNodeId = packet.destination_node_id
-            ?? (packet.kind === 'request' ? (this.#registry?.pickRpcNode(packet.service) ?? undefined) : undefined)
+            ?? (packet.kind === 'request'
+                ? (this.#registry?.pickRpcNode(packet.service, { filter: node => this.#hasRpcEndpoint(node) }) ?? undefined)
+                : undefined)
 
         const node = this.#resolveNode(resolvedNodeId)
 
@@ -174,6 +175,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             if (connected) {
                 connection.once('close', () => {
                     this.#connections.delete(node.node_id)
+                    this.#registry?.removePeer(node.node_id)
                     if (!this.#isDisposing && !this.closed) {
                         this.next({ offline: node.node_id })
                     }
@@ -339,6 +341,13 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         return node.transporters?.[this.constructor.name]
             || node.transporters?.Http2Rpc
             || node.transporters?.http2rpc
+    }
+
+    // A peer is RPC-routable only once it has advertised an Http2Rpc endpoint port.
+    // NOTE: this keys on the 'Http2Rpc' transporter name (matching `#getTransporterMetadata`);
+    // registering Http2Rpc under a custom name would defeat this lookup — see UdpDiscovery#isRpcReady.
+    #hasRpcEndpoint(node: SpiderMeshNode): boolean {
+        return Number((this.#getTransporterMetadata(node) as { port?: number } | undefined)?.port) > 0
     }
 
     #resolveNode(node_id?: string) {

@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/tcp",
   "type": "module",
-  "version": "2.0.45",
+  "version": "2.0.145",
   "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
@@ -16,10 +16,10 @@
     "yarn.lock"
   ],
   "peerDependencies": {
-    "@spider-mesh/core": "^2.0.45"
+    "@spider-mesh/core": "^2.0.145"
   },
   "devDependencies": {
-    "@spider-mesh/core": "^2.0.45",
+    "@spider-mesh/core": "^2.0.145",
     "@types/bun": "^1.2.23",
     "@types/msgpack": "^0.0.34",
     "@types/node": "^25.6.0",
@@ -40,7 +40,7 @@
     "test:tcp:e2e": "bun run examples/tcp-e2e-test.ts",
     "test:tcp:e2e:matrix": "bun run examples/tcp-e2e-matrix-test.ts",
     "test:tcp:e2e:reverse": "bun run examples/tcp-e2e-reverse-test.ts",
-    "test:e2e": "bun test tests/tcp-transporters.e2e.test.ts && bun test tests/tcp-contracts.e2e.test.ts && bun test tests/tcp-spidermesh.e2e.test.ts && bun test tests/tcp-spidermesh-reverse.e2e.test.ts && bun test tests/tcp-spidermesh-matrix.e2e.test.ts && bun test tests/tcp-spidermesh-round-robin.e2e.test.ts"
+    "test:e2e": "bun test tests/tcp-transporters.e2e.test.ts && bun test tests/tcp-contracts.e2e.test.ts && bun test tests/tcp-spidermesh.e2e.test.ts && bun test tests/tcp-spidermesh-reverse.e2e.test.ts && bun test tests/tcp-spidermesh-matrix.e2e.test.ts && bun test tests/tcp-spidermesh-round-robin.e2e.test.ts && bun test tests/tcp-getting-started.e2e.test.ts && bun test tests/tcp-registry-free-wait.e2e.test.ts && bun test tests/tcp-missing.e2e.test.ts && bun test tests/tcp-multi-provider-noretry.e2e.test.ts"
   },
   "author": "Duong Van Ba",
   "license": "ISC",

@@ -10,9 +10,8 @@ if (!targetPort) {
     throw new Error('Missing RPC_TARGET_PORT')
 }
 
-const rpc = new Http2Rpc()
 const registry = new Registry()
-rpc.linkRegistry(registry)
+const rpc = new Http2Rpc(registry)
 
 await firstValueFrom(
     rpc.pipe(

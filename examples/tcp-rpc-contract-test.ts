@@ -5,9 +5,8 @@ import type { RpcEvent, SpiderMeshNode } from '../src/types.js'
 
 async function main() {
     const server = new Http2Rpc()
-    const client = new Http2Rpc()
     const registry = new Registry()
-    client.linkRegistry(registry)
+    const client = new Http2Rpc(registry)
 
     const serverEndpoints = await firstValueFrom(
         server.pipe(

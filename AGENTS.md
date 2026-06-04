@@ -1,89 +1,60 @@
-# Spider Mesh TCP Agent Guide
+# @spider-mesh/tcp — Agent / Contributor Guide
 
-Use this file as the canonical implementation guide for `@spider-mesh/tcp`.
+How to build, test, and work inside this package. This file is the operating
+guide for anyone (human or agent) **editing** `@spider-mesh/tcp`.
 
-## Package Purpose
+- **Using the package?** → [README.md](README.md)
+- **Understanding the internals?** → [ARCHITECTURE.md](ARCHITECTURE.md)
 
-`@spider-mesh/tcp` provides three separate transporters for `@spider-mesh/core`:
+## Build & Test
 
-- `UdpDiscovery`
-- `Http2Rpc`
-- `Http2Pubsub`
-
-These transporters are registered individually on `SpiderMesh`.
-
-## Canonical Runtime Setup
-
-```ts
-import { Registry, SpiderMesh } from '@spider-mesh/core'
-import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '@spider-mesh/tcp'
-
-const registry = new Registry()
-const mesh = new SpiderMesh(registry)
-
-mesh.registerTransporter(new UdpDiscovery())
-mesh.registerTransporter(new Http2Rpc())
-mesh.registerTransporter(new Http2Pubsub())
+```bash
+bun run build        # tsc -b
+bun run test:e2e     # runs the tests/*.e2e suites in sequence
 ```
 
-`Registry` is part of the expected TCP runtime because RPC and pubsub routing use peer and topic lookups.
+There is **no bare `test` script**. Narrower commands:
 
-## Transporter Contracts
+```bash
+bun run test:tcp                 # smoke runner (examples/)
+bun run test:tcp:e2e             # full e2e runner (examples/)
+bun run test:tcp:e2e:matrix      # sync/async/observable/error return paths
+bun run test:tcp:e2e:reverse     # reverse RPC
+```
 
-### `UdpDiscovery`
+Individual e2e files (use the narrowest that matches your change):
 
-- observable discovery transporter
-- broadcasts full node metadata
-- preserves multicast fan-out
-- normalizes remote `host` from packet source address
+```bash
+bun test tests/tcp-transporters.e2e.test.ts
+bun test tests/tcp-contracts.e2e.test.ts
+bun test tests/tcp-spidermesh.e2e.test.ts
+bun test tests/tcp-spidermesh-reverse.e2e.test.ts
+bun test tests/tcp-spidermesh-matrix.e2e.test.ts
+bun test tests/tcp-spidermesh-round-robin.e2e.test.ts
+```
 
-### `Http2Rpc`
+## Conventions
 
-- observable RPC transporter
-- exposes endpoint metadata for local HTTP/2 port
-- resolves remote targets from `Registry.getPeer(node_id)`
-- current send signature is `send(packet, node_id?)`
+- **ESM-only**, `.js` relative specifiers in TypeScript source.
+- **Node/Bun only** — this package uses raw UDP and HTTP/2; never add browser/RN code here (that is `@spider-mesh/ws`).
+- **`src/types.ts` re-exports core contracts** — `@spider-mesh/core` is the source of truth. Keep both packages on matching versions.
+- **All network config is env-backed constants in `src/const.ts`** (ports/multicast). The only constructor argument is the shared `Registry` (`new UdpDiscovery(registry)` etc.) — construct one and inject it into all three so they share routing state. Do not add other per-instance options without discussing the structural impact (see [ARCHITECTURE.md](ARCHITECTURE.md#configuration-model)).
+- **`examples/` and `tests/` are excluded from the package build.** For matrix tests, use the linked core RxJS copy when observable identity matters (`examples/helpers/coreRxjs.ts`).
+- `msgpackr` is the encoder for all three transports.
 
-### `Http2Pubsub`
+## Where things live
 
-- pubsub transporter for `publish()` and `listen()`
-- resolves remote subscribers from `Registry.listTopicNodes(topic)` when linked
+| Concern | File |
+| --- | --- |
+| Multicast discovery | `src/UdpDiscovery.ts` |
+| HTTP/2 RPC | `src/Http2Rpc.ts` |
+| HTTP/2 pub/sub | `src/Http2Pubsub.ts` |
+| Env config constants | `src/const.ts` |
+| Core contract re-exports | `src/types.ts` |
 
-## Source Of Truth
+## Known issues to keep in mind
 
-Prefer these files:
+- `SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE` is **dead code** (read, never used). Don't document it as working.
+- Teardown is **not uniform**: `UdpDiscovery`/`Http2Rpc` use `unsubscribe()`, `Http2Pubsub` uses `close()`.
 
-- `src/UdpDiscovery.ts`
-- `src/Http2Rpc.ts`
-- `src/Http2Pubsub.ts`
-- `src/runtime.ts`
-- `src/types.ts`
-
-For behavior references, prefer:
-
-- `examples/tcp-smoke-test.ts`
-- `examples/tcp-e2e-test.ts`
-- `examples/tcp-e2e-reverse-test.ts`
-- `examples/tcp-e2e-matrix-test.ts`
-- `examples/tcp-e2e-round-robin-test.ts`
-
-## Important Notes
-
-- `src/types.ts` re-exports transporter contracts from `@spider-mesh/core`.
-- Keep `@spider-mesh/tcp` and `@spider-mesh/core` on matching versions.
-- Keep ESM `.js` specifiers in TypeScript source.
-- `examples/` and `tests/` are intentionally excluded from the package build.
-- For matrix tests, use the linked core RxJS copy when observable identity matters.
-
-## Validation
-
-Use the narrowest check that matches the change:
-
-- `bun run build`
-- `bun test tests/tcp-transporters.e2e.test.ts`
-- `bun test tests/tcp-contracts.e2e.test.ts`
-- `bun test tests/tcp-spidermesh.e2e.test.ts`
-- `bun test tests/tcp-spidermesh-reverse.e2e.test.ts`
-- `bun test tests/tcp-spidermesh-matrix.e2e.test.ts`
-- `bun test tests/tcp-spidermesh-round-robin.e2e.test.ts`
-- `bun run test:e2e`
+For the full module map, data flow, and gotchas, see [ARCHITECTURE.md](ARCHITECTURE.md).

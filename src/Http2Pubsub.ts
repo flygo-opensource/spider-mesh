@@ -21,8 +21,9 @@ export class Http2Pubsub extends Subject<PubsubEvent> implements PubsubTransport
     #registry?: Registry
 
 
-    constructor() {
+    constructor(registry?: Registry) {
         super()
+        this.#registry = registry
         this.#server = createServer()
 
         this.#server.on('request', (req, res) => {
@@ -61,10 +62,6 @@ export class Http2Pubsub extends Subject<PubsubEvent> implements PubsubTransport
             this.#subscriptions.set(topic, $)
         }
         return $ as Subject<T>
-    }
-
-    linkRegistry(registry: Registry) {
-        this.#registry = registry
     }
 
     async publish<T>(topic: string, data: T) {
