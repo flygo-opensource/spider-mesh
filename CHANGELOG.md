@@ -16,6 +16,10 @@ Pairs with `@spider-mesh/core` 2.0.145 (registry-free core).
   out of core.
 - `Http2Rpc` now evicts peers from the registry (`removePeer`) on connection close — this
   also moved out of core.
+- **Routing only targets RPC-ready peers**: `UdpDiscovery`'s `ServiceDirectory` and
+  `Http2Rpc`'s `pickRpcNode({ filter })` skip a provider that advertised the service but
+  not yet its Http2Rpc port — avoids a spurious `MICROSERVICE_OFFLINE` ("metadata missing")
+  when a peer is discovered mid-startup.
 
 ### Migration
 ```ts

@@ -54,7 +54,7 @@ Teardown: `unsubscribe()` stops the loop and closes the socket.
 `extends Subject<RpcEvent>`, receives the shared `Registry` via its constructor (`new Http2Rpc(registry)`) and implements `send(packet) → { cancel }`. Accepts `RpcRequestPacket | RpcCancelPacket | RpcResponsePacket` (a superset of the core contract — it handles cancel frames on the wire itself).
 
 - Exposes local HTTP/2 endpoint metadata (`metadata` getter) so peers learn the ephemeral port.
-- **Routing:** by `destination_node_id` when present; otherwise `registry.pickRpcNode(service)` (round-robin). Requires a registry for `request` packets — throws `MICROSERVICE_OFFLINE` if none.
+- **Routing:** by `destination_node_id` when present; otherwise `registry.pickRpcNode(service, { filter })` (round-robin) where `filter` = `#hasRpcEndpoint` — so a provider that advertised the service but not yet its Http2Rpc port is skipped (no "metadata missing"). Requires a registry for `request` packets — throws `MICROSERVICE_OFFLINE` if none.
 - **Eviction:** on a connection close it calls `registry.removePeer(node_id)` (this moved out of core).
 - **Streaming:** request/response streams are preserved across the HTTP/2 connection.
 - **Cancel:** the `cancel()` returned for a `request` sends a `RpcCancelPacket` to the same destination over the existing connection; the provider unsubscribes its Observable on receipt.
