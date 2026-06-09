@@ -18,6 +18,8 @@ owned by the transport.
   `watchService(service): Observable<NodeRef[]>` + `listNodes(service): NodeRef[]` becomes
   an availability source. Core merges all of them (via `combineLatest`, de-duped by
   `node_id`) to answer `wait()` / `watch()` / `nodes`.
+- `Registry.pickRpcNode(service, { filter? })` — optional routability predicate so a
+  transport can exclude peers it can't reach yet (round-robin only over the filtered set).
 
 ### Migration
 - **core:** drop the registry argument — `new SpiderMesh()`.

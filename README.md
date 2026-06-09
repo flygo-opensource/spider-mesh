@@ -217,7 +217,7 @@ Public methods:
 - `removePeer(nodeId)`
 - `listPeers(service?)`
 - `watch(service?)`
-- `pickRpcNode(service, { node_id? })`
+- `pickRpcNode(service, { node_id?, filter? })` — round-robin; `filter(node)` lets a transport exclude peers it cannot route to yet (e.g. a provider whose RPC endpoint port isn't advertised)
 - `getRpcTransporterName(service)`
 - `listTopicNodes(topic)`
 

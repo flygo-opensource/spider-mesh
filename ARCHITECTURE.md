@@ -117,7 +117,7 @@ All are `Observable<…Event>` (the runtime subscribes to them). A single instan
 
 ## Registry (transport helper)
 
-`Registry` is pure in-memory peer + routing state — no I/O. `SpiderMesh` no longer owns or depends on it; it is a **helper for client-side-routing transports** (e.g. tcp constructs one and injects it into its three transporters). Public surface: `getPeer`, `upsertPeer`, `removePeer`, `listPeers(service?)`, `watch(service?)`, `pickRpcNode(service, { node_id? })` (round-robin), `getRpcTransporterName(service)`, `listTopicNodes(topic)`, plus the `nodes$` BehaviorSubject. If you change routing strategy (e.g. weighted/affinity), `pickRpcNode` is the seam.
+`Registry` is pure in-memory peer + routing state — no I/O. `SpiderMesh` no longer owns or depends on it; it is a **helper for client-side-routing transports** (e.g. tcp constructs one and injects it into its three transporters). Public surface: `getPeer`, `upsertPeer`, `removePeer`, `listPeers(service?)`, `watch(service?)`, `pickRpcNode(service, { node_id?, filter? })` (round-robin; `filter(node)` excludes peers a transport can't route to yet — e.g. tcp passes one to skip providers whose Http2Rpc port isn't advertised), `getRpcTransporterName(service)`, `listTopicNodes(topic)`, plus the `nodes$` BehaviorSubject. If you change routing strategy (e.g. weighted/affinity), `pickRpcNode` is the seam.
 
 ### Extending: platform-native availability (e.g. Kubernetes)
 
