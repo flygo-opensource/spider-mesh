@@ -287,6 +287,18 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         return this.#nodesForService([...this.#nodes.values()], service)
     }
 
+    // Reachability probe used by core's #selectRpcTransport. Mirrors #selectRpcSocket:
+    // we can route only while at least one relay socket is open AND the relay has reported
+    // a node serving `service` (the specific `node_id`, when given).
+    canRoute(service: string, node_id?: string): boolean {
+        const hasOpenSocket = [...this.#connections.values()].some(
+            connection => connection.socket?.readyState === WEBSOCKET_OPEN
+        )
+        if (!hasOpenSocket) return false
+        const nodes = this.listNodes(service)
+        return node_id ? nodes.some(node => node.node_id === node_id) : nodes.length > 0
+    }
+
     private on_publish(_url: string, frame: Extract<RelayFrame, { type: 'publish' }>) {
         const topic = this.#topics.get(frame.topic)
         if (!topic) return
