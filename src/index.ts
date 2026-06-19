@@ -30,4 +30,5 @@ export type {
 	SpiderMeshNode,
 	NodeRef,
 	ServiceDirectory,
+	BuildInfo,
 } from './types.js'

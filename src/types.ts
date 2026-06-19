@@ -11,6 +11,17 @@ export type SpiderMeshError = {
 
 
 
+export type BuildInfo = {
+    version?: string
+    git_tag?: string
+    git_branch?: string
+    git_commit?: string
+    build_time?: number
+    environment?: string
+    runtime?: string
+    tags?: Record<string, string>
+}
+
 export type SpiderMeshNode = {
     host: string;
     namespace: string;
@@ -26,6 +37,7 @@ export type SpiderMeshNode = {
     transporters: {
         [name: string]: any;
     };
+    build?: BuildInfo;
 };
 
 export type NodesMap = {
@@ -134,6 +146,18 @@ export type RpcEvent = Partial<{
 }>;
 export type RpcTransporter = Observable<RpcEvent> & {
     send(data: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }>;
+    /**
+     * Reachability probe (required). Returns `true` when this transporter can currently
+     * deliver an RPC for `service` (and, when given, to the specific `node_id`).
+     *
+     * Core consults this in `#selectRpcTransport` so that — when more than one RPC
+     * transporter is registered — a default RPC is dispatched through a transporter
+     * that can actually reach the provider, instead of blindly through the
+     * first-registered one. MUST be side-effect free (no round-robin advancing etc.).
+     * A transporter that cannot enumerate reachability may return `true` to remain a
+     * candidate (it then relies on `send` to surface the real error).
+     */
+    canRoute(service: string, node_id?: string): boolean;
 };
 
 export type MeshTransporter = RpcTransporter | PubsubTransporter | DiscoveryTransporter;

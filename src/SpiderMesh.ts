@@ -1,8 +1,8 @@
 import { BehaviorSubject, catchError, combineLatest, distinctUntilChanged, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, mergeMap, NEVER, Observable, of, retry, share, Subject, Subscription, switchMap, take, tap, throwError, timeout, timer } from "rxjs"
 import { listBeforeMicroserviceOnlineMethods } from "./decorators/BeforeMicroserviceOnline.js";
 import { LOCAL_SERVICES$ } from "./decorators/Microservice.js";
-import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME } from "../const.js";
-import { SpiderMeshNode, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions, SpiderMeshError, RpcEvent, RpcResponsePacket, MeshTransporter, RpcCancelPacket, NodeRef, ServiceDirectory } from './types.js'
+import { SPIDERMESH_NAMESPACE, SPIDERMESH_NODE_HOSTNAME, SPIDERMESH_NODE_ID, SPIDERMESH_BUILD_VERSION, SPIDERMESH_BUILD_GIT_TAG, SPIDERMESH_BUILD_GIT_BRANCH, SPIDERMESH_BUILD_GIT_COMMIT, SPIDERMESH_BUILD_TIME, SPIDERMESH_BUILD_ENVIRONMENT, SPIDERMESH_BUILD_TAGS } from "../const.js";
+import { SpiderMeshNode, BuildInfo, RpcTransporter, PubsubTransporter, DiscoveryTransporter, RpcOptions, SpiderMeshError, RpcEvent, RpcResponsePacket, MeshTransporter, RpcCancelPacket, NodeRef, ServiceDirectory } from './types.js'
 
 export type HelloEvent = SpiderMeshNode & { back?: boolean }
 export type ServiceChecker = (nodes: NodeRef[]) => Promise<boolean> | boolean
@@ -31,12 +31,12 @@ const isNamedTransporter = (value: unknown): value is { constructor?: { name?: s
 
 export class SpiderMesh {
 
-    public readonly node_id = `${Date.now().toString(36).toUpperCase()}|${Math.random().toString(36).slice(10).toUpperCase()}`
+    public readonly node_id = SPIDERMESH_NODE_ID ?? `${Date.now().toString(36).toUpperCase()}|${Math.random().toString(36).slice(10).toUpperCase()}`
     public readonly namespace = SPIDERMESH_NAMESPACE
     #transporters = {
-        rpcs: new Map<string, RpcTransporter>(),
-        pubsubs: new Map<string, PubsubTransporter>(),
-        discoveries: new Map<string, DiscoveryTransporter>()
+        rpcs: new BehaviorSubject(new Map<string, RpcTransporter>()),
+        pubsubs: new BehaviorSubject(new Map<string, PubsubTransporter>()),
+        discoveries: new BehaviorSubject(new Map<string, DiscoveryTransporter>())
     }
     #localServices = new Map<string, any>()
     #me$ = new BehaviorSubject<SpiderMeshNode>({
@@ -48,7 +48,30 @@ export class SpiderMesh {
         transporters: {},
         nodes: {},
         version: 0,
+        build: SpiderMesh.#readBuildInfo(),
     })
+
+    static #readBuildInfo(): BuildInfo | undefined {
+        const runtime = (() => {
+            if (typeof Bun !== 'undefined') return `bun@${(Bun as any).version}`
+            if (typeof process !== 'undefined') return `node@${process.version}`
+            return undefined
+        })()
+
+        const info: BuildInfo = {
+            version: SPIDERMESH_BUILD_VERSION,
+            git_tag: SPIDERMESH_BUILD_GIT_TAG,
+            git_branch: SPIDERMESH_BUILD_GIT_BRANCH,
+            git_commit: SPIDERMESH_BUILD_GIT_COMMIT,
+            build_time: SPIDERMESH_BUILD_TIME,
+            environment: SPIDERMESH_BUILD_ENVIRONMENT,
+            runtime,
+            tags: SPIDERMESH_BUILD_TAGS,
+        }
+
+        // Only attach if at least one field is set
+        return Object.values(info).some(v => v != null) ? info : undefined
+    }
 
     #rpc = {
         pending: new Map<string, PendingRpcStream>(),
@@ -102,7 +125,7 @@ export class SpiderMesh {
     #serviceDirectories(): ServiceDirectory[] {
         const seen = new Set<unknown>()
         const directories: ServiceDirectory[] = []
-        for (const map of [this.#transporters.discoveries, this.#transporters.rpcs, this.#transporters.pubsubs]) {
+        for (const map of [this.#transporters.discoveries.value, this.#transporters.rpcs.value, this.#transporters.pubsubs.value]) {
             for (const transporter of map.values()) {
                 if (seen.has(transporter)) continue
                 seen.add(transporter)
@@ -129,24 +152,28 @@ export class SpiderMesh {
     }
 
     watchService(service: string): Observable<NodeRef[]> {
-        const directories = this.#serviceDirectories()
-        if (!directories.length) return EMPTY
-        // ServiceDirectory.watchService is expected to emit current state promptly
-        // (BehaviorSubject semantics), so combineLatest does not stall. We deliberately
-        // do NOT startWith([]) — a synthetic empty emission would masquerade as "no
-        // providers" and break offline/availability gating.
-        return combineLatest(
-            directories.map(directory => directory.watchService(service))
-        ).pipe(
-            map(lists => {
-                const seen = new Set<string>()
-                const merged: NodeRef[] = []
-                for (const node of lists.flat()) {
-                    if (seen.has(node.node_id)) continue
-                    seen.add(node.node_id)
-                    merged.push(node)
-                }
-                return merged
+        return combineLatest([
+            this.#transporters.rpcs,
+            this.#transporters.pubsubs,
+            this.#transporters.discoveries,
+        ]).pipe(
+            map(() => this.#serviceDirectories()),
+            switchMap(directories => {
+                if (!directories.length) return of([] as NodeRef[])
+                return combineLatest(
+                    directories.map(directory => directory.watchService(service))
+                ).pipe(
+                    map(lists => {
+                        const seen = new Set<string>()
+                        const merged: NodeRef[] = []
+                        for (const node of lists.flat()) {
+                            if (seen.has(node.node_id)) continue
+                            seen.add(node.node_id)
+                            merged.push(node)
+                        }
+                        return merged
+                    }),
+                )
             }),
             distinctUntilChanged((prev, curr) => {
                 if (prev.length !== curr.length) return false
@@ -156,29 +183,33 @@ export class SpiderMesh {
         )
     }
 
-    /** Best-effort: which RPC transporter serves `service`, derived from advertised peer metadata. */
-    #rpcTransporterNameForService(service: string): string | undefined {
-        for (const node of this.listRpcNodes(service)) {
-            const name = node.transporters?.rpc
-            if (typeof name === 'string') return name
-        }
-        return undefined
-    }
-
     #selectRpcTransport(filters: Partial<Pick<RpcOptions<any>, 'node_id' | 'service' | 'transporter'>> = {}): RpcTransporter | undefined {
         if (!filters.service) return undefined
+        // Explicit binding always wins.
         if (filters.transporter) {
             const name = typeof filters.transporter === 'string' ? filters.transporter : filters.transporter.name
             if (!name) return
-            return this.#transporters.rpcs.get(name)
+            return this.#transporters.rpcs.value.get(name)
         }
-        const name = this.#rpcTransporterNameForService(filters.service)
-        if (name) {
-            const transporter = this.#transporters.rpcs.get(name)
-            if (transporter) return transporter
+
+        const rpcs = this.#transporters.rpcs.value
+        // Nothing to choose from — probe canRoute only when at least one RPC transporter exists.
+        if (rpcs.size === 0) return undefined
+
+        // Reachability-first: the first-registered transporter may not actually be able to
+        // reach the provider (e.g. a LAN Http2Rpc has no route to a relay-only peer that the
+        // WS transporter sees). Prefer a transporter that declares it can route to this
+        // service/node, so routing follows the same source of truth as wait()/watch()/nodes.
+        for (const transporter of rpcs.values()) {
+            if (transporter.canRoute(filters.service, filters.node_id)) {
+                return transporter
+            }
         }
+
         // Fallback: the only/first RPC transporter (typical single-transport / relay setup).
-        return this.#transporters.rpcs.values().next().value
+        // Kept so a sole transporter still routes even when its canRoute reported no route
+        // yet — the send path then surfaces the real error instead of "no route at all".
+        return rpcs.values().next().value
     }
 
     #normalizeRpcError(error: any): SpiderMeshError | { code?: string, message: string } {
@@ -274,7 +305,7 @@ export class SpiderMesh {
     }
 
     #linkRpcTransporter(name: string, transporter: RpcTransporter) {
-        this.#transporters.rpcs.set(name, transporter)
+        this.#transporters.rpcs.next(new Map(this.#transporters.rpcs.value).set(name, transporter))
         this.#ensureLocalTransporterPresence(name)
 
         const initialEndpoints = (transporter as RpcTransporter & { metadata?: RpcEvent['endpoints'] }).metadata
@@ -395,7 +426,7 @@ export class SpiderMesh {
     }
 
     #linkPubsubTransporter(name: string, transporter: PubsubTransporter) {
-        this.#transporters.pubsubs.set(name, transporter)
+        this.#transporters.pubsubs.next(new Map(this.#transporters.pubsubs.value).set(name, transporter))
         this.#ensureLocalTransporterPresence(name)
 
         return transporter.pipe(
@@ -411,7 +442,7 @@ export class SpiderMesh {
     }
 
     #linkDiscoveryTransporter(name: string, transporter: DiscoveryTransporter) {
-        this.#transporters.discoveries.set(name, transporter)
+        this.#transporters.discoveries.next(new Map(this.#transporters.discoveries.value).set(name, transporter))
         this.#ensureLocalTransporterPresence(name)
 
         const announce = this.#me$.subscribe(metadata => {
@@ -497,7 +528,7 @@ export class SpiderMesh {
         const listen$ = new Observable<T>(subscriber => {
             this.#registerTopic(topic)
 
-            const subscription = from(this.#transporters.pubsubs.values()).pipe(
+            const subscription = from(this.#transporters.pubsubs.value.values()).pipe(
                 mergeMap(t => t.listen<T>(topic))
             ).subscribe(subscriber)
 
@@ -509,7 +540,7 @@ export class SpiderMesh {
 
         return {
             publish: (data: T) => lastValueFrom(
-                from(this.#transporters.pubsubs.values()).pipe(
+                from(this.#transporters.pubsubs.value.values()).pipe(
                     mergeMap(t => t.publish(topic, data))
                 ), { defaultValue: undefined as any as void }
             ),
