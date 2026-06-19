@@ -350,6 +350,19 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         return Number((this.#getTransporterMetadata(node) as { port?: number } | undefined)?.port) > 0
     }
 
+    // Reachability probe used by core's #selectRpcTransport. Side-effect free: mirrors the
+    // condition #resolveNode/#connect need (a peer serving `service` that has advertised its
+    // Http2Rpc endpoint port) WITHOUT advancing the registry's round-robin index.
+    canRoute(service: string, node_id?: string): boolean {
+        const registry = this.#registry
+        if (!registry) return false
+        if (node_id) {
+            const node = registry.getPeer(node_id)
+            return !!node && node.services?.[service] != undefined && this.#hasRpcEndpoint(node)
+        }
+        return registry.listPeers(service).some(node => this.#hasRpcEndpoint(node))
+    }
+
     #resolveNode(node_id?: string) {
         const node = node_id ? this.#registry?.getPeer(node_id) : undefined
         if (node) {

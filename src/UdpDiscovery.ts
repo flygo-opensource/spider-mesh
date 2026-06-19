@@ -1,6 +1,6 @@
 import { createSocket } from "node:dgram"
 import { networkInterfaces } from "node:os"
-import { distinctUntilChanged, EMPTY, finalize, firstValueFrom, fromEvent, map, merge, Observable, ReplaySubject, Subject, takeUntil, tap } from "rxjs"
+import { distinctUntilChanged, EMPTY, finalize, firstValueFrom, fromEvent, map, merge, Observable, of, ReplaySubject, Subject, takeUntil, tap } from "rxjs"
 import { unpack, pack } from 'msgpackr'
 import type { DiscoveryEvent, DiscoveryTransporter, MdnsMessage, NodeMetadata, NodeRef, Registry, ServiceDirectory, SpiderMeshNode } from '@spider-mesh/core'
 import { SPIDERMESH_WHITELIST_ADDRESS, SPIDERMESH_MULTICAST_PORT, SPIDERMESH_MULTICAST_ADDRESS } from "./const.js"
@@ -175,7 +175,7 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
 
     watchService(service: string): Observable<NodeRef[]> {
         const registry = this.#registry
-        if (!registry) return EMPTY
+        if (!registry) return of([])
         return registry.nodes$.pipe(
             map(() => this.#readyNodes(service)),
             distinctUntilChanged((prev, curr) => {
