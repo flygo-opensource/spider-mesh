@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/ws",
   "type": "module",
-  "version": "2.0.153",
+  "version": "2.0.154",
   "description": "Built-in WebSocket transporter and relay server for Spider Mesh",
   "repository": {
     "url": "https://github.com/spider-mesh/ws"
