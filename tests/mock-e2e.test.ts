@@ -43,11 +43,39 @@ class NamedLoopbackRpcTransporter extends Subject<RpcEvent> implements RpcTransp
         })
         return { cancel: () => {} }
     }
+
+    canRoute() {
+        return true
+    }
 }
 
 class SilentRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
     async send(_data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket, _node_id?: string) {
         return { cancel: () => {} }
+    }
+
+    canRoute() {
+        return true
+    }
+}
+
+// A transporter that swallows requests (never replies) and declares it cannot route.
+// Stands in for an Http2Rpc with no LAN peer for a relay-only provider.
+class UnreachableRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
+    sent = 0
+    async send(_data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket, _node_id?: string) {
+        this.sent++
+        return { cancel: () => {} }
+    }
+    canRoute() {
+        return false
+    }
+}
+
+// Loopback transporter that declares it can route (sees the provider).
+class RoutableLoopbackRpcTransporter extends NamedLoopbackRpcTransporter {
+    canRoute() {
+        return true
     }
 }
 
@@ -285,5 +313,76 @@ describe('mock e2e', () => {
 
         // Round-robin must never land on the half-formed peer.
         expect([...picks]).toEqual(['ready'])
+    })
+
+    // LOCAL_SERVICES$ is an unbounded ReplaySubject: a freshly constructed mesh replays every
+    // previously-emitted service into its concurrency-1 registration queue, so a service emitted
+    // afterwards is registered a few microtasks later. A single macrotask hop drains that backlog
+    // deterministically, making these loopback tests order-independent. (Kept last so they don't
+    // lengthen the replay backlog seen by earlier tests.)
+    const flushLocalServiceRegistration = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    test('routes rpc through a reachable transporter instead of the first-registered one', async () => {
+        const mesh = new SpiderMesh()
+        const unreachable = new UnreachableRpcTransporter()
+        const loopback = new RoutableLoopbackRpcTransporter(mesh.node_id)
+        const serviceName = nextName('ReachService')
+
+        // The bug scenario: first-registered transporter cannot route; the second one can.
+        mesh.registerTransporter(unreachable, 'UnreachableRpcTransporter')
+        mesh.registerTransporter(loopback, 'RoutableLoopbackRpcTransporter')
+
+        LOCAL_SERVICES$.next({
+            name: serviceName,
+            metadata: {},
+            instance: {
+                echo(value: string) {
+                    return value
+                },
+            },
+        })
+        await flushLocalServiceRegistration()
+
+        const result = await firstValueFrom(mesh.callRemoteService<string, never>({
+            service: serviceName,
+            method: 'echo',
+            args: ['reach'],
+        }))
+
+        expect(result).toBe('reach')
+        // The unroutable (first-registered) transporter was never dispatched to.
+        expect(unreachable.sent).toBe(0)
+    })
+
+    test('falls back to the sole RPC transporter even when canRoute reports no route yet', async () => {
+        const mesh = new SpiderMesh()
+        const serviceName = nextName('SoleService')
+        // canRoute=false (e.g. provider mid-startup) but it is the only transporter → still used.
+        class NotReadyLoopback extends NamedLoopbackRpcTransporter {
+            canRoute() {
+                return false
+            }
+        }
+        const loopback = new NotReadyLoopback(mesh.node_id)
+        mesh.registerTransporter(loopback, 'NotReadyLoopback')
+
+        LOCAL_SERVICES$.next({
+            name: serviceName,
+            metadata: {},
+            instance: {
+                echo(value: string) {
+                    return value
+                },
+            },
+        })
+        await flushLocalServiceRegistration()
+
+        const result = await firstValueFrom(mesh.callRemoteService<string, never>({
+            service: serviceName,
+            method: 'echo',
+            args: ['ok'],
+        }))
+
+        expect(result).toBe('ok')
     })
 })

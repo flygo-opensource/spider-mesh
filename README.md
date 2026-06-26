@@ -243,8 +243,16 @@ The contract source of truth is `src/types.ts`.
 ```ts
 type RpcTransporter = Observable<RpcEvent> & {
   send(data: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }>
+  canRoute(service: string, node_id?: string): boolean
 }
 ```
+
+`canRoute` is **required**. When no explicit `transporter` is bound and more than one RPC
+transporter is registered, core's `#selectRpcTransport` dispatches through the first transporter
+whose `canRoute(service, node_id)` returns `true` (falling back to registration order if none
+claims a route), so routing follows the same source of truth as `wait()` / `watch()` / `nodes`.
+It MUST be side-effect free. A transporter that cannot enumerate reachability may `return true`
+to stay a candidate and let `send()` surface the real error.
 
 The core contract `send()` accepts only `request` and `response` packets. Cancellation is exposed through the `cancel()` function returned by `send()`, not by passing a `RpcCancelPacket` to `send()`. A concrete transporter may translate that `cancel()` into a `RpcCancelPacket` on the wire (for example `@spider-mesh/tcp`), but that is a transport-internal detail.
 

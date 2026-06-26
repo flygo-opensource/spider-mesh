@@ -63,16 +63,20 @@ Service **identity is the class name**. Metadata passed to `@Microservice({...})
 ```
 proxy.getUser('42')  ──►  callRemoteService({ service, method, args, ... })
    1. availability gate: firstValueFrom(watchService(service))   (merged ServiceDirectory)
-   2. resolve transporter:
+   2. resolve transporter (#selectRpcTransport):
         - explicit RpcOptions.transporter (name | class | {name}), else
-        - the transporter reporting the service available, else first RPC transporter
+        - the first registered RPC transporter whose canRoute(service, node_id) is true, else
+        - the first registered RPC transporter (fallback)
    3. transporter.send(RpcRequestPacket) with destination_node_id = RpcOptions.node_id
         → the TRANSPORT picks the actual node (relay round-robin, or its own peer table)
    4. correlate RpcResponsePacket(s) by request_id on the transporter's Observable
    5. apply timeout / retry; surface data or error as an RxJS stream
 ```
 
-Core does **not** pick the target node — it delegates routing to the transport. `@spider-mesh/tcp` round-robins via its own injected `Registry`; `@spider-mesh/ws` lets the relay pick.
+Core selects only the **transporter** — preferring one whose `canRoute` reports a route, so a
+default call is not dispatched through a transporter that can't reach the provider — and never the
+target node. It delegates node selection to the transport: `@spider-mesh/tcp` round-robins via its
+own injected `Registry`; `@spider-mesh/ws` lets the relay pick. Selection re-runs on retry.
 
 The returned value is an **Observable augmented with `then`**, so callers can either `subscribe()` or `await`. `SpiderMesh` owns the entire lifecycle: timeout, retry, completion, and cancellation.
 
@@ -107,9 +111,12 @@ Capability is **inferred by instance shape** at `registerTransporter()` time, no
 
 All are `Observable<…Event>` (the runtime subscribes to them). A single instance can implement more than one contract (that is how `@spider-mesh/ws` serves all from one socket). There is **no `linkRegistry`** — transports that need a registry receive it via their own constructor.
 
+The RPC contract also requires **`canRoute(service, node_id?): boolean`** (part of `send()`'s capability, not a separate one). Core calls it in `#selectRpcTransport` to prefer a transporter that can actually reach the target — see the checklist below.
+
 ### Implementing a custom transporter — checklist
 
 - `send()` returns `Promise<{ cancel: () => void }>`; for `response` packets `cancel` is a no-op.
+- Implement **`canRoute(service, node_id?)`** (required): return `true` only when you can currently reach a provider of `service` (honor `node_id` when given). Keep it **side-effect free** (e.g. don't advance a round-robin index). If you can't enumerate reachability, `return true` and let `send()` surface the error.
 - Route `request` packets by `destination_node_id`; fall back to your own selection when absent (core does not pick the node).
 - Implement `ServiceDirectory` (`watchService`/`listNodes`) if you want `wait()`/`watch()`/`nodes` to work. `watchService` must emit current state promptly (BehaviorSubject semantics) — do **not** emit a synthetic empty first.
 - Own your peer table: ingest on discovery, evict on disconnect. Receive any `Registry`/state you need via your constructor.

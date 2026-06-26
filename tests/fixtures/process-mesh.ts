@@ -52,6 +52,11 @@ class ProcessRpcTransporter extends Subject<RpcEvent> implements RpcTransporter 
         })
         return { cancel: () => {} }
     }
+
+    // Delegates all routing to the host process bridge, so it is always a candidate.
+    canRoute() {
+        return true
+    }
 }
 
 class ProcessDiscoveryTransporter extends Subject<DiscoveryEvent> implements DiscoveryTransporter, ServiceDirectory {
