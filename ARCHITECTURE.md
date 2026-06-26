@@ -41,6 +41,7 @@ One instance serves RPC, discovery, and pubsub simultaneously (that is why `mesh
 - **`status$`:** `BehaviorSubject<Map<url, status>>`, status ∈ `connecting | connected | error | not_connected`. Per-URL, not global — monitor the map.
 - **Options (with defaults):** `heartbeatIntervalMs` (30000), `reconnectIntervalMs` (1000), `unsubscribeDelayMs` (10000). Reconnect is automatic on the interval.
 - **RPC:** `send(RpcRequestPacket | RpcResponsePacket) → { cancel }`. The transporter is **not registry-aware** — it forwards every frame to the relay and lets the relay route. `cancel()` sends a cancel frame; the relay maps it back to the right provider socket.
+- **Reachability (`canRoute`):** implements core's now-**required** `RpcTransporter.canRoute(service, node_id?)`. Returns `true` only while at least one relay socket is open **and** the relay has reported a node serving `service` (honoring an explicit `node_id`) — mirrors `#selectRpcSocket`. Lets core's `#selectRpcTransport` prefer this transporter over a LAN one for relay-only providers.
 - **Discovery:** `broadcast(data)` announces local identity (sets the local node id, pushes into the local-node subject). Inbound `hello` frames re-emit a `discovered` event **only when the peer's advertised service list changed** (`#hasSameServices` dedup); `offline` frames evict.
 - **Pubsub:** `publish(topic, data)` / `listen(topic)`.
 
