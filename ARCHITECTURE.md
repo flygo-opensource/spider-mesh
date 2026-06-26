@@ -55,6 +55,7 @@ Teardown: `unsubscribe()` stops the loop and closes the socket.
 
 - Exposes local HTTP/2 endpoint metadata (`metadata` getter) so peers learn the ephemeral port.
 - **Routing:** by `destination_node_id` when present; otherwise `registry.pickRpcNode(service, { filter })` (round-robin) where `filter` = `#hasRpcEndpoint` — so a provider that advertised the service but not yet its Http2Rpc port is skipped (no "metadata missing"). Requires a registry for `request` packets — throws `MICROSERVICE_OFFLINE` if none.
+- **Reachability (`canRoute`):** implements core's now-**required** `RpcTransporter.canRoute(service, node_id?)`. Returns `true` only when a registry peer serves `service` and has advertised its Http2Rpc port; uses `registry.listPeers` (no round-robin side-effect, unlike `pickRpcNode`). Core's `#selectRpcTransport` consults it first, so when several RPC transporters are registered it won't dispatch a relay-only provider's call through `Http2Rpc`. Stays in sync with the `#hasRpcEndpoint` routing condition above.
 - **Eviction:** on a connection close it calls `registry.removePeer(node_id)` (this moved out of core).
 - **Streaming:** request/response streams are preserved across the HTTP/2 connection.
 - **Cancel:** the `cancel()` returned for a `request` sends a `RpcCancelPacket` to the same destination over the existing connection; the provider unsubscribes its Observable on receipt.

@@ -55,6 +55,14 @@ export class UdpDiscovery extends Subject<DiscoveryEvent> implements DiscoveryTr
             ),
             fromEvent(this.#udp4, 'error').pipe(
                 tap(error => {
+                    // On Linux, sending a UDP datagram to a host/port with no listener makes the
+                    // kernel surface the resulting ICMP "destination/port unreachable" on the next
+                    // recv as a socket 'error' (ECONNREFUSED / ENETUNREACH / EHOSTUNREACH / ECONNRESET).
+                    // During unicast peer discovery (whitelist scan) this is expected and routine, so
+                    // it must NOT tear down the discovery socket. (macOS never delivers these to the
+                    // socket, which is why the bug only manifests on Linux.)
+                    const code = (error as NodeJS.ErrnoException)?.code
+                    if (code && ['ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'ECONNRESET'].includes(code)) return
                     this.#ready.error(error as Error)
                     this.#stop$.next()
                     this.#stop$.complete()
