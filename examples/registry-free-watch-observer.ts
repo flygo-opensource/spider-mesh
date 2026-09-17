@@ -6,7 +6,7 @@
  *   WATCH_PRESENT  — watch() emitted a non-empty provider list (provider appeared)
  *   WATCH_GONE     — watch() emitted an empty list after having seen a provider (disappeared)
  */
-import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
+import { RemoteServiceLinker, SpiderMesh, Topology } from '@spider-mesh/core'
 import { WebsocketTransporter } from '../src/node.js'
 
 type GreetingService = { hello(name: string): Promise<string> }
@@ -14,8 +14,11 @@ type GreetingService = { hello(name: string): Promise<string> }
 const transporter = new WebsocketTransporter()
 transporter.connect(process.env.WS_URL || 'ws://127.0.0.1:8787')
 
-const mesh = new SpiderMesh()          // ← no Registry
-mesh.registerTransporter(transporter)
+// watch()/nodes() cần Topology; relay routing RPC thông thường thì không cần.
+const mesh = new SpiderMesh({
+    topology: new Topology({ discovery: transporter }),
+    transporters: [transporter],
+})
 
 const greeter = RemoteServiceLinker.link<GreetingService>(mesh, { service: 'GreetingService' })
 

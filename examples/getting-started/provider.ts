@@ -2,8 +2,7 @@
  * Getting started (ws) — Step 2: a provider node.
  *
  * Exposes GreetingService over the mesh. Note: NO Registry anywhere — the relay does
- * the routing and the WebSocket transporter supplies availability to core as a
- * ServiceDirectory.
+ * the routing and the WebSocket transporter supplies availability directly to core.
  *
  *   bun run examples/getting-started/provider.ts
  */
@@ -24,8 +23,9 @@ new GreetingService()
 const transporter = new WebsocketTransporter()
 transporter.connect(process.env.WS_URL || 'ws://127.0.0.1:8787')
 
-const mesh = new SpiderMesh()          // ← registry-free: no constructor argument
-mesh.registerTransporter(transporter)  // ← one transporter serves rpc + discovery + pubsub + availability
+const mesh = new SpiderMesh({
+    transporters: [transporter],
+})
 
 console.log('provider online — exposing GreetingService')
 

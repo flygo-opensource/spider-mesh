@@ -1,4 +1,4 @@
-import { SpiderMesh } from '@spider-mesh/core'
+import { SpiderMesh, Topology } from '@spider-mesh/core'
 import { WebsocketTransporter } from '../../src/node.js'
 
 export type CreateMeshOptions = {
@@ -6,6 +6,8 @@ export type CreateMeshOptions = {
     heartbeatIntervalMs?: number
     reconnectIntervalMs?: number
     unsubscribeDelayMs?: number
+    /** Bật khi ví dụ cần enumerate/watch danh sách node thay vì chỉ probe reachability. */
+    topology?: boolean
 }
 
 export function createMesh(options: CreateMeshOptions = {}) {
@@ -17,11 +19,15 @@ export function createMesh(options: CreateMeshOptions = {}) {
 
     transporter.connect(options.wsUrl || 'ws://127.0.0.1:8787')
 
-    const mesh = new SpiderMesh()
-    mesh.registerTransporter(transporter)
+    const topology = options.topology ? new Topology({ discovery: transporter }) : undefined
+    const mesh = new SpiderMesh({
+        topology,
+        transporters: [transporter],
+    })
 
     return {
         mesh,
         transporter,
+        topology,
     }
 }

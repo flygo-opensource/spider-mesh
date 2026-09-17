@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { SpiderMeshNode } from '@spider-mesh/core'
+import type { DiscoveryMessage } from '@spider-mesh/discovery'
 import { WebsocketRelayServer } from '../src/WebsocketRelayServer.js'
 import { WebsocketTransporter } from '../src/WebsocketTransporter.js'
 
@@ -23,6 +24,18 @@ function makeNode(nodeId: string, services: Record<string, object> = {}): Spider
         topics: [],
         nodes: {},
         version: 1,
+    }
+}
+
+function discoveryMessage(node: SpiderMeshNode): DiscoveryMessage<SpiderMeshNode> {
+    return {
+        node_id: node.node_id,
+        namespace: node.namespace,
+        tags: ['spider-mesh', 'node'],
+        version: String(node.version),
+        created_at: Date.now(),
+        seq: node.version,
+        data: node,
     }
 }
 
@@ -66,22 +79,14 @@ test('node online event should not fire for already-known nodes when sending req
 
     const discoveredIds: string[] = []
     clientTransporter.subscribe((event: any) => {
-        if (event?.discovered?.node_id) {
-            discoveredIds.push(event.discovered.node_id)
+        if (event?.data?.node_id) {
+            discoveredIds.push(event.data.node_id)
         }
     })
 
     // Announce cả hai node lên relay
-    await providerTransporter.broadcast({
-        hi: true,
-        node: makeNode(PROVIDER_ID, { PingService: {} }),
-        sender_id: PROVIDER_ID,
-    })
-    await clientTransporter.broadcast({
-        hi: true,
-        node: makeNode(CLIENT_ID),
-        sender_id: CLIENT_ID,
-    })
+    await providerTransporter.broadcast(discoveryMessage(makeNode(PROVIDER_ID, { PingService: {} })))
+    await clientTransporter.broadcast(discoveryMessage(makeNode(CLIENT_ID)))
 
     // Chờ client discover được provider
     await waitFor(() => discoveredIds.includes(PROVIDER_ID), 3000)
@@ -146,14 +151,14 @@ test('node online event should not fire for already-known nodes on reconnection'
 
     const discoveredByA: string[] = []
     transporterA.subscribe((event: any) => {
-        if (event?.discovered?.node_id) {
-            discoveredByA.push(event.discovered.node_id)
+        if (event?.data?.node_id) {
+            discoveredByA.push(event.data.node_id)
         }
     })
 
     // A và B announce bản thân
-    await transporterA.broadcast({ hi: true, node: makeNode(NODE_A), sender_id: NODE_A })
-    await transporterB.broadcast({ hi: true, node: makeNode(NODE_B), sender_id: NODE_B })
+    await transporterA.broadcast(discoveryMessage(makeNode(NODE_A)))
+    await transporterB.broadcast(discoveryMessage(makeNode(NODE_B)))
 
     // Chờ A discover B
     await waitFor(() => discoveredByA.includes(NODE_B), 3000)
@@ -163,7 +168,7 @@ test('node online event should not fire for already-known nodes on reconnection'
 
     // C connect vào relay (gây #syncServerConnections → A nhận hello của B lần nữa)
     const transporterC = await createTransporter(url)
-    await transporterC.broadcast({ hi: true, node: makeNode(NODE_C), sender_id: NODE_C })
+    await transporterC.broadcast(discoveryMessage(makeNode(NODE_C)))
 
     // Chờ A discover C
     await waitFor(() => discoveredByA.includes(NODE_C), 3000)
@@ -191,21 +196,13 @@ test('node should not discover itself via relay sync', async () => {
 
     const discoveredBySelf: string[] = []
     selfTransporter.subscribe((event: any) => {
-        if (event?.discovered?.node_id) {
-            discoveredBySelf.push(event.discovered.node_id)
+        if (event?.data?.node_id) {
+            discoveredBySelf.push(event.data.node_id)
         }
     })
 
-    await selfTransporter.broadcast({
-        hi: true,
-        node: makeNode(NODE_SELF, { SomeService: {} }),
-        sender_id: NODE_SELF,
-    })
-    await otherTransporter.broadcast({
-        hi: true,
-        node: makeNode(NODE_OTHER),
-        sender_id: NODE_OTHER,
-    })
+    await selfTransporter.broadcast(discoveryMessage(makeNode(NODE_SELF, { SomeService: {} })))
+    await otherTransporter.broadcast(discoveryMessage(makeNode(NODE_OTHER)))
 
     // Chờ initial discovery
     await waitFor(() => discoveredBySelf.includes(NODE_OTHER), 3000)

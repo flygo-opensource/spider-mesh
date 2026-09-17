@@ -11,6 +11,7 @@ import {
     Observable,
     retry,
     Subject,
+    Subscription,
     switchMap,
     take,
     tap,
@@ -18,16 +19,14 @@ import {
     timer,
 } from 'rxjs'
 import type {
-    DiscoveryEvent,
-    DiscoveryTransporter,
-    MdnsMessage,
-    NodeMetadata,
     NodeRef,
-    ServiceDirectory,
     SpiderMeshNode,
+    TopologyDiscoveryContext,
 } from '@spider-mesh/core'
+import type { DiscoveryEvent, DiscoveryMessage, DiscoveryTransporter } from '@spider-mesh/discovery'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayRawData } from './websocketProtocol.js'
 
+/** Cấu hình reconnect và heartbeat cho discovery-only WebSocket client. */
 export type WebsocketDiscoveryClientOptions = {
     reconnectIntervalMs?: number
     heartbeatIntervalMs?: number
@@ -36,14 +35,30 @@ export type WebsocketDiscoveryClientOptions = {
 const WS_OPEN = 1
 const WS_CONNECTING = 0
 
+function toDiscoveryEvent(node: SpiderMeshNode): DiscoveryEvent<SpiderMeshNode> {
+    return {
+        node_id: node.node_id,
+        namespace: node.namespace,
+        tags: ['spider-mesh', 'node'],
+        version: String(node.version || 0),
+        created_at: Date.now(),
+        seq: Number(node.version || 0),
+        data: node,
+    }
+}
+
+/** Discovery-only client dùng relay để đồng bộ node vào Topology. */
 export class WebsocketDiscoveryClient
-    extends Subject<DiscoveryEvent>
-    implements DiscoveryTransporter, ServiceDirectory {
+    extends Subject<DiscoveryEvent<SpiderMeshNode>>
+    implements DiscoveryTransporter<SpiderMeshNode> {
 
     #nodes = new Map<string, SpiderMeshNode>()
     #nodes$ = new BehaviorSubject<SpiderMeshNode[]>([])
     #localNode?: SpiderMeshNode
     #socket?: WebSocket
+    #connection = Subscription.EMPTY
+    #topologyBinding = Subscription.EMPTY
+    #topologyContext?: TopologyDiscoveryContext
 
     constructor(
         private readonly url: string,
@@ -53,12 +68,42 @@ export class WebsocketDiscoveryClient
         this.#startConnectionLoop()
     }
 
-    async broadcast(data: MdnsMessage<NodeMetadata>) {
-        const node = { ...data.node } as unknown as SpiderMeshNode
+    /** Gắn discovery client vào Topology theo contract hai chiều. */
+    bind(context: TopologyDiscoveryContext) {
+        this.#topologyBinding.unsubscribe()
+        this.#topologyContext = context
+        this.#topologyBinding = context.localNode$.subscribe(node => {
+            void this.broadcast(toDiscoveryEvent(node))
+        })
+        return new Subscription(() => {
+            this.#topologyBinding.unsubscribe()
+            if (this.#topologyContext === context) this.#topologyContext = undefined
+        })
+    }
+
+    /** Đóng discovery client và dừng reconnect loop. */
+    close() {
+        this.unsubscribe()
+    }
+
+    override unsubscribe() {
+        this.#connection.unsubscribe()
+        this.#topologyBinding.unsubscribe()
+        super.unsubscribe()
+    }
+
+    async broadcast(message: DiscoveryMessage<SpiderMeshNode>) {
+        const node = { ...message.data }
         this.#localNode = node
         if (this.#socket?.readyState === WS_OPEN) {
             this.#socket.send(encodeRelayFrame({ type: 'hello', me: node }), { binary: true })
         }
+    }
+
+    /** Directory của relay chỉ authoritative khi WebSocket đang kết nối. */
+    async verify(node_id: string) {
+        if (this.#socket?.readyState !== WS_OPEN) return 'unknown' as const
+        return this.#nodes.has(node_id) ? 'alive' as const : 'dead' as const
     }
 
     watchService(service: string): Observable<NodeRef[]> {
@@ -77,7 +122,7 @@ export class WebsocketDiscoveryClient
     }
 
     #startConnectionLoop() {
-        defer(() => {
+        this.#connection = defer(() => {
             const socket = new WebSocket(this.url)
             socket.binaryType = 'arraybuffer'
 
@@ -138,7 +183,8 @@ export class WebsocketDiscoveryClient
             if (!node?.node_id || node.node_id === this.#localNode?.node_id) return
             this.#nodes.set(node.node_id, node)
             this.#publishNodes()
-            this.next({ discovered: node })
+            this.#topologyContext?.upsertRemote(node)
+            this.next(toDiscoveryEvent(node))
             return
         }
 
@@ -146,11 +192,14 @@ export class WebsocketDiscoveryClient
             if (!this.#nodes.has(frame.node_id)) return
             this.#nodes.delete(frame.node_id)
             this.#publishNodes()
+            this.#topologyContext?.removeRemote(frame.node_id)
         }
     }
 
     #clearNodes() {
         if (this.#nodes.size === 0) return
+        // Mất kết nối tới relay chỉ có nghĩa trạng thái hiện tại chưa biết, không chứng minh
+        // từng node đã chết. Chỉ offline frame mới được quyền xóa membership khỏi Topology.
         this.#nodes.clear()
         this.#publishNodes()
     }

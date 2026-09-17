@@ -52,7 +52,7 @@ async function main() {
     }, 15000)
 
     try {
-        await service.wait(() => mesh.listRpcNodes('RpcMatrixService').length > 0)
+        await service.wait()
 
         const syncValue = await service.syncValue('case-sync')
         const asyncValue = await service.asyncValue('case-async')

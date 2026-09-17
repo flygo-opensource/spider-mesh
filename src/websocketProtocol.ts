@@ -1,40 +1,48 @@
 import { decode, encode } from '@msgpack/msgpack'
 import type { RpcCancelPacket, RpcRequestPacket, RpcResponsePacket, SpiderMeshNode } from '@spider-mesh/core'
 
+/** Các dạng raw payload có thể nhận từ WebSocket ở nhiều runtime. */
 export type RelayRawData = Uint8Array | ArrayBuffer | ArrayBufferView | string | RelayRawData[]
 
+/** Frame mang packet RPC qua relay. */
 export type RelayRpcFrame = {
     type: 'rpc'
     data: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
 }
 
+/** Frame publish một event topic. */
 export type RelayPublishFrame = {
     type: 'publish'
     topic: string
     payload: Uint8Array
 }
 
+/** Frame đăng ký danh sách event topic. */
 export type RelaySubscribeFrame = {
     type: 'subscribe'
     topics: string[]
 }
 
+/** Frame hủy đăng ký danh sách event topic. */
 export type RelayUnsubscribeFrame = {
     type: 'unsubscribe'
     topics: string[]
 }
 
+/** Frame quảng bá snapshot node tới relay và các peer. */
 export type RelayHelloFrame = {
     type: 'hello'
     me: SpiderMeshNode
     target_id?: string
 }
 
+/** Frame thông báo node đã rời relay. */
 export type RelayOfflineFrame = {
     type: 'offline'
     node_id: string
 }
 
+/** Union toàn bộ frame của SpiderMesh WebSocket protocol. */
 export type RelayFrame = RelayRpcFrame | RelayPublishFrame | RelaySubscribeFrame | RelayUnsubscribeFrame | RelayHelloFrame | RelayOfflineFrame
 
 

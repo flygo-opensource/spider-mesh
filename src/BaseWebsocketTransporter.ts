@@ -1,8 +1,10 @@
 import { decode, encode } from '@msgpack/msgpack'
-import { BehaviorSubject, defer, distinctUntilChanged, finalize, from, fromEvent, ignoreElements, map, merge, Observable, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
-import type { DiscoveryTransporter, MdnsMessage, NodeMetadata, NodeRef, PubsubTransporter, RpcEvent, RpcRequestPacket, RpcResponsePacket, RpcTransporter, ServiceDirectory, SpiderMeshNode } from '@spider-mesh/core'
+import { BehaviorSubject, defer, distinctUntilChanged, finalize, from, fromEvent, ignoreElements, map, merge, Observable, of, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
+import type { NodeRef, RpcCancelPacket, RpcEvent, RpcProbeRequest, RpcProbeResult, RpcRequestPacket, RpcResponsePacket, RpcTransporter, RpcTransporterContext, SpiderMeshNode, Topology, TopologyDiscoveryContext } from '@spider-mesh/core'
+import type { DiscoveryEvent, DiscoveryMessage, DiscoveryTransporter } from '@spider-mesh/discovery'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayRawData } from './websocketProtocol.js'
 
+/** Cấu hình heartbeat, reconnect và thời gian giữ subscription của WebSocket transporter. */
 export type WebsocketTransporterOptions = {
     heartbeatIntervalMs?: number
     reconnectIntervalMs?: number
@@ -19,6 +21,7 @@ type KnownNode = {
     relayUrl: string
 }
 
+/** Interface socket tối thiểu dùng chung cho Node, browser và React Native. */
 export type WebSocketLike = {
     readyState: number
     binaryType?: BinaryType
@@ -35,22 +38,77 @@ type RelayConnection = {
     socket?: WebSocketLike
 }
 
+/** Các trạng thái kết nối relay được công bố qua `status$`. */
 export type WebsocketConnectionStatus = 'connecting' | 'connected' | 'error' | 'not_connected'
 
 const WEBSOCKET_CONNECTING = 0
 const WEBSOCKET_OPEN = 1
 
-export abstract class BaseWebsocketTransporter extends Subject<any> implements RpcTransporter, DiscoveryTransporter, PubsubTransporter, ServiceDirectory {
+function toDiscoveryEvent(node: SpiderMeshNode): DiscoveryEvent<SpiderMeshNode> {
+    return {
+        node_id: node.node_id,
+        namespace: node.namespace,
+        tags: ['spider-mesh', 'node'],
+        version: String(node.version || 0),
+        created_at: Date.now(),
+        seq: Number(node.version || 0),
+        data: node,
+    }
+}
+
+/**
+ * Transporter WebSocket dùng chung cho Node, browser và React Native.
+ * Relay có thể tự routing khi không có Topology; cùng instance cũng có thể làm Discovery.
+ */
+export abstract class BaseWebsocketTransporter extends Subject<any> implements RpcTransporter, DiscoveryTransporter<SpiderMeshNode> {
+    public readonly name = 'websocket'
     #connections = new Map<string, RelayConnection>()
     #topics = new Map<string, TopicStream>()
     #nodes = new Map<string, KnownNode>()
     #nodes$ = new BehaviorSubject<KnownNode[]>([])
     #me$ = new ReplaySubject<SpiderMeshNode>(1)
     #localNodeId?: string
+    #topology?: Topology
+    #topologyContext?: TopologyDiscoveryContext
+    #topologyBinding = Subscription.EMPTY
+    #runtimeLocalBinding = Subscription.EMPTY
     public readonly status$ = new BehaviorSubject<Map<string, string>>(new Map())
 
     constructor(protected options: WebsocketTransporterOptions = {}) {
         super()
+    }
+
+    /** Core truyền Topology optional cho routing theo từng RPC request. */
+    start(context: RpcTransporterContext) {
+        this.#topology = context.topology
+        this.#runtimeLocalBinding.unsubscribe()
+        // Nếu chính transporter đang làm Discovery của Topology thì bind() đã announce local node.
+        if (this.#topologyContext) return
+        this.#runtimeLocalBinding = context.localNode$.subscribe(node => {
+            void this.broadcast(toDiscoveryEvent(node))
+        })
+    }
+
+    /** Dừng toàn bộ WebSocket connection của transporter. */
+    stop() {
+        this.#runtimeLocalBinding.unsubscribe()
+        this.close()
+    }
+
+    /**
+     * Kết nối WebSocket transporter như một Discovery của Topology.
+     * Local node được announce lên relay, hello/offline từ relay cập nhật remote nodes.
+     */
+    bind(context: TopologyDiscoveryContext) {
+        this.#topologyBinding.unsubscribe()
+        this.#topologyContext = context
+        this.#topologyBinding = context.localNode$.subscribe(node => {
+            void this.broadcast(toDiscoveryEvent(node))
+        })
+        return new Subscription(() => {
+            this.#topologyBinding.unsubscribe()
+            if (this.#topologyContext === context) this.#topologyContext = undefined
+        })
     }
 
     connect(url: string) {
@@ -62,33 +120,60 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         })
     }
 
-    close(url: string) {
+    close(url?: string) {
+        if (!url) {
+            for (const connectedUrl of [...this.#connections.keys()]) {
+                this.close(connectedUrl)
+            }
+            return
+        }
+
         const connection = this.#connections.get(url)
         const socket = connection?.socket
 
         this.#connections.delete(url)
-        this.#deleteConnectionStatus(url)
 
+        // An explicit close should not leave a Node `ws` peer waiting on the close
+        // handshake (which would also keep a WebSocketServer.close callback pending).
+        socket?.terminate?.()
         connection?.subscription.unsubscribe()
-        if (socket) {
+        if (socket && !socket.terminate) {
             this.#disconnectSocket(socket)
         }
+        this.#deleteConnectionStatus(url)
     }
 
 
-    async send(packet: RpcRequestPacket | RpcResponsePacket): Promise<{ cancel: () => void }> {
-        const socket = this.#selectRpcSocket(packet.destination_node_id)
+    async send(packet: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket): Promise<{ cancel: () => void, destination_node_id?: string }> {
+        const route = packet.kind === 'request' && packet.routing
+            ? this.#topology?.route({
+                service: packet.service,
+                transporter: this.name,
+                node_id: packet.destination_node_id,
+                routing: packet.routing,
+            })
+            : undefined
+        const outboundPacket = route && packet.kind === 'request'
+            ? { ...packet, destination_node_id: route.node.node_id }
+            : packet
+        const socket = this.#selectRpcSocket(outboundPacket.destination_node_id)
         await this.#sendFrame(socket, {
             type: 'rpc',
-            data: packet,
+            data: outboundPacket,
         })
 
         if (packet.kind === 'request') {
             return {
+                // Core cần biết node đã được Topology chọn để đóng stream khi node đó offline.
+                destination_node_id: outboundPacket.destination_node_id,
                 cancel: () => {
                     void this.#sendFrame(socket, {
                         type: 'rpc',
-                        data: { kind: 'cancel', request_id: packet.request_id },
+                        data: {
+                            kind: 'cancel',
+                            request_id: packet.request_id,
+                            destination_node_id: outboundPacket.destination_node_id,
+                        },
                     }).catch(() => undefined)
                 }
             }
@@ -97,11 +182,8 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         return { cancel: () => {} }
     }
 
-    async broadcast(data: MdnsMessage<SpiderMeshNode>) {
-        const localNode = {
-            ...data.node,
-            node_id: data.sender_id,
-        } satisfies SpiderMeshNode
+    async broadcast(message: DiscoveryMessage<SpiderMeshNode>) {
+        const localNode = { ...message.data } satisfies SpiderMeshNode
         this.#localNodeId = localNode.node_id
         this.#me$.next(localNode)
     }
@@ -145,13 +227,17 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
     #createConnectionLoop(url: string) {
         return defer(() => {
             this.#setConnectionStatus(url, 'connecting')
-            return from(Promise.resolve(this.createSocket(url)))
+            const created = this.createSocket(url)
+            return created && typeof (created as Promise<WebSocketLike>).then === 'function'
+                ? from(created as Promise<WebSocketLike>)
+                : of(created as WebSocketLike)
         }).pipe(
             switchMap(socket => {
                 const closed$ = fromEvent(socket as never, 'close').pipe(
                     take(1),
                     tap(() => {
                         this.#setConnectionStatus(url, 'not_connected')
+                        this.#reportDirectoryUnreachable('relay-connection-lost')
                     }),
                     switchMap(() => throwError(() => new Error(`WebSocket disconnected: ${url}`))),
                 )
@@ -160,6 +246,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
                     take(1),
                     tap(() => {
                         this.#setConnectionStatus(url, 'error')
+                        this.#reportDirectoryUnreachable('relay-connection-error')
                     }),
                     switchMap(() => throwError(() => new Error(`WebSocket disconnected: ${url}`))),
                 )
@@ -238,9 +325,15 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         const existing = this.#nodes.get(node.node_id)
         this.#nodes.set(node.node_id, { node, relayUrl: url })
         this.#publishNodes()
+        this.#topologyContext?.upsertRemote(node)
+        this.#topology?.reportReachability({
+            node_id: node.node_id,
+            transporter: this.name,
+            status: 'reachable',
+        })
 
         if (existing && this.#hasSameServices(existing.node, node)) return
-        this.next({ discovered: node })
+        this.next(toDiscoveryEvent(node))
     }
 
     #hasSameServices(a: SpiderMeshNode, b: SpiderMeshNode): boolean {
@@ -255,12 +348,13 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         if (current?.relayUrl === url) {
             this.#nodes.delete(frame.node_id)
             this.#publishNodes()
+            this.#topologyContext?.removeRemote(frame.node_id)
         }
 
         this.next({ offline: frame.node_id } satisfies RpcEvent)
     }
 
-    // --- ServiceDirectory: relay-backed availability for core's wait()/watch()/nodes ---
+    // --- Relay-backed availability for core's wait()/watch()/nodes ---
 
     #publishNodes() {
         this.#nodes$.next([...this.#nodes.values()])
@@ -297,6 +391,49 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         if (!hasOpenSocket) return false
         const nodes = this.listNodes(service)
         return node_id ? nodes.some(node => node.node_id === node_id) : nodes.length > 0
+    }
+
+    /** Relay directory cung cấp reachability tối thiểu khi SpiderMesh không có Topology. */
+    async probe(request: RpcProbeRequest): Promise<RpcProbeResult> {
+        const startedAt = Date.now()
+        const nodes = this.listNodes(request.service)
+        const node = request.node_id
+            ? nodes.find(candidate => candidate.node_id === request.node_id)
+            : nodes[0]
+        return {
+            reachable: !!node && this.canRoute(request.service, request.node_id),
+            node_id: node?.node_id,
+            latency: Date.now() - startedAt,
+        }
+    }
+
+    /** Relay directory chỉ xác minh membership khi còn ít nhất một socket đang kết nối. */
+    async verify(node_id: string) {
+        const connected = [...this.#connections.values()].some(
+            connection => connection.socket?.readyState === WEBSOCKET_OPEN
+        )
+        if (!connected) return 'unknown' as const
+        return this.#nodes.has(node_id) ? 'alive' as const : 'dead' as const
+    }
+
+    /**
+     * Khi mất toàn bộ relay, transporter chỉ báo endpoint unreachable.
+     * Membership vẫn do offline frame/Discovery quyết định; verify lúc này sẽ trả unknown.
+     */
+    #reportDirectoryUnreachable(reason: string) {
+        const hasAnotherOpenSocket = [...this.#connections.values()].some(
+            connection => connection.socket?.readyState === WEBSOCKET_OPEN
+        )
+        if (hasAnotherOpenSocket) return
+
+        for (const { node } of this.#nodes.values()) {
+            this.#topology?.reportReachability({
+                node_id: node.node_id,
+                transporter: this.name,
+                status: 'unreachable',
+                reason,
+            })
+        }
     }
 
     private on_publish(_url: string, frame: Extract<RelayFrame, { type: 'publish' }>) {

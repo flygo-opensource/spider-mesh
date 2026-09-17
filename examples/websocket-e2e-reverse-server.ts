@@ -28,7 +28,7 @@ async function main() {
     }, 10000)
 
     try {
-        await responder.wait(() => mesh.listRpcNodes('ClientResponderService').length > 0)
+        await responder.wait()
         const result = await firstValueFrom(responder.helloFromServer('from server').pipe(timeout(5000)))
         console.log(result)
         process.exit(0)

@@ -17,12 +17,11 @@ type GreetingService = {
 const transporter = new WebsocketTransporter()
 transporter.connect(process.env.WS_URL || 'ws://127.0.0.1:8787')
 
-const mesh = new SpiderMesh()
-mesh.registerTransporter(transporter)
+const mesh = new SpiderMesh({ transporters: [transporter] })
 
 const greeter = RemoteServiceLinker.link<GreetingService>(mesh, { service: 'GreetingService' })
 
-// wait() resolves once the relay has told us a provider exists (via ServiceDirectory).
+// wait() resolves once the transporter reports that the relay sees a provider.
 await greeter.wait()
 
 // Remote methods return an RxJS Observable that is also awaitable.

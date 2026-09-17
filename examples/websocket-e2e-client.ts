@@ -27,7 +27,7 @@ async function main() {
     }, 10000)
 
     try {
-        await greeter.wait(() => mesh.listRpcNodes('GreetingService').length > 0)
+        await greeter.wait()
         const result = await firstValueFrom(greeter.hello('websocket e2e').pipe(timeout(5000)))
         console.log(result)
         process.exit(0)

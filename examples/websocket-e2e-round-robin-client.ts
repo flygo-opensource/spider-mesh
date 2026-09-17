@@ -28,7 +28,7 @@ async function main() {
     }, 12000)
 
     try {
-        await greeter.wait(() => mesh.listRpcNodes('GreetingService').length >= 2)
+        await greeter.wait()
 
         const results = await Promise.all([
             firstValueFrom(greeter.hello('round-robin-1').pipe(timeout(5000))),

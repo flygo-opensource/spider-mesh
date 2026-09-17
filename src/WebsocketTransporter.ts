@@ -3,6 +3,7 @@ import { BaseWebsocketTransporter, type WebSocketLike, type WebsocketTransporter
 
 export { type WebsocketConnectionStatus, type WebsocketTransporterOptions } from './BaseWebsocketTransporter.js'
 
+/** WebSocket transporter dành cho Node.js, sử dụng package `ws`. */
 export class WebsocketTransporter extends BaseWebsocketTransporter {
     constructor(options: WebsocketTransporterOptions = {}) {
         super(options)

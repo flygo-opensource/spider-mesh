@@ -2,6 +2,7 @@ import { BaseWebsocketTransporter, type WebSocketLike, type WebsocketTransporter
 
 export { type WebsocketConnectionStatus, type WebsocketTransporterOptions } from './BaseWebsocketTransporter.js'
 
+/** WebSocket transporter dùng implementation `globalThis.WebSocket` của runtime. */
 export class WebsocketTransporter extends BaseWebsocketTransporter {
     constructor(options: WebsocketTransporterOptions = {}) {
         super(options)

@@ -15,6 +15,14 @@ type RelaySocket = WebSocket & {
     }
 }
 
+/** Một RPC request đang bay: relay giữ cả hai đầu để đóng stream khi một đầu rớt. */
+type PendingRelayRequest = {
+    caller: WebSocket
+    provider: WebSocket
+    service: string
+}
+
+/** Cấu hình listener và cách phân loại connection của WebSocket relay. */
 export type WebsocketRelayServerOptions = {
     port?: number
     host?: string
@@ -22,6 +30,7 @@ export type WebsocketRelayServerOptions = {
     isServerConnection?: (socket: WebSocket, request: RelayServerConnectionRequest) => boolean
 }
 
+/** Relay vừa forward RPC/event vừa route service theo round-robin khi Core không có Topology. */
 export class WebsocketRelayServer {
     #server: WsServer
     #subscription = Subscription.EMPTY
@@ -29,7 +38,7 @@ export class WebsocketRelayServer {
     #listeners = new Map<string, Set<string>>()
     #services = new Map<string, Set<string>>()
     #serviceRrIndex = new Map<string, number>()
-    #pendingRequests = new Map<string, WebSocket>()
+    #pendingRequests = new Map<string, PendingRelayRequest>()
 
     constructor(options: WebsocketRelayServerOptions = {}) {
         this.#server = new WsServer({
@@ -124,20 +133,26 @@ export class WebsocketRelayServer {
                     return
                 }
                 const target = this.#nodes.get(targetNodeId)
-                if (target?.readyState === WebSocket.OPEN) {
-                    this.#pendingRequests.set(packet.request_id, target)
-                    target.send(encodeRelayFrame(frame), { binary: true })
+                if (target?.readyState !== WebSocket.OPEN) {
+                    // Node biến mất ngay giữa lúc chọn route: caller phải biết ngay thay vì
+                    // treo tới khi hết timeout của chính nó.
+                    this.#sendOfflineError(socket, packet.request_id, packet.service)
+                    return
                 }
+                this.#pendingRequests.set(packet.request_id, {
+                    caller: socket,
+                    provider: target,
+                    service: packet.service,
+                })
+                target.send(encodeRelayFrame(frame), { binary: true })
                 return
             }
 
             if (packet.kind === 'cancel') {
-                const providerSocket = this.#pendingRequests.get(packet.request_id)
-                if (!providerSocket) return
+                const pending = this.#pendingRequests.get(packet.request_id)
+                if (!pending) return
                 this.#pendingRequests.delete(packet.request_id)
-                if (providerSocket.readyState === WebSocket.OPEN) {
-                    providerSocket.send(encodeRelayFrame(frame), { binary: true })
-                }
+                this.#forwardCancel(pending.provider, packet.request_id)
                 return
             }
 
@@ -157,6 +172,9 @@ export class WebsocketRelayServer {
     }
 
     private on_close(socket: WebSocket) {
+        // Chạy trước phần membership: một caller chưa kịp gửi hello vẫn có request đang bay.
+        this.#failPendingRequests(socket)
+
         const nodeId = this.#resolveSenderId(socket)
         if (!nodeId) return
 
@@ -164,17 +182,51 @@ export class WebsocketRelayServer {
         this.#removeTopicListeners(nodeId)
         this.#removeFromServiceIndex(nodeId)
 
-        for (const [requestId, providerSocket] of this.#pendingRequests) {
-            if (providerSocket === socket) {
-                this.#pendingRequests.delete(requestId)
-            }
-        }
-
         this.on_broadcast({
             type: 'offline',
             node_id: nodeId,
         }, socket)
         this.#syncServerConnections()
+    }
+
+    /**
+     * Relay là nơi duy nhất biết chắc cặp caller/provider của một request round-robin,
+     * nên nó phải đóng cả hai chiều khi một đầu rớt:
+     * provider chết → caller nhận `MICROSERVICE_OFFLINE`, không treo tới hết timeout;
+     * caller chết → provider nhận `cancel`, không rò rỉ stream đang chạy.
+     */
+    #failPendingRequests(socket: WebSocket) {
+        for (const [requestId, pending] of this.#pendingRequests) {
+            if (pending.provider !== socket && pending.caller !== socket) continue
+
+            this.#pendingRequests.delete(requestId)
+
+            if (pending.provider === socket && pending.caller !== socket) {
+                this.#sendOfflineError(
+                    pending.caller,
+                    requestId,
+                    pending.service,
+                    `Node serving ${pending.service} went offline while the request was in flight`,
+                )
+                continue
+            }
+
+            if (pending.caller === socket && pending.provider !== socket) {
+                this.#forwardCancel(pending.provider, requestId)
+            }
+        }
+    }
+
+    #forwardCancel(provider: WebSocket, requestId: string) {
+        if (provider.readyState !== WebSocket.OPEN) return
+
+        provider.send(encodeRelayFrame({
+            type: 'rpc',
+            data: {
+                kind: 'cancel',
+                request_id: requestId,
+            },
+        } satisfies RelayFrame), { binary: true })
     }
 
     #registerNode(socket: WebSocket, frame: RelayHelloFrame, nodeId: string) {
@@ -229,7 +281,7 @@ export class WebsocketRelayServer {
         return candidates[next]
     }
 
-    #sendOfflineError(socket: WebSocket, requestId: string, service: string) {
+    #sendOfflineError(socket: WebSocket, requestId: string, service: string, message = `No available node for service ${service}`) {
         if (socket.readyState !== WebSocket.OPEN) return
 
         socket.send(encodeRelayFrame({
@@ -237,7 +289,7 @@ export class WebsocketRelayServer {
             data: {
                 kind: 'response',
                 request_id: requestId,
-                error: { code: 'MICROSERVICE_OFFLINE', message: `No available node for service ${service}` },
+                error: { code: 'MICROSERVICE_OFFLINE', message },
                 completed: true,
             },
         } satisfies RelayFrame), { binary: true })

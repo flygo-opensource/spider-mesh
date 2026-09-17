@@ -3,6 +3,7 @@ import { BehaviorSubject, fromEvent, ignoreElements, merge, mergeMap, Subscripti
 import type { SpiderMeshNode } from '@spider-mesh/core'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame } from './websocketProtocol.js'
 
+/** Metrics quan sát của một node đang kết nối discovery server. */
 export type NodeMetrics = {
     node_id: string
     host: string
@@ -13,6 +14,7 @@ export type NodeMetrics = {
     last_seen: number
 }
 
+/** Snapshot metrics tổng hợp của WebSocket discovery server. */
 export type DiscoveryMetrics = {
     total_nodes: number
     nodes: NodeMetrics[]
@@ -20,6 +22,7 @@ export type DiscoveryMetrics = {
     updated_at: number
 }
 
+/** Cấu hình địa chỉ listen của WebSocket discovery server. */
 export type WebsocketDiscoveryServerOptions = {
     port?: number
     host?: string
@@ -29,6 +32,7 @@ export type WebsocketDiscoveryServerOptions = {
 const socketNodeId = Symbol('socketNodeId')
 type TrackedSocket = WebSocket & { [socketNodeId]?: string }
 
+/** Server đồng bộ hello/offline và cung cấp metrics; không truyền RPC. */
 export class WebsocketDiscoveryServer {
     #server: WsServer
     #subscription = Subscription.EMPTY

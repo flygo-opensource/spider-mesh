@@ -3,7 +3,9 @@ import WebSocket from 'ws'
 import { WebsocketRelayServer } from '../src/relay-server.js'
 import { WebsocketTransporter } from '../src/node.js'
 import { encodeRelayFrame } from '../src/websocketProtocol.js'
-import type { DiscoveryEvent, MdnsMessage, RpcRequestPacket, SpiderMeshNode } from '@spider-mesh/core'
+import type { RpcRequestPacket, SpiderMeshNode } from '@spider-mesh/core'
+import type { DiscoveryEvent, DiscoveryMessage } from '@spider-mesh/discovery'
+import { EventBus } from '@spider-mesh/events'
 
 const port = 8800 + Math.floor(Math.random() * 200)
 const baseWsUrl = `ws://127.0.0.1:${port}`
@@ -48,11 +50,15 @@ const nodeC: SpiderMeshNode = {
     transporters: { websocket: {} },
 }
 
-function createDiscoveryMessage(node: SpiderMeshNode): MdnsMessage<SpiderMeshNode> {
+function createDiscoveryMessage(node: SpiderMeshNode): DiscoveryMessage<SpiderMeshNode> {
     return {
-        hi: true,
-        node,
-        sender_id: node.node_id,
+        node_id: node.node_id,
+        namespace: node.namespace,
+        tags: ['spider-mesh', 'node'],
+        version: String(node.version),
+        created_at: Date.now(),
+        seq: node.version,
+        data: node,
     }
 }
 
@@ -89,19 +95,26 @@ async function main() {
     })
     transporterC.connect(serverWsUrl)
 
+    const eventsA = new EventBus()
+    const eventsB = new EventBus()
+    const eventsC = new EventBus()
+    eventsA.registerTransporter(transporterA)
+    eventsB.registerTransporter(transporterB)
+    eventsC.registerTransporter(transporterC)
+
     try {
         const discoveryA = firstValueFrom(transporterA.pipe(
-            filter((event): event is DiscoveryEvent => !!event?.discovered?.node_id && event.discovered.node_id === nodeB.node_id),
+            filter((event): event is DiscoveryEvent<SpiderMeshNode> => event?.data?.node_id === nodeB.node_id),
             timeout(5000),
         ))
 
         const discoveryC = firstValueFrom(transporterC.pipe(
-            filter((event): event is DiscoveryEvent => !!event?.discovered?.node_id && event.discovered.node_id === nodeB.node_id),
+            filter((event): event is DiscoveryEvent<SpiderMeshNode> => event?.data?.node_id === nodeB.node_id),
             timeout(5000),
         ))
 
         const noDiscoveryOnClient = expectNoEvent(transporterB.pipe(
-            filter((event): event is DiscoveryEvent => !!event?.discovered?.node_id && (event.discovered.node_id === nodeA.node_id || event.discovered.node_id === nodeC.node_id)),
+            filter((event): event is DiscoveryEvent<SpiderMeshNode> => event?.data?.node_id === nodeA.node_id || event?.data?.node_id === nodeC.node_id),
         ))
 
         await Promise.all([
@@ -169,18 +182,18 @@ async function main() {
             filter(event => event?.rpc?.request_id === 'blocked-request'),
         ))
 
-        const sharedStreamA = transporterA.listen<{ ok: boolean, via: string }>('updates')
+        const sharedStreamA = eventsA.linkTopic<{ ok: boolean, via: string }>('updates').listen()
         const pubsubMessageA = firstValueFrom(sharedStreamA.pipe(
             timeout(5000),
         ))
 
-        const pubsubMessageC = firstValueFrom(transporterC.listen<{ ok: boolean, via: string }>('updates').pipe(
+        const pubsubMessageC = firstValueFrom(eventsC.linkTopic<{ ok: boolean, via: string }>('updates').listen().pipe(
             timeout(5000),
         ))
 
         await new Promise(resolve => setTimeout(resolve, 50))
 
-        await transporterB.publish('updates', { ok: true, via: 'binary-pubsub' })
+        await eventsB.linkTopic<{ ok: boolean, via: string }>('updates').publish({ ok: true, via: 'binary-pubsub' })
 
         const [pubsubEventA, pubsubEventC] = await Promise.all([pubsubMessageA, pubsubMessageC])
         if (!pubsubEventA.ok || pubsubEventA.via !== 'binary-pubsub') {

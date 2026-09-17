@@ -10,7 +10,7 @@ type GreetingService = {
 }
 
 async function main() {
-    const { mesh } = createMesh({ wsUrl, heartbeatIntervalMs: 1000, reconnectIntervalMs: 500 })
+    const { mesh } = createMesh({ wsUrl, heartbeatIntervalMs: 1000, reconnectIntervalMs: 500, topology: true })
     console.log('WebSocket failover client connected')
 
     const greeter = RemoteServiceLinker.link<GreetingService>(mesh, {

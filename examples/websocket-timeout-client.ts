@@ -26,7 +26,7 @@ async function main() {
     }, 12000)
 
     try {
-        await service.wait(() => mesh.listRpcNodes('SlowService').length > 0)
+        await service.wait()
 
         try {
             await firstValueFrom(service.hang('trigger-timeout'))

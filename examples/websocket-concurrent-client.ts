@@ -27,7 +27,7 @@ async function main() {
     }, 20000)
 
     try {
-        await greeter.wait(() => mesh.listRpcNodes('GreetingService').length > 0)
+        await greeter.wait()
 
         // Fire CONCURRENT_COUNT calls simultaneously — all must complete correctly
         const results = await Promise.all(
