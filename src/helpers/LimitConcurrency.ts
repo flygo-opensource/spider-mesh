@@ -1,9 +1,6 @@
-import { Observable, Subject } from 'rxjs';
+import { Subject } from 'rxjs';
 import { finalize, mergeMap } from 'rxjs/operators';
-
-const isSubscribable = (value: unknown): value is Observable<unknown> => {
-  return !!value && typeof value === 'object' && typeof (value as { subscribe?: unknown }).subscribe === 'function';
-};
+import { isSubscribable } from './isSubscribable.js';
 
 // Helper type: Only allow methods that return Promise<any>
 type AsyncMethod = (...args: any[]) => Promise<any>;

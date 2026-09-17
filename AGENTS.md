@@ -15,28 +15,32 @@ bun run test:e2e     # bun test tests/*.test.ts
 
 Behavior references when changing runtime/routing:
 
-- `tests/mock-e2e.test.ts` — single-process mock RPC / linking / events
+- `tests/mock-e2e.test.ts` — single-process mock RPC, linking, local-node state, and availability
 - `tests/process-e2e.test.ts` — RPC across isolated child processes
 - `tests/fixtures/` — shared test services
 
 ## Conventions
 
 - **ESM-only.** Source uses emitted `.js` relative specifiers (`moduleResolution: NodeNext`). Import `./Foo.js`, not `./Foo`.
-- **`src/types.ts` is the transporter contract source of truth.** Change contracts there; keep companion packages (`@spider-mesh/tcp`, `@spider-mesh/ws`) aligned in the same change.
+- **`src/types.ts` is the RPC/Topology contract source of truth.** Generic discovery contracts belong to
+  `@spider-mesh/discovery`; keep companion packages aligned in the same change.
 - **Keep this package runtime-agnostic.** No sockets, UDP, HTTP, or transport-specific code in `core`. Concrete transports belong in companion packages.
-- **Register transporter instances, never classes** (`mesh.registerTransporter(new T())`). Capability is inferred by instance shape (`send`/`publish`/`broadcast`).
-- **Service & event identity is the class name.** Treat renames as breaking; avoid build steps that mangle class names.
+- **Transporter tự hardcode `readonly name`** và được truyền vào `new SpiderMesh({ transporters })`.
+  Không suy luận bằng tên class và không có availability registration riêng.
+- **Topology là optional**; Topology nhận Discovery trong constructor, còn routing config thuộc request.
+- **Service identity is the class name.** Treat renames as breaking; avoid build steps that mangle class names.
 - **`LOCAL_SERVICES$` is process-global** and not re-exported — do not rely on multiple meshes per process being isolated. See [ARCHITECTURE.md](ARCHITECTURE.md#invariants--gotchas).
 
 ## Where things live
 
 | Concern | File |
 | --- | --- |
-| Runtime lifecycle, RPC routing, events | `src/SpiderMesh.ts` |
-| Peer / topic / RPC-routing state | `src/Registry.ts` |
+| Runtime lifecycle, RPC routing, metadata bridge | `src/SpiderMesh.ts` |
+| Node / topic / RPC-routing state | `src/Topology.ts` (`Registry.ts` chỉ là alias cũ) |
 | Remote proxy + linker | `src/RemoteService.ts` |
 | Contracts, packets, node shape, error codes | `src/types.ts` |
 | Local-service registration | `src/decorators/Microservice.ts` |
+| Stateless runtime utilities and guards | `src/helpers/` |
 | Public API surface | `src/index.ts` |
 
 For the full module map and data flow, see [ARCHITECTURE.md](ARCHITECTURE.md).

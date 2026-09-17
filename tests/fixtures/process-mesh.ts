@@ -1,31 +1,27 @@
 import { createInterface } from 'node:readline'
 import { firstValueFrom, Subject } from 'rxjs'
-import { Registry } from '../../src/Registry.js'
 import { SpiderMesh } from '../../src/SpiderMesh.js'
+import { Topology } from '../../src/Topology.js'
 import { LOCAL_SERVICES$ } from '../../src/decorators/Microservice.js'
 import type {
-    DiscoveryEvent,
-    DiscoveryTransporter,
-    MdnsMessage,
-    NodeMetadata,
     RpcCancelPacket,
     RpcEvent,
     RpcRequestPacket,
     RpcResponsePacket,
     RpcTransporter,
-    ServiceDirectory,
+    SpiderMeshNode,
 } from '../../src/types.js'
 
 type RpcPacket = RpcRequestPacket | RpcResponsePacket | RpcCancelPacket
 
 type HostMessage =
     | { kind: 'ready'; role: string; node_id: string }
-    | { kind: 'discovery-broadcast'; role: string; node: any }
+    | { kind: 'node-broadcast'; role: string; node: SpiderMeshNode }
     | { kind: 'rpc-send'; role: string; packet: RpcPacket; node_id?: string }
     | { kind: 'result'; role: string; value?: unknown; error?: string; code?: string }
 
 type ChildCommand =
-    | { kind: 'discovery-deliver'; node: any }
+    | { kind: 'node-deliver'; node: SpiderMeshNode }
     | { kind: 'rpc-deliver'; packet: RpcPacket }
     | { kind: 'call'; value: string }
 
@@ -41,6 +37,7 @@ const sendHostMessage = (message: HostMessage) => {
 }
 
 class ProcessRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
+    public readonly name = 'process'
     metadata = { mock: true }
 
     async send(packet: RpcPacket, node_id?: string) {
@@ -59,39 +56,14 @@ class ProcessRpcTransporter extends Subject<RpcEvent> implements RpcTransporter 
     }
 }
 
-class ProcessDiscoveryTransporter extends Subject<DiscoveryEvent> implements DiscoveryTransporter, ServiceDirectory {
-    #registry = new Registry()
-
-    constructor() {
-        super()
-        this.subscribe(event => {
-            if (event.discovered) this.#registry.upsertPeer(event.discovered)
-        })
-    }
-
-    async broadcast(data: MdnsMessage<NodeMetadata>) {
-        sendHostMessage({
-            kind: 'discovery-broadcast',
-            role,
-            node: data.node,
-        })
-    }
-
-    watchService(service: string) {
-        return this.#registry.watch(service)
-    }
-
-    listNodes(service: string) {
-        return this.#registry.listPeers(service)
-    }
-}
-
-const mesh = new SpiderMesh()
+const topology = new Topology()
+const mesh = new SpiderMesh({ topology })
 const rpcTransporter = new ProcessRpcTransporter()
-const discoveryTransporter = new ProcessDiscoveryTransporter()
 
-mesh.registerTransporter(rpcTransporter, 'ProcessRpcTransporter')
-mesh.registerTransporter(discoveryTransporter, 'ProcessDiscoveryTransporter')
+mesh.registerTransporter(rpcTransporter)
+mesh.localNode$.subscribe(node => {
+    sendHostMessage({ kind: 'node-broadcast', role, node })
+})
 
 if (role === 'provider') {
     LOCAL_SERVICES$.next({
@@ -116,8 +88,8 @@ rl.on('line', async line => {
     if (!line.trim()) return
     const command = JSON.parse(line) as ChildCommand
 
-    if (command.kind === 'discovery-deliver') {
-        discoveryTransporter.next({ discovered: command.node })
+    if (command.kind === 'node-deliver') {
+        topology.upsertRemote(command.node)
         return
     }
 

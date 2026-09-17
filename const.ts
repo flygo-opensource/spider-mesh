@@ -1,8 +1,6 @@
 
 export const SPIDERMESH_NAMESPACE = process.env.SPIDERMESH_NAMESPACE || 'default'
 export const SPIDERMESH_NODE_HOSTNAME = process.env.SPIDERMESH_NODE_HOSTNAME || ''
-export const SPIDERMESH_NODE_ID = process.env.SPIDERMESH_NODE_ID || process.env.HOSTNAME || undefined
-
 export const SPIDERMESH_BUILD_VERSION = process.env.APP_VERSION || process.env.SPIDERMESH_VERSION || undefined
 export const SPIDERMESH_BUILD_GIT_TAG = process.env.GIT_TAG || undefined
 export const SPIDERMESH_BUILD_GIT_BRANCH = process.env.GIT_BRANCH || undefined

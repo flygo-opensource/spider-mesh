@@ -1,4 +1,4 @@
-import { catchError, EMPTY, filter, takeUntil, firstValueFrom, from, map, mergeMap, Observable, of, timer } from "rxjs";
+import { catchError, EMPTY, firstValueFrom, from, map, mergeMap, Observable, of } from "rxjs";
 import { ServiceChecker, SpiderMesh } from "./SpiderMesh.js";
 import { RpcOptions, SpiderMeshNode } from "./types.js";
 
@@ -27,21 +27,27 @@ const InvaildMethodList = new Set([
     'onApplicationShutdown'
 ])
 
+/** Type helper dùng để nhận biết generic đang giữ giá trị `unknown`. */
 export type IsUnknown<T, A, B> = unknown extends T ? ([T] extends [unknown] ? A : B) : B;
 
+/** Cấu hình mặc định của proxy gọi một remote service. */
 export type RemoteServiceOptions = Partial<RpcOptions<any>> & { service: string }
 
+/** Chuẩn hóa Promise/Observable/value thành kiểu trả về mà proxy cung cấp cho caller. */
 export type Unwrap<T> = Awaited<T> extends Observable<infer U> ? Observable<U> : (T extends Promise<infer V> ? Promise<V> : Promise<T>)
 
+/** Thêm fallback type vào kết quả của một remote method. */
 export type Fallbackable<Fn, FallbackValue = unknown> = Fn extends (...args: infer A) => infer R ? (
     (...args: A) => IsUnknown<FallbackValue, Unwrap<R>, FallbackValue | Unwrap<R>>
 ) : undefined
 
+/** Chỉ giữ property là function khi ánh xạ service interface. */
 export type FunctionOnly<T, Fallback> = T extends (...args: any[]) => any ? Fallback : never
 
 
 
 
+/** Tạo proxy typed để gọi, chờ, theo dõi hoặc batch một remote service. */
 export class RemoteServiceLinker<Service> {
 
     constructor(
@@ -67,15 +73,7 @@ export class RemoteServiceLinker<Service> {
     }
 
     wait(checker: ServiceChecker = (nodes => nodes.length > 0), stop$: Observable<any> = EMPTY) {
-        return firstValueFrom(this.watch().pipe(
-            takeUntil(stop$),
-            mergeMap(async nodes => ({
-                nodes,
-                ready: await checker(nodes)
-            })),
-            filter(result => result.ready),
-            map(result => result.nodes)
-        ), { defaultValue: null })
+        return this.sm.waitForService(this.options.service, checker, stop$)
     }
 
     static link<Service, Fallback = never>(sm: SpiderMesh, options: RemoteServiceOptions) {
@@ -95,6 +93,8 @@ export class RemoteServiceLinker<Service> {
                         mergeMap(node => (
                             target.sm.callRemoteService({
                                 ...options,
+                                // Batch phải pin từng RPC vào đúng node đang được lặp.
+                                node_id: node.node_id,
                                 method: real_metod,
                                 args
                             }).pipe(
@@ -131,6 +131,7 @@ export class RemoteServiceLinker<Service> {
     }
 }
 
+/** Kiểu proxy cuối cùng gồm các remote method và biến thể `__batch__`. */
 export type Mapper<Service, Fallback = unknown> = RemoteServiceLinker<Service> & ({
     [K in keyof Service as  FunctionOnly<Service[K], K>]: Fallbackable<Service[K], Fallback>
 } & {
@@ -146,4 +147,5 @@ export type Mapper<Service, Fallback = unknown> = RemoteServiceLinker<Service> &
 })
 
 
+/** Alias ngắn cho một remote service proxy đã được map type. */
 export type RemoteService<Service> = Mapper<Service>

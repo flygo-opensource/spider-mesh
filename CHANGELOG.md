@@ -1,5 +1,65 @@
 # Changelog
 
+## 3.0.0 — modular integrations, registry-free runtime, and random identity
+
+- `SpiderMesh` nhận `transporters` và optional `topology` trong constructor.
+- Mỗi RPC transporter bắt buộc có wire name ổn định qua `readonly name`.
+- Thêm `Topology`, request-level routing, lifecycle `start/stop` và probe fallback.
+- `Registry` trở thành alias compatibility của `Topology`; bỏ availability registration riêng.
+- Không gửi cancel thừa khi một terminal response vừa có `data` vừa có `completed`; sửa race
+  giữa `firstValueFrom()` và HTTP/2 response stream trên Node/Linux.
+- Topology quản lý reachability theo node/transporter, loại endpoint lỗi khỏi routing và phát
+  event `suspect`/`unreachable`/`recovered` tức thời.
+- Thêm optional `TopologyDiscovery.verify()`; chỉ Discovery được xác nhận `dead` mới xóa node.
+
+### Breaking
+- Event linking and pub/sub contracts moved to `@spider-mesh/events`. Replace
+  `mesh.linkEvent(...)` with `events.link(...)`, and register event transporters on `EventBus`.
+- Discovery contracts and outbound binding moved to `@spider-mesh/discovery`. Replace
+  `mesh.registerTransporter(discovery)` with `bindMeshDiscovery(mesh, discovery)`.
+- Node identity can no longer be forced through `SPIDERMESH_NODE_ID` or `HOSTNAME`; every
+  `SpiderMesh` instance receives a fresh random ID.
+- Consumers and companion packages must use the 3.x transporter contracts.
+- `SpiderMesh` no longer accepts a Registry constructor argument or exposes `mesh.registry`.
+  Transporters provide availability directly through optional `watchService()` / `listNodes()`.
+- Removed the separate `ServiceDirectory` type. Availability is now part of transporter capability.
+
+### Fixed
+- An in-flight RPC whose provider node goes offline now errors with `MICROSERVICE_OFFLINE`
+  instead of hanging. `#rpc.pending` tracks the node serving each request (pinned `node_id`, the
+  `destination_node_id` a transporter resolved, or `sender_node_id` from the first response), and
+  an `offline` event errors every stream bound to that node. Previously a long-lived `Observable`
+  stayed silent forever unless the caller had set a `timeout`.
+- `cancel` is no longer dropped when `unsubscribe()` runs before `transporter.send()` resolves;
+  the request is cancelled as soon as the send settles, so provider streams stop leaking.
+- Declares `reflect-metadata` as a runtime dependency, so production installs no longer fail
+  while loading `BeforeMicroserviceOnline`.
+- Mixed-capability transporters remain authoritative for their own peer lifecycle; core does not
+  interpret inbound discovery/RPC/pubsub events as peer storage.
+- Node identity is always random per `SpiderMesh` instance. Core no longer reads identity from
+  `SPIDERMESH_NODE_ID`, `HOSTNAME`, or any constant derived from environment state.
+
+### Changed
+- `RpcResponsePacket.sender_node_id` (optional) reports the node that answered, so a caller can
+  close the right stream when that node disappears.
+- `RpcTransporter.send()` may return `destination_node_id` alongside `cancel`, reporting the node
+  a transporter actually routed to. Both additions are optional and backward-compatible.
+- `SpiderMesh.localNode` and `localNode$` expose the current node snapshot to external integrations.
+- Added explicit `AvailabilitySource` and `registerAvailabilitySource()`; RPC transporters that
+  implement the availability methods are still registered automatically.
+- Discovery envelopes, outbound broadcast binding, reply/convergence policy, Registry updates, and
+  liveness now live outside core.
+- `Registry` remains exported as a standalone helper for transporters; core runtime does not use it.
+- `Registry.watch(service)` emits when an existing peer's metadata version changes, allowing
+  half-ready service announcements to become RPC-routable without changing `node_id`.
+- `Registry.upsertPeer()` now replaces a full discovery snapshot instead of merging stale fields.
+  Partial updates use the explicit `Registry.patchPeer()` API.
+
+### Validation
+- Core contract/process E2E: 13/13 pass.
+- Cross-host TCP/Ohayo tests confirmed that a third node discovers two providers for each of two
+  services across two servers, and that stop/restart emits Registry offline then rediscovery.
+
 ## 2.0.152 — reachability-aware RPC routing (BREAKING)
 
 Default RPC routing now follows the same source of truth as availability. Previously, with

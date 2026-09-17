@@ -1,152 +1,118 @@
-# @spider-mesh/core — Architecture
+# Kiến trúc `@spider-mesh/core`
 
-Internal structure of `@spider-mesh/core`, for maintainers and contributors.
-For *how to use* the package, see [README.md](README.md). For build/test/conventions, see [AGENTS.md](AGENTS.md).
+Core chỉ quản lý RPC runtime và model node. Mọi I/O nằm ở package transporter hoặc Discovery.
 
-The whole package is runtime-agnostic: it has **no socket, UDP, or HTTP code**. It defines the mesh model (services, peers, routing, events) and the *contracts* a transport must satisfy. Concrete transports live in `@spider-mesh/tcp`, `@spider-mesh/ws`, or user code.
+## Biên trách nhiệm
 
-## Module Map
-
-```
-src/
-├── index.ts                 # public API barrel (values + type re-exports)
-├── types.ts                 # contract source of truth: packets, transporter shapes, node shape, error codes
-├── SpiderMesh.ts            # runtime: local node state, transporter wiring, RPC lifecycle, events
-├── Registry.ts              # remote peer + topic + RPC-routing state
-├── RemoteService.ts         # RemoteServiceLinker + the typed remote proxy
-├── decorators/
-│   ├── Microservice.ts                 # @Microservice() + LOCAL_SERVICES$ stream (+ MicroserviceList)
-│   ├── BeforeMicroserviceOnline.ts     # @BeforeMicroserviceOnline() warmup hook
-│   ├── LimitConcurrentRunning.ts       # alias of LimitConcurrency (method throttle)
-│   ├── NestJSExposeMicroservice.ts     # DI factory: expose a Nest provider as a microservice
-│   ├── NestJSLinkMicroservice.ts       # DI factory: inject a remote proxy
-│   └── NestJSLinkEvent.ts              # DI factory: inject an event binding
-└── helpers/
-    ├── LimitConcurrency.ts             # concurrency limiter used by the decorators
-    ├── MicroserviceException.ts        # MicroserviceError TYPE (no runtime value)
-    └── sleep.ts
+```text
+Application
+   |
+SpiderMesh ── local services, request lifecycle, timeout/retry
+   | \
+   |  └── RpcTransporter[] ── HTTP/2, gRPC, raw TCP, WebSocket...
+   |
+   └── Topology? ── membership + endpoint state + request routing state
+            |
+            └── TopologyDiscovery? ── UDP, WebSocket, EndpointSlice...
 ```
 
-### What `index.ts` exports
+### `SpiderMesh`
 
-- **Values:** `SpiderMesh`, `Registry`, `RemoteServiceLinker`, `Microservice`, `BeforeMicroserviceOnline`, `LimitConcurrency`, `LimitConcurrentRunning`, `NestJSExposeMicroservice`, `NestJSLinkMicroservice`, `NestJSLinkEvent`.
-- **Types only:** `RpcOptions`, `RpcTransporter`, `PubsubTransporter`, `DiscoveryTransporter`, `RpcRequestPacket`, `RpcResponsePacket`, `RpcCancelPacket`, `RpcEvent`, `PubsubEvent`, `DiscoveryEvent`, `MeshTransporter`, `TransporterSelector`, `SpiderMeshNode`, `NodeMetadata`, `MdnsMessage`, `SpiderMeshError`, `SpiderMeshErrorCode`, `MicroserviceError`, plus the `RemoteService.ts` helper types.
-- **NOT re-exported (internal):** `LOCAL_SERVICES$` and `MicroserviceList` live in `decorators/Microservice.ts` and are intentionally module-private.
+- Nhận `transporters` và `topology` optional trong constructor.
+- Theo dõi `@Microservice()` và phát snapshot qua `localNode$`.
+- Chọn transporter bằng wire name hoặc `canRoute()`.
+- Correlate response, xử lý stream, cancel, retry và timeout.
+- Không sở hữu discovery và không suy luận transporter bằng tên class.
 
-## Core Data Structures
+### `Topology`
 
-### `SpiderMeshNode` (the unit of discovery)
+- Là một concrete class duy nhất dùng cho mọi môi trường.
+- Nhận `discovery` trong constructor.
+- Chứa local node và remote nodes trong cùng `nodes$`.
+- Route khi request có `node_id` hoặc `routing`.
+- Giữ round-robin/least-active state qua các request.
+- Nhận reachability report từ transporter và loại endpoint lỗi khỏi candidate ngay.
+- Yêu cầu Discovery xác minh node khi endpoint chuyển sang `unreachable`.
+- Có thể evict announcement cũ bằng `staleAfterMs`.
 
-A node advertises its full state on every change. Fields: `node_id`, `namespace`, `host`, `version` (monotonic counter, bumped on every local refresh), `services`, `topics`, `transporters` (which RPC transporter name serves which service), and `nodes`/metadata. Discovery transports serialize and rebroadcast this whole object — there are no deltas.
+`Registry` export lại đúng class này dưới tên cũ; không có runtime Registry thứ hai.
 
-### `LOCAL_SERVICES$` (process-global service stream)
+### `TopologyDiscovery`
 
-`@Microservice()` pushes `{ name, instance, metadata }` into this RxJS subject **at construction time**. Every `SpiderMesh` in the process subscribes and registers every emitted service. This is the single most important non-obvious constraint — see [Invariants](#invariants--gotchas).
+Contract hai chiều:
 
-## Control & Data Flow
-
-### Local service registration
-
-```
-new UserService()
-  └─ @Microservice() decorator → LOCAL_SERVICES$.next({ name: 'UserService', instance, metadata })
-        └─ SpiderMesh subscription
-              ├─ await every @BeforeMicroserviceOnline() method   (warmup gate)
-              ├─ add service to local node metadata
-              └─ #refresh(): bump version, rebroadcast node via discovery transporters
-```
-
-Service **identity is the class name**. Metadata passed to `@Microservice({...})` is free-form and opaque to routing.
-
-### Outbound RPC (`callRemoteService` / remote proxy)
-
-```
-proxy.getUser('42')  ──►  callRemoteService({ service, method, args, ... })
-   1. availability gate: firstValueFrom(watchService(service))   (merged ServiceDirectory)
-   2. resolve transporter (#selectRpcTransport):
-        - explicit RpcOptions.transporter (name | class | {name}), else
-        - the first registered RPC transporter whose canRoute(service, node_id) is true, else
-        - the first registered RPC transporter (fallback)
-   3. transporter.send(RpcRequestPacket) with destination_node_id = RpcOptions.node_id
-        → the TRANSPORT picks the actual node (relay round-robin, or its own peer table)
-   4. correlate RpcResponsePacket(s) by request_id on the transporter's Observable
-   5. apply timeout / retry; surface data or error as an RxJS stream
+```ts
+type TopologyDiscovery = {
+  bind(context: {
+    localNode$: Observable<SpiderMeshNode>
+    upsertRemote(node: SpiderMeshNode): void
+    removeRemote(nodeId: string): void
+  }): { unsubscribe(): void } | void
+  verify?(nodeId: string): Promise<'alive' | 'dead' | 'unknown'>
+  close?(): void | Promise<void>
+}
 ```
 
-Core selects only the **transporter** — preferring one whose `canRoute` reports a route, so a
-default call is not dispatched through a transporter that can't reach the provider — and never the
-target node. It delegates node selection to the transport: `@spider-mesh/tcp` round-robins via its
-own injected `Registry`; `@spider-mesh/ws` lets the relay pick. Selection re-runs on retry.
+Discovery quyết định membership. Transporter quan sát kết nối thật và báo endpoint reachability
+cho Topology. Topology chỉ xóa node sau khi Discovery trả `dead` hoặc snapshot hết TTL.
 
-The returned value is an **Observable augmented with `then`**, so callers can either `subscribe()` or `await`. `SpiderMesh` owns the entire lifecycle: timeout, retry, completion, and cancellation.
+```text
+HTTP/2 connection lost
+        |
+        v
+Http2Rpc -> Topology.reportReachability(unreachable)
+        |          |
+        |          └─ loại endpoint khỏi routing, phát event ngay
+        v
+Discovery.verify(node)
+   dead    -> xóa membership
+   alive   -> giữ membership; transporter tiếp tục reconnect
+   unknown -> giữ membership; heartbeat/TTL hoặc offline frame quyết định sau
+```
 
-**Cancellation:** when the last subscriber unsubscribes before the stream completes, `SpiderMesh` calls the `cancel()` returned by `send()`. The core contract's `send()` only accepts `request`/`response` packets — turning `cancel()` into an on-the-wire `RpcCancelPacket` is a transport-internal concern.
+`Topology.events$` là kênh thay đổi tức thời cho availability. `nodes$` chỉ biểu diễn membership,
+vì thế mất một endpoint không làm biến mất node có thể vẫn dùng protocol khác.
 
-**Fallback short-circuit:** if `RpcOptions.fallback !== undefined`, any caught error resolves to `of(fallback)` instead of propagating.
+### `RpcTransporter`
 
-### Discovery & availability
+```ts
+type RpcTransporter = Observable<RpcEvent> & {
+  readonly name: string
+  start?(context: RpcTransporterContext): void | Promise<void>
+  stop?(): void | Promise<void>
+  send(packet: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket): Promise<{ cancel(): void }>
+  canRoute?(service: string, nodeId?: string): boolean
+  probe?(request: RpcProbeRequest): Promise<RpcProbeResult>
+}
+```
 
-Core does **not** ingest or store peers. A discovery transporter that owns a peer table
-exposes it to core as a `ServiceDirectory`. `watchService(service)` merges
-`directory.watchService(service)` across all such transporters (via `combineLatest`,
-de-duped by `node_id`); `listRpcNodes(service)`/`nodes` do the same for snapshots. Each
-transport is responsible for filling and evicting its own table (tcp ingests into its
-injected `Registry`; ws maintains a node map from relay `hello`/`offline` frames). Core
-keeps the outbound self-announce (`broadcast(#me$)`) only.
+`name` là wire identifier ổn định (`http2`, `grpc`, `raw-tcp`, `websocket`). Metadata endpoint
+trên node luôn dùng đúng key này.
 
-### Events (pub/sub)
+## Hai chế độ vận hành
 
-`mesh.linkEvent(EventClass)` returns `{ publish, listen }` keyed on `EventClass.name` as the topic. `publish()` fans out across **all** registered pubsub transporters; `listen()` merges all transporter listeners into one stream. First local subscribe adds the topic to node metadata (and rebroadcasts); last unsubscribe removes it.
+| Môi trường | Topology | Ai route | Availability |
+| --- | --- | --- | --- |
+| Kubernetes Service | Không cần | K8s Service/mesh | `probe()` |
+| WebSocket relay | Không cần | Relay | relay directory qua `probe()` |
+| PM2/pure Linux | Có | Topology + transporter | membership + `canRoute()` |
+| K8s per-Pod routing | Có | Topology + transporter | discovery + `canRoute()` |
 
-## The Three Transporter Contracts (`types.ts`)
+## Invariants
 
-Capability is **inferred by instance shape** at `registerTransporter()` time, not declared:
+- `LOCAL_SERVICES$` là process-global; một process nên đại diện một logical node.
+- Service identity mặc định là class name; rename/minify class là wire-breaking.
+- Discovery snapshot là authoritative full snapshot.
+- Transporter không được tự xóa membership; nó chỉ báo reachability của endpoint mình sở hữu.
+- Trạng thái endpoint chưa từng được báo mặc định là reachable để tương thích transporter cũ.
+- Routing config thuộc request, không thuộc Topology constructor.
+- Không có Topology thì Core không bịa danh sách node từ kết quả probe.
+- Source là ESM và relative import dùng đuôi `.js`.
 
-| Method present | Treated as | Contract |
-| --- | --- | --- |
-| `send()` | RPC | `send(RpcRequestPacket \| RpcResponsePacket) → Promise<{ cancel }>` |
-| `publish()` | pubsub | `publish(topic, data)` + `listen(topic): Observable` |
-| `broadcast()` | discovery | `broadcast(MdnsMessage<NodeMetadata>)` |
-| `watchService()` + `listNodes()` | `ServiceDirectory` | availability for `wait()`/`watch()`/`nodes` |
+## Thứ tự đọc source
 
-All are `Observable<…Event>` (the runtime subscribes to them). A single instance can implement more than one contract (that is how `@spider-mesh/ws` serves all from one socket). There is **no `linkRegistry`** — transports that need a registry receive it via their own constructor.
-
-The RPC contract also requires **`canRoute(service, node_id?): boolean`** (part of `send()`'s capability, not a separate one). Core calls it in `#selectRpcTransport` to prefer a transporter that can actually reach the target — see the checklist below.
-
-### Implementing a custom transporter — checklist
-
-- `send()` returns `Promise<{ cancel: () => void }>`; for `response` packets `cancel` is a no-op.
-- Implement **`canRoute(service, node_id?)`** (required): return `true` only when you can currently reach a provider of `service` (honor `node_id` when given). Keep it **side-effect free** (e.g. don't advance a round-robin index). If you can't enumerate reachability, `return true` and let `send()` surface the error.
-- Route `request` packets by `destination_node_id`; fall back to your own selection when absent (core does not pick the node).
-- Implement `ServiceDirectory` (`watchService`/`listNodes`) if you want `wait()`/`watch()`/`nodes` to work. `watchService` must emit current state promptly (BehaviorSubject semantics) — do **not** emit a synthetic empty first.
-- Own your peer table: ingest on discovery, evict on disconnect. Receive any `Registry`/state you need via your constructor.
-- Deliver the cancel signal through your own wire format inside the `cancel()` closure — do **not** expect `RpcCancelPacket` through `send()`.
-
-## Registry (transport helper)
-
-`Registry` is pure in-memory peer + routing state — no I/O. `SpiderMesh` no longer owns or depends on it; it is a **helper for client-side-routing transports** (e.g. tcp constructs one and injects it into its three transporters). Public surface: `getPeer`, `upsertPeer`, `removePeer`, `listPeers(service?)`, `watch(service?)`, `pickRpcNode(service, { node_id?, filter? })` (round-robin; `filter(node)` excludes peers a transport can't route to yet — e.g. tcp passes one to skip providers whose Http2Rpc port isn't advertised), `getRpcTransporterName(service)`, `listTopicNodes(topic)`, plus the `nodes$` BehaviorSubject. If you change routing strategy (e.g. weighted/affinity), `pickRpcNode` is the seam.
-
-### Extending: platform-native availability (e.g. Kubernetes)
-
-Because availability is just a `ServiceDirectory`, a transport can back it with whatever
-the platform already knows. A Kubernetes transport could implement `watchService` from
-**EndpointSlice** watches (push) or a **2s DNS/endpoints poll** (simple first cut), with
-routing delegated to a K8s `Service` / service mesh — no `Registry` and no app-level
-round-robin. Core code is identical across tcp / ws / k8s; only the directory source differs.
-
-## Invariants & Gotchas
-
-- **`LOCAL_SERVICES$` is process-global.** Two `SpiderMesh` instances in one process are NOT isolated — both see every local service. Process-per-node (plus `SPIDERMESH_NAMESPACE`) is the isolation boundary. Any refactor that adds multi-mesh-per-process must replace this global stream.
-- **Service & event identity = class name.** Renaming a class is a wire-breaking change. Minification that mangles class names will break routing.
-- **`MicroserviceError` is a type, not a value.** Error codes are the `SpiderMeshErrorCode` string union (`MICROSERVICE_OFFLINE`, `MICROSERVICE_NOT_FOUND`, `MICROSERVICE_RPC_TIMEOUT`). There is no class to instantiate.
-- **`@Microservice({ version })` is not the node `version`.** The node-level `version` is an internal monotonic counter; the decorator metadata is opaque and ignored by selection.
-- **ESM-only, `.js` relative specifiers in source.** Source imports use emitted `.js` paths (`moduleResolution: NodeNext`).
-
-## Source-of-truth files
-
-When in doubt, read in this order: `src/types.ts` (contracts) → `src/SpiderMesh.ts` (lifecycle/routing) → `src/Registry.ts` (peer state) → `src/RemoteService.ts` (proxy) → `src/decorators/Microservice.ts` (registration). Behavior examples: `tests/mock-e2e.test.ts`, `tests/process-e2e.test.ts`.
-
-## Environment Variables
-
-- `SPIDERMESH_NAMESPACE` — node namespace, default `default`.
-- `SPIDERMESH_NODE_HOSTNAME` — optional hostname attached to node metadata.
+1. `src/types.ts`
+2. `src/SpiderMesh.ts`
+3. `src/Topology.ts`
+4. `src/RemoteService.ts`
+5. `src/decorators/Microservice.ts`

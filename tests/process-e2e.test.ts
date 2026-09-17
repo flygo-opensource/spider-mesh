@@ -4,10 +4,10 @@ import { EventEmitter, once } from 'node:events'
 import { createInterface } from 'node:readline'
 
 type ChildReadyMessage = { kind: 'ready'; role: string; node_id: string }
-type ChildDiscoveryMessage = { kind: 'discovery-broadcast'; role: string; node: any }
+type ChildNodeMessage = { kind: 'node-broadcast'; role: string; node: any }
 type ChildRpcMessage = { kind: 'rpc-send'; role: string; packet: any; node_id?: string }
 type ChildResultMessage = { kind: 'result'; role: string; value?: unknown; error?: string; code?: string }
-type ChildMessage = ChildReadyMessage | ChildDiscoveryMessage | ChildRpcMessage | ChildResultMessage
+type ChildMessage = ChildReadyMessage | ChildNodeMessage | ChildRpcMessage | ChildResultMessage
 
 class MeshProcess {
     process: ChildProcessWithoutNullStreams
@@ -77,15 +77,15 @@ afterEach(() => {
 })
 
 describe('process e2e', () => {
-    test('routes rpc between isolated processes through mock discovery and rpc transporters', async () => {
+    test('routes rpc between isolated processes through local node snapshots and Topology', async () => {
         const serviceName = `ProcessEcho${Date.now().toString(36)}`
         const client = new MeshProcess('client', serviceName)
         const provider = new MeshProcess('provider', serviceName)
         children.push(client, provider)
 
-        const routeDiscovery = (message: ChildDiscoveryMessage) => {
+        const routeNode = (message: ChildNodeMessage) => {
             const target = message.role === 'provider' ? client : provider
-            target.send({ kind: 'discovery-deliver', node: message.node })
+            target.send({ kind: 'node-deliver', node: message.node })
         }
 
         const routeRpc = (message: ChildRpcMessage) => {
@@ -93,17 +93,17 @@ describe('process e2e', () => {
             target.send({ kind: 'rpc-deliver', packet: message.packet })
         }
 
-        client.events.on('discovery-broadcast', routeDiscovery)
-        provider.events.on('discovery-broadcast', routeDiscovery)
+        client.events.on('node-broadcast', routeNode)
+        provider.events.on('node-broadcast', routeNode)
         client.events.on('rpc-send', routeRpc)
         provider.events.on('rpc-send', routeRpc)
 
         await client.waitFor('ready')
         await provider.waitFor('ready')
 
-        const providerDiscovery = provider.latest('discovery-broadcast')
-        if (providerDiscovery) {
-            client.send({ kind: 'discovery-deliver', node: providerDiscovery.node })
+        const providerNode = provider.latest('node-broadcast')
+        if (providerNode) {
+            client.send({ kind: 'node-deliver', node: providerNode.node })
         }
 
         client.send({ kind: 'call', value: 'cross-process' })
