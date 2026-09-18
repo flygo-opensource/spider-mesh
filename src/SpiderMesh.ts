@@ -293,7 +293,8 @@ export class SpiderMesh {
             retry({
                 delay: (e: { code: string }, count: number) => {
                     if (e.code === 'MICROSERVICE_OFFLINE') {
-                        if (options.retry && count < options.retry) return timer(1000)
+                        // RxJS đếm lượt thử lại từ 1, nên `retry: N` phải cho phép đủ N lượt.
+                        if (options.retry && count <= options.retry) return timer(1000)
                     }
                     throw e
                 }

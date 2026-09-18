@@ -145,6 +145,31 @@ class StreamingRpcTransporter extends Subject<RpcEvent> implements RpcTransporte
     }
 }
 
+/** Mọi request đều bị trả MICROSERVICE_OFFLINE; đếm số request đã gửi. */
+class AlwaysOfflineRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
+    public readonly name = 'always-offline'
+    requests = 0
+
+    async send(packet: RpcRequestPacket | RpcResponsePacket | RpcCancelPacket) {
+        if (packet.kind === 'request') {
+            this.requests++
+            queueMicrotask(() => this.next({
+                rpc: {
+                    kind: 'response',
+                    request_id: packet.request_id,
+                    error: { code: 'MICROSERVICE_OFFLINE', message: 'offline' },
+                    completed: true,
+                },
+            }))
+        }
+        return { cancel: () => {} }
+    }
+
+    canRoute() {
+        return true
+    }
+}
+
 /** `send()` resolve chậm, mở đúng cửa sổ mà unsubscribe chạy trước khi có hàm cancel. */
 class DeferredCancelRpcTransporter extends Subject<RpcEvent> implements RpcTransporter {
     public readonly name = 'deferred-cancel'
@@ -316,6 +341,25 @@ describe('mock e2e', () => {
         await new Promise(resolve => setTimeout(resolve, 20))
         expect(transporter.cancelCount).toBe(1)
     })
+
+    test('retry: N retries an offline call exactly N times', async () => {
+        for (const retry of [0, 1, 2]) {
+            const transporter = new AlwaysOfflineRpcTransporter()
+            const mesh = new SpiderMesh({ transporters: [transporter] })
+
+            const error = await firstValueFrom(mesh.callRemoteService({
+                service: 'OfflineService',
+                method: 'run',
+                args: [],
+                transporter: transporter.name,
+                retry,
+            })).catch(error => error) as { code?: string }
+
+            expect(error.code).toBe('MICROSERVICE_OFFLINE')
+            // Một lần gọi đầu cộng đúng `retry` lần thử lại.
+            expect(transporter.requests).toBe(1 + retry)
+        }
+    }, 10_000)
 
     test('registers constructor transporters by their hardcoded names', () => {
         const transporter = new NamedLoopbackRpcTransporter('constructor-node')

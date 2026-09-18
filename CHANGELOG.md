@@ -25,6 +25,8 @@
 - Removed the separate `ServiceDirectory` type. Availability is now part of transporter capability.
 
 ### Fixed
+- `retry: N` now retries an offline call exactly `N` times. RxJS counts retries from 1 and the
+  check used `count < retry`, so `retry: 1` never retried and `retry: N` retried only `N - 1` times.
 - An in-flight RPC whose provider node goes offline now errors with `MICROSERVICE_OFFLINE`
   instead of hanging. `#rpc.pending` tracks the node serving each request (pinned `node_id`, the
   `destination_node_id` a transporter resolved, or `sender_node_id` from the first response), and
