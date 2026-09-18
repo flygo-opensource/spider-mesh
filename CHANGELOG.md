@@ -21,6 +21,8 @@
 - The legacy `{ hi, node }` UDP wire format is no longer supported by this package.
 
 ### Changed
+- Declares `@ohayo/udp@^3.0.0` as an optional peer dependency: the documented UDP setup pairs the two,
+  so package managers now warn about a mismatched major. `msgpackr` is pinned to the tested `^1.12.1`.
 - Added an RPC contract e2e matrix (`examples/contract/`, shared verbatim by `@spider-mesh/ws` and
   `@spider-mesh/tcp`), 74 checks: 17 method shapes (sync, async, sync/async observable with immediate
   or delayed values, empty streams, and every error position — sync throw, async reject, observable

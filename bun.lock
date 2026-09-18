@@ -5,7 +5,7 @@
     "": {
       "name": "@spider-mesh/tcp",
       "dependencies": {
-        "msgpackr": "^1.11.5",
+        "msgpackr": "^1.12.1",
         "rxjs": "^7.8.2",
       },
       "devDependencies": {
@@ -18,8 +18,12 @@
         "typescript": "^5.8.2",
       },
       "peerDependencies": {
+        "@ohayo/udp": "^3.0.0",
         "@spider-mesh/core": "^3.0.0",
       },
+      "optionalPeers": [
+        "@ohayo/udp",
+      ],
     },
   },
   "packages": {
