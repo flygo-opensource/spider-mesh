@@ -25,6 +25,10 @@
 - Removed the separate `ServiceDirectory` type. Availability is now part of transporter capability.
 
 ### Fixed
+- `@spider-mesh/core` loads in browsers and React Native. `const.ts` read `process.env` at import
+  time, so any app without a `process` global crashed with `ReferenceError: process is not defined`
+  before running anything. Environment variables are now read only when `process` exists, falling
+  back to defaults otherwise; a test bundles core for the browser and runs it without `process`.
 - A remote call now behaves like a real Promise. The proxy's hand-written `then` dropped the
   callback's return value (`await call.then(v => v + 1)` gave `undefined`) and there was no `catch`
   or `finally`, so `call.catch(...)` — allowed by the `Promise` type — threw at runtime. It also sent

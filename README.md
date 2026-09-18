@@ -194,8 +194,14 @@ Lỗi luôn có dạng `{ code?: string, message: string }`.
 | `MICROSERVICE_RPC_TIMEOUT` | Hết `timeout`. |
 | mã tuỳ ý | Provider ném `{ code, message }`, hoặc `Error` có thuộc tính `code`. `Error` thường hoặc chuỗi thì chỉ có `message`. |
 
-Stream lỗi giữa chừng vẫn giao đủ các giá trị trước lỗi. Stream hoàn tất mà không phát giá trị nào
-thì subscribe chỉ nhận `complete`, còn `await` sẽ ném `EmptyError` của RxJS.
+Kết quả theo từng cách dùng:
+
+| Provider trả về | `subscribe` nhận | `await` nhận |
+| --- | --- | --- |
+| giá trị / `Promise` | giá trị rồi `complete` | giá trị |
+| `Observable` / `Promise<Observable>` | mọi giá trị rồi `complete` | giá trị **đầu tiên**; stream ở provider bị huỷ ngay sau đó |
+| `Observable` rỗng | chỉ `complete` | ném `EmptyError` của RxJS |
+| lỗi (throw, reject, `Observable` lỗi) | các giá trị phát trước lỗi, rồi `error` | lỗi, trừ khi đã có giá trị trước lỗi |
 
 ### Dữ liệu truyền qua RPC
 
@@ -203,8 +209,11 @@ thì subscribe chỉ nhận `complete`, còn `await` sẽ ném `EmptyError` củ
 | --- | --- |
 | `string`, `number`, `boolean`, `null`, mảng, object lồng nhau | ✅ |
 | `Date`, `Uint8Array` | ✅ giữ nguyên kiểu |
-| `undefined` | ⚠️ tuỳ transporter: `@spider-mesh/ws` nhận `null`, `@spider-mesh/tcp` nhận `undefined`. Dùng `null` khi cần giá trị rỗng như nhau. |
-| `Map`, `Set`, instance của class | ❌ không giữ kiểu (với `ws`, `Map` còn mất hết dữ liệu). Dùng object/mảng; instance đến nơi thành object thường, không có method. |
+| `undefined` (giá trị trả về lẫn field trong object) | ✅ |
+| `Map` | ⚠️ đến nơi thành object thường, dữ liệu còn nguyên |
+| `Set`, instance của class | ❌ không giữ kiểu; instance đến nơi thành object thường, không có method |
+
+`@spider-mesh/ws` và `@spider-mesh/tcp` dùng cùng một cách mã hoá, nên dữ liệu đến nơi giống hệt nhau.
 
 ### Chờ và theo dõi service
 
