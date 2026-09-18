@@ -11,7 +11,8 @@
   "files": [
     "build/**/*",
     "tsconfig.json",
-    "yarn.lock"
+    "yarn.lock",
+    "CHANGELOG.md"
   ],
   "devDependencies": {
     "@types/bun": "^1.3.13",
