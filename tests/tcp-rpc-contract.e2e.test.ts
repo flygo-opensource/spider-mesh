@@ -16,5 +16,5 @@ test('tcp rpc contract: every return and error shape', async () => {
     const results = (JSON.parse(line!) as { contract: ContractResult[] }).contract
     const failures = results.filter(item => !item.pass)
     expect(failures.map(({ name, actual, expected }) => ({ name, actual, expected }))).toEqual([])
-    expect(results.length).toBeGreaterThanOrEqual(35)
+    expect(results.length).toBeGreaterThanOrEqual(74)
 })
