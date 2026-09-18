@@ -7,9 +7,7 @@
     "url": "https://github.com/spider-mesh/ws"
   },
   "files": [
-    "build/**/*",
-    "tsconfig.json",
-    "yarn.lock",
+    "build/src/**/*",
     "CHANGELOG.md"
   ],
   "peerDependencies": {
