@@ -160,9 +160,10 @@ import { Http2Rpc } from '@spider-mesh/tcp'
 const mesh = new SpiderMesh({
   transporters: [new Http2Rpc({
     port: 8080,
-    // Tên service -> địa chỉ; ví dụ DNS của Kubernetes Service.
+    // Tên service -> địa chỉ; ở đây là DNS của Kubernetes Service đặt tên theo kebab-case
+    // (GreetingService -> greeting-service.default.svc.cluster.local).
     resolveService: service => ({
-      host: `${service.toLowerCase()}.default.svc.cluster.local`,
+      host: `${service.replace(/(?<!^)([A-Z])/g, '-$1').toLowerCase()}.default.svc.cluster.local`,
       port: 8080,
     }),
   })],
