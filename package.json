@@ -9,9 +9,8 @@
     "url": "https://github.com/spider-mesh/core"
   },
   "files": [
-    "build/**/*",
-    "tsconfig.json",
-    "yarn.lock",
+    "build/src/**/*",
+    "build/const.*",
     "CHANGELOG.md"
   ],
   "devDependencies": {

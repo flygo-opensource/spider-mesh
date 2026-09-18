@@ -15,8 +15,9 @@
 ### Breaking
 - Event linking and pub/sub contracts moved to `@spider-mesh/events`. Replace
   `mesh.linkEvent(...)` with `events.link(...)`, and register event transporters on `EventBus`.
-- Discovery contracts and outbound binding moved to `@spider-mesh/discovery`. Replace
-  `mesh.registerTransporter(discovery)` with `bindMeshDiscovery(mesh, discovery)`.
+- Discovery is no longer registered on the mesh. Replace `mesh.registerTransporter(discovery)` with
+  `new SpiderMesh({ topology: new Topology({ discovery }) })`. To use a broadcast discovery such as
+  `@ohayo/udp`, wrap it in `TopologyDiscoveryAdapter` from `@spider-mesh/tcp`.
 - Node identity can no longer be forced through `SPIDERMESH_NODE_ID` or `HOSTNAME`; every
   `SpiderMesh` instance receives a fresh random ID.
 - Consumers and companion packages must use the 3.x transporter contracts.
