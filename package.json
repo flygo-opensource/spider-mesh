@@ -1,14 +1,12 @@
 {
   "name": "@spider-mesh/tcp",
   "type": "module",
-  "version": "2.0.156",
-  "description": "Lightweight microservice framework for typescript, auto discovery, load-balancing, fault-torrent, multiple transporters",
+  "version": "3.0.0",
+  "description": "HTTP/2 RPC and pubsub transporters for @spider-mesh/core",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "repository": {
-    "url": "https://github.com/spider-mesh/tcp",
-    "rxjs": "^7.8.2",
-    "reflect-metadata": "^0.2.2"
+    "url": "https://github.com/spider-mesh/tcp"
   },
   "files": [
     "build/**/*",
@@ -16,10 +14,13 @@
     "yarn.lock"
   ],
   "peerDependencies": {
-    "@spider-mesh/core": "^2.0.156"
+    "@spider-mesh/core": "^3.0.0"
   },
   "devDependencies": {
-    "@spider-mesh/core": "^2.0.156",
+    "@ohayo/udp": "file:../../ohayo/udp",
+    "@spider-mesh/core": "file:../core",
+    "@spider-mesh/discovery": "file:../discovery",
+    "@spider-mesh/events": "file:../events",
     "@types/bun": "^1.2.23",
     "@types/msgpack": "^0.0.34",
     "@types/node": "^25.6.0",
@@ -40,11 +41,13 @@
     "test:tcp:e2e": "bun run examples/tcp-e2e-test.ts",
     "test:tcp:e2e:matrix": "bun run examples/tcp-e2e-matrix-test.ts",
     "test:tcp:e2e:reverse": "bun run examples/tcp-e2e-reverse-test.ts",
-    "test:e2e": "bun test tests/tcp-transporters.e2e.test.ts && bun test tests/tcp-contracts.e2e.test.ts && bun test tests/tcp-spidermesh.e2e.test.ts && bun test tests/tcp-spidermesh-reverse.e2e.test.ts && bun test tests/tcp-spidermesh-matrix.e2e.test.ts && bun test tests/tcp-spidermesh-round-robin.e2e.test.ts && bun test tests/tcp-getting-started.e2e.test.ts && bun test tests/tcp-registry-free-wait.e2e.test.ts && bun test tests/tcp-missing.e2e.test.ts && bun test tests/tcp-multi-provider-noretry.e2e.test.ts"
+    "test:resilience": "bun test tests/tcp-resilience.e2e.test.ts",
+    "test:e2e": "bun test tests/tcp-transporters.e2e.test.ts && bun test tests/tcp-contracts.e2e.test.ts && bun test tests/tcp-session-recovery.e2e.test.ts && bun test tests/tcp-spidermesh.e2e.test.ts && bun test tests/tcp-spidermesh-reverse.e2e.test.ts && bun test tests/tcp-spidermesh-matrix.e2e.test.ts && bun test tests/tcp-spidermesh-round-robin.e2e.test.ts && bun test tests/tcp-getting-started.e2e.test.ts && bun test tests/tcp-registry-free-wait.e2e.test.ts && bun test tests/tcp-missing.e2e.test.ts && bun test tests/tcp-multi-provider-noretry.e2e.test.ts"
   },
   "author": "Duong Van Ba",
   "license": "ISC",
   "dependencies": {
-    "msgpackr": "^1.11.5"
+    "msgpackr": "^1.11.5",
+    "rxjs": "^7.8.2"
   }
 }

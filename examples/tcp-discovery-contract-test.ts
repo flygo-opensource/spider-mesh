@@ -3,7 +3,7 @@ import { createTcpTestEnv, start, stopAll, waitForOutput } from './helpers/e2eHa
 async function main() {
     const env = {
         ...createTcpTestEnv(),
-        SPIDERMESH_MULTICAST_PORT: String(24000 + Math.floor(Math.random() * 1000)),
+        OHAYO_DISCOVERY_PORT: String(24000 + Math.floor(Math.random() * 1000)),
     }
 
     const listener = start('discovery-contract-listener', 'examples/tcp-discovery-contract-listener.ts', env)

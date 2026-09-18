@@ -30,7 +30,7 @@ const target: SpiderMeshNode = {
     services: {},
     nodes: {},
     transporters: {
-        Http2Rpc: { port: targetPort }
+        http2: { port: targetPort }
     }
 }
 

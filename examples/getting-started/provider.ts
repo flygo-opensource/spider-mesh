@@ -1,16 +1,17 @@
 /**
- * Getting started (tcp) — a provider node.
+ * Ví dụ provider TCP.
  *
- * tcp discovers peers over UDP multicast, so there is NO relay process. Because core is
- * registry-free, tcp owns its own routing: construct ONE shared Registry and inject it
- * into all three transporters. UdpDiscovery fills the registry and exposes it to core as
- * a ServiceDirectory; Http2Rpc / Http2Pubsub read it for routing.
+ * Topology nhận UDP Discovery trong constructor; SpiderMesh nhận Topology và Http2Rpc.
+ * Http2Pubsub là event transporter riêng nhưng đọc cùng một Topology.
  *
- * Run provider and client in two terminals (same host / LAN):
+ * Chạy provider và client ở hai terminal trong cùng LAN:
  *   bun run examples/getting-started/provider.ts
  */
-import { Microservice, Registry, SpiderMesh } from '@spider-mesh/core'
-import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '../../src/index.js'
+import { Microservice, SpiderMesh, Topology } from '@spider-mesh/core'
+import { EventBus } from '@spider-mesh/events'
+import { TopologyDiscoveryAdapter } from '@spider-mesh/discovery'
+import { Http2Pubsub, Http2Rpc } from '../../src/index.js'
+import { createDiscovery } from '../helpers/createDiscovery.js'
 
 @Microservice()
 class GreetingService {
@@ -21,12 +22,17 @@ class GreetingService {
 
 new GreetingService()
 
-const mesh = new SpiderMesh()    // ← core holds no registry
-const registry = new Registry()  // ← tcp's own routing table, shared by the three transporters
+const topology = new Topology({
+    discovery: new TopologyDiscoveryAdapter(createDiscovery(), { heartbeatIntervalMs: 5_000 }),
+    staleAfterMs: 15_000,
+})
+const mesh = new SpiderMesh({
+    topology,
+    transporters: [new Http2Rpc()],
+})
+const events = new EventBus({ mesh })
 
-mesh.registerTransporter(new UdpDiscovery(registry))
-mesh.registerTransporter(new Http2Rpc(registry))
-mesh.registerTransporter(new Http2Pubsub(registry))
+events.registerTransporter(new Http2Pubsub(topology))
 
 console.log('provider online — exposing GreetingService')
 

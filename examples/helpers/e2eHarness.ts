@@ -10,12 +10,17 @@ type StartedProcess = {
 }
 
 const started: StartedProcess[] = []
+const outputByChild = new WeakMap<StartedChild, { stdout: string; stderr: string }>()
 
 export function createTcpTestEnv() {
     const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     return {
         SPIDERMESH_NAMESPACE: `tcp-e2e-${suffix}`,
-        SPIDERMESH_NODE_HOSTNAME: '127.0.0.1'
+        SPIDERMESH_NODE_HOSTNAME: '127.0.0.1',
+        // Keep bounded reconnect tests fast. UDP discovery has no heartbeat/TTL.
+        SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS: '3',
+        SPIDERMESH_HTTP2_RECONNECT_DELAY_MS: '100',
+        SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS: '1000',
     }
 }
 
@@ -29,6 +34,13 @@ export function start(name: string, file: string, env: Record<string, string>) {
         stdio: ['ignore', 'pipe', 'pipe'],
     })
 
+    const output = { stdout: '', stderr: '' }
+    outputByChild.set(child, output)
+    child.stdout?.on('data', chunk => { output.stdout += chunk.toString() })
+    child.stderr?.on('data', chunk => {
+        output.stderr += chunk.toString()
+        if (process.env.SPIDERMESH_TCP_DEBUG) process.stderr.write(`[${name}] ${chunk.toString()}`)
+    })
     started.push({ child, name })
     return child
 }
@@ -42,8 +54,16 @@ export function waitForOutput(child: StartedChild, matcher: RegExp, timeoutMs: n
             return
         }
 
-        let stdout = ''
-        let stderr = ''
+        const output = outputByChild.get(child) || { stdout: '', stderr: '' }
+
+        if (matcher.test(output.stdout)) {
+            resolve(output.stdout)
+            return
+        }
+        if (child.exitCode !== null) {
+            reject(new Error(`${name} exited before expected output, code=${child.exitCode}\nstdout:\n${output.stdout}\nstderr:\n${output.stderr}`))
+            return
+        }
 
         const cleanup = () => {
             clearTimeout(timeout)
@@ -54,24 +74,21 @@ export function waitForOutput(child: StartedChild, matcher: RegExp, timeoutMs: n
 
         const timeout = setTimeout(() => {
             cleanup()
-            reject(new Error(`${name} timed out after ${timeoutMs}ms\nstdout:\n${stdout}\nstderr:\n${stderr}`))
+            reject(new Error(`${name} timed out after ${timeoutMs}ms\nstdout:\n${output.stdout}\nstderr:\n${output.stderr}`))
         }, timeoutMs)
 
         const onStdout = (chunk: Buffer | string) => {
-            stdout += chunk.toString()
-            if (matcher.test(stdout)) {
+            if (matcher.test(output.stdout)) {
                 cleanup()
-                resolve(stdout)
+                resolve(output.stdout)
             }
         }
 
-        const onStderr = (chunk: Buffer | string) => {
-            stderr += chunk.toString()
-        }
+        const onStderr = () => undefined
 
         const onExit = (code: number | null) => {
             cleanup()
-            reject(new Error(`${name} exited before expected output, code=${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`))
+            reject(new Error(`${name} exited before expected output, code=${code}\nstdout:\n${output.stdout}\nstderr:\n${output.stderr}`))
         }
 
         stdoutStream.on('data', onStdout)

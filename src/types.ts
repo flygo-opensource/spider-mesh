@@ -1,10 +1,6 @@
+/** Các core RPC type được re-export để người dùng TCP không phải import thêm package. */
 export type {
-    DiscoveryEvent,
-    DiscoveryTransporter,
-    MdnsMessage,
-    NodeMetadata,
-    PubsubEvent,
-    PubsubTransporter,
+    NodeRef,
     RpcCancelPacket,
     RpcEvent,
     RpcRequestPacket,

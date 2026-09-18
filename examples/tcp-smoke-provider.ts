@@ -18,8 +18,8 @@ class GreetingService {
 
 async function main() {
     new GreetingService()
-    const { mesh } = createMesh()
-    mesh.linkEvent(SmokeEvent).listen().subscribe(event => {
+    const { events } = createMesh()
+    events.link(SmokeEvent).listen().subscribe(event => {
         console.log(JSON.stringify({ smokeEvent: event }))
         process.exit(0)
     })

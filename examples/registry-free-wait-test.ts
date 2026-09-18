@@ -1,11 +1,8 @@
 /**
  * E2E orchestrator (tcp): the CLIENT starts BEFORE any provider exists.
  *
- * With a registry-free core, availability comes from the transporter's ServiceDirectory,
- * so the client's `wait(() => mesh.listRpcNodes(...) > 0)` must genuinely BLOCK until a
- * provider is discovered over multicast — it must not fake-resolve. We start the provider
- * only after a delay; the client must still succeed (prints "hello world"). If the client
- * exits early, `waitForOutput` rejects and this orchestrator fails.
+ * Topology nhận node từ generic UDP Discovery; availability còn lọc HTTP/2 endpoint đã route
+ * được. Vì vậy wait() phải thực sự block cho tới khi provider xuất hiện, không fake resolve.
  */
 import { createTcpTestEnv, start, waitForOutput, stopAll } from './helpers/e2eHarness.js'
 

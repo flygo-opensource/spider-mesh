@@ -11,6 +11,7 @@ guide for anyone (human or agent) **editing** `@spider-mesh/tcp`.
 ```bash
 bun run build        # tsc -b
 bun run test:e2e     # runs the tests/*.e2e suites in sequence
+bun run test:resilience # fault, restart, soak, duplicate-id, interrupted-stream coverage
 ```
 
 There is **no bare `test` script**. Narrower commands:
@@ -31,30 +32,35 @@ bun test tests/tcp-spidermesh.e2e.test.ts
 bun test tests/tcp-spidermesh-reverse.e2e.test.ts
 bun test tests/tcp-spidermesh-matrix.e2e.test.ts
 bun test tests/tcp-spidermesh-round-robin.e2e.test.ts
+bun test tests/tcp-session-recovery.e2e.test.ts
+bun test tests/tcp-resilience.e2e.test.ts
 ```
 
 ## Conventions
 
 - **ESM-only**, `.js` relative specifiers in TypeScript source.
-- **Node/Bun only** — this package uses raw UDP and HTTP/2; never add browser/RN code here (that is `@spider-mesh/ws`).
-- **`src/types.ts` re-exports core contracts** — `@spider-mesh/core` is the source of truth. Keep both packages on matching versions.
-- **All network config is env-backed constants in `src/const.ts`** (ports/multicast). The only constructor argument is the shared `Registry` (`new UdpDiscovery(registry)` etc.) — construct one and inject it into all three so they share routing state. Do not add other per-instance options without discussing the structural impact (see [ARCHITECTURE.md](ARCHITECTURE.md#configuration-model)).
+- **Node/Bun only** — this package uses HTTP/2; never add browser/RN code here (that is `@spider-mesh/ws`).
+- **`src/types.ts` re-exports core RPC contracts** — discovery contracts come from
+  `@spider-mesh/discovery`. Keep companion packages on matching major versions.
+- **`Http2Rpc.name` luôn là `http2`.** Endpoint metadata chỉ đọc/ghi bằng wire name này.
+- **Topology thuộc Core và optional trên SpiderMesh.** `Http2Rpc` nhận nó qua lifecycle; Discovery là
+  nguồn membership duy nhất, còn transporter chỉ giữ connection reachability.
+- Hạ tầng tự route thì dùng `resolveService` và không cần Topology.
 - **`examples/` and `tests/` are excluded from the package build.** For matrix tests, use the linked core RxJS copy when observable identity matters (`examples/helpers/coreRxjs.ts`).
-- `msgpackr` is the encoder for all three transports.
+- `msgpackr` is the RPC/pubsub encoder.
 
 ## Where things live
 
 | Concern | File |
 | --- | --- |
-| Multicast discovery | `src/UdpDiscovery.ts` |
 | HTTP/2 RPC | `src/Http2Rpc.ts` |
-| HTTP/2 pub/sub | `src/Http2Pubsub.ts` |
+| HTTP/2 events (registered on `EventBus`) | `src/Http2Pubsub.ts` |
 | Env config constants | `src/const.ts` |
 | Core contract re-exports | `src/types.ts` |
 
 ## Known issues to keep in mind
 
-- `SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE` is **dead code** (read, never used). Don't document it as working.
-- Teardown is **not uniform**: `UdpDiscovery`/`Http2Rpc` use `unsubscribe()`, `Http2Pubsub` uses `close()`.
+- Core gọi `start/stop`; API `unsubscribe()` của `Http2Rpc` và `close()` của `Http2Pubsub` vẫn tồn tại
+  cho standalone lifecycle.
 
 For the full module map, data flow, and gotchas, see [ARCHITECTURE.md](ARCHITECTURE.md).

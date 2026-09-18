@@ -28,10 +28,10 @@ async function main() {
         version: 1,
         node_id: 'rpc-contract-server',
         topics: [],
-        services: {},
+        services: { ContractService: {} },
         nodes: {},
         transporters: {
-            Http2Rpc: { port: serverEndpoints.endpoints.port }
+            http2: { port: serverEndpoints.endpoints.port }
         }
     }
 

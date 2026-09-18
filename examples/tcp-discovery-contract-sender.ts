@@ -1,7 +1,6 @@
-import { UdpDiscovery } from '../src/index.js'
-import type { MdnsMessage, SpiderMeshNode } from '../src/types.js'
-
-const discovery = new UdpDiscovery()
+import type { SpiderMeshNode } from '../src/types.js'
+import type { DiscoveryMessage } from '@spider-mesh/discovery'
+import { createDiscovery } from './helpers/createDiscovery.js'
 
 const localNode: SpiderMeshNode = {
     host: '127.0.0.1',
@@ -13,10 +12,16 @@ const localNode: SpiderMeshNode = {
     transporters: {},
 }
 
-const hello: MdnsMessage<SpiderMeshNode> = {
-    hi: true,
-    node: localNode,
-    sender_id: localNode.node_id,
+const discovery = createDiscovery(localNode.node_id)
+
+const hello: DiscoveryMessage<SpiderMeshNode> = {
+    node_id: localNode.node_id,
+    namespace: localNode.namespace,
+    tags: ['spider-mesh', 'node'],
+    version: String(localNode.version),
+    created_at: Date.now(),
+    seq: localNode.version,
+    data: localNode,
 }
 
 await discovery.broadcast(hello)

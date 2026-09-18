@@ -1,28 +1,36 @@
 /**
- * Getting started (tcp) — a client node.
+ * Ví dụ client TCP.
  *
- * Same construction as the provider: one shared Registry injected into the three
- * transporters. The client discovers the provider over multicast, then calls it.
+ * Cấu hình giống provider: Discovery ghi node vào Topology, còn Http2Rpc dùng Topology
+ * để chọn endpoint và truyền packet.
  *
  *   bun run examples/getting-started/client.ts
  */
-import { RemoteServiceLinker, Registry, SpiderMesh } from '@spider-mesh/core'
-import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '../../src/index.js'
+import { RemoteServiceLinker, SpiderMesh, Topology } from '@spider-mesh/core'
+import { EventBus } from '@spider-mesh/events'
+import { TopologyDiscoveryAdapter } from '@spider-mesh/discovery'
+import { Http2Pubsub, Http2Rpc } from '../../src/index.js'
+import { createDiscovery } from '../helpers/createDiscovery.js'
 
 type GreetingService = {
     hello(name: string): Promise<string>
 }
 
-const mesh = new SpiderMesh()
-const registry = new Registry()
+const topology = new Topology({
+    discovery: new TopologyDiscoveryAdapter(createDiscovery(), { heartbeatIntervalMs: 5_000 }),
+    staleAfterMs: 15_000,
+})
+const mesh = new SpiderMesh({
+    topology,
+    transporters: [new Http2Rpc()],
+})
+const events = new EventBus({ mesh })
 
-mesh.registerTransporter(new UdpDiscovery(registry))
-mesh.registerTransporter(new Http2Rpc(registry))
-mesh.registerTransporter(new Http2Pubsub(registry))
+events.registerTransporter(new Http2Pubsub(topology))
 
 const greeter = RemoteServiceLinker.link<GreetingService>(mesh, { service: 'GreetingService' })
 
-// Wait until discovery has found at least one provider for the service.
+// Chờ đến khi có ít nhất một provider vừa có service vừa có HTTP/2 endpoint.
 await greeter.wait(() => mesh.listRpcNodes('GreetingService').length > 0)
 
 console.log(await greeter.hello('world'))

@@ -13,7 +13,7 @@ const linkerA = RemoteServiceLinker.link<ServiceA>(mesh, { service: 'ServiceA', 
 const linkerB = RemoteServiceLinker.link<ServiceB>(mesh, { service: 'ServiceB', timeout: 5000, retry: 0 })
 
 const hasValidPort = (n: any) => {
-    const m = n.transporters['Http2Rpc']
+    const m = n.transporters.http2
     return m && typeof m === 'object' && typeof m.port === 'number' && m.port > 0
 }
 
@@ -36,13 +36,13 @@ await linkerA.wait(() => {
     const nodes = mesh.listRpcNodes('ServiceA')
     const ready = nodes.length >= 2 && nodes.every(hasValidPort)
     if (nodes.length > 0) {
-        process.stderr.write('wait check: ' + JSON.stringify(nodes.map(n => ({ id: n.node_id.slice(-4), port: n.transporters['Http2Rpc']?.port, valid: hasValidPort(n) }))) + '\n')
+        process.stderr.write('wait check: ' + JSON.stringify(nodes.map(n => ({ id: n.node_id.slice(-4), port: n.transporters.http2?.port, valid: hasValidPort(n) }))) + '\n')
     }
     return ready
 })
 
 const nodes = mesh.listRpcNodes('ServiceA')
-process.stderr.write('warmup nodes: ' + JSON.stringify(nodes.map(n => ({ id: n.node_id.slice(-4), port: n.transporters['Http2Rpc']?.port }))) + '\n')
+process.stderr.write('warmup nodes: ' + JSON.stringify(nodes.map(n => ({ id: n.node_id.slice(-4), port: n.transporters.http2?.port }))) + '\n')
 
 for (const node of nodes) {
     try {

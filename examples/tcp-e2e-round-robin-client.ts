@@ -8,7 +8,7 @@ type GreetingService = {
 }
 
 async function main() {
-    const { mesh } = createMesh()
+    const { mesh, registry } = createMesh()
     console.log('TCP round-robin client connected')
 
     const greeter = RemoteServiceLinker.link<GreetingService>(mesh, {
@@ -18,7 +18,12 @@ async function main() {
     })
 
     const guard = setTimeout(() => {
-        console.error('TCP round-robin client timed out')
+        console.error('TCP round-robin client timed out', [...registry.nodes$.value.values()].map(node => ({
+            node_id: node.node_id,
+            version: node.version,
+            services: Object.keys(node.services),
+            transporters: node.transporters,
+        })))
         process.exit(1)
     }, 15000)
 

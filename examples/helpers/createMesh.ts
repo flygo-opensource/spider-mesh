@@ -1,13 +1,22 @@
-import { Registry, SpiderMesh } from '@spider-mesh/core'
-import { createTransporters } from './createTransporters.js'
+import { SpiderMesh, Topology } from '@spider-mesh/core'
+import { EventBus } from '@spider-mesh/events'
+import { TopologyDiscoveryAdapter } from '@spider-mesh/discovery'
+import { Http2Pubsub, Http2Rpc } from '../../src/index.js'
+import { createDiscovery } from './createDiscovery.js'
 
 export function createMesh() {
-    const registry = new Registry()
-    const mesh = new SpiderMesh()
+    const discovery = createDiscovery()
+    const topology = new Topology({
+        discovery: new TopologyDiscoveryAdapter(discovery, { heartbeatIntervalMs: 5_000 }),
+        staleAfterMs: 15_000,
+    })
+    const mesh = new SpiderMesh({
+        topology,
+        transporters: [new Http2Rpc()],
+    })
+    const events = new EventBus({ mesh })
 
-    for (const transporter of createTransporters(registry)) {
-        mesh.registerTransporter(transporter)
-    }
+    events.registerTransporter(new Http2Pubsub(topology))
 
-    return { mesh, registry }
+    return { mesh, events, registry: topology, topology, discovery }
 }

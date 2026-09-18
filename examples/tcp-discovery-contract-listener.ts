@@ -1,8 +1,7 @@
 import process from 'node:process'
-import { UdpDiscovery } from '../src/index.js'
-import type { MdnsMessage, SpiderMeshNode } from '../src/types.js'
-
-const discovery = new UdpDiscovery()
+import type { SpiderMeshNode } from '../src/types.js'
+import type { DiscoveryMessage } from '@spider-mesh/discovery'
+import { createDiscovery } from './helpers/createDiscovery.js'
 
 const localNode: SpiderMeshNode = {
     host: '127.0.0.1',
@@ -14,6 +13,8 @@ const localNode: SpiderMeshNode = {
     transporters: {},
 }
 
+const discovery = createDiscovery(localNode.node_id)
+
 const guard = setTimeout(() => {
     console.error('Discovery contract listener timed out')
     process.exit(1)
@@ -22,19 +23,23 @@ const guard = setTimeout(() => {
 discovery.subscribe(event => {
     console.log(JSON.stringify({
         type: 'discovery',
-        hasDiscovered: 'discovered' in event,
-        hasRawNodeId: 'node_id' in (event as Record<string, unknown>),
-        discoveredNodeId: event.discovered.node_id,
-        discoveredNamespace: event.discovered.namespace,
+        hasData: !!event.data,
+        hasEnvelopeNodeId: 'node_id' in (event as Record<string, unknown>),
+        discoveredNodeId: event.data.node_id,
+        discoveredNamespace: event.data.namespace,
     }))
     clearTimeout(guard)
     process.exit(0)
 })
 
-const hello: MdnsMessage<SpiderMeshNode> = {
-    hi: true,
-    node: localNode,
-    sender_id: localNode.node_id,
+const hello: DiscoveryMessage<SpiderMeshNode> = {
+    node_id: localNode.node_id,
+    namespace: localNode.namespace,
+    tags: ['spider-mesh', 'node'],
+    version: String(localNode.version),
+    created_at: Date.now(),
+    seq: localNode.version,
+    data: localNode,
 }
 
 await discovery.broadcast(hello)

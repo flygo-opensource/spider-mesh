@@ -28,9 +28,8 @@ mesh.watchService('ServiceB').subscribe(nodes => {
     emit()
 })
 
-// Gọi RPC định kỳ đến từng node đang online.
-// Mục đích kép: (1) giữ kết nối HTTP/2 sống để offline detection hoạt động;
-// (2) khi provider chết, lần gọi tiếp theo sẽ fail và Http2Rpc tự emit offline event.
+// Gọi RPC định kỳ để kiểm tra end-to-end và tạo socket traffic. Http2Rpc không có active ping;
+// silent partition được phát hiện khi traffic lỗi hoặc OS đóng session.
 const runHealthChecks = async () => {
     const aNodes = mesh.listRpcNodes('ServiceA')
     const bNodes = mesh.listRpcNodes('ServiceB')
@@ -55,7 +54,7 @@ const runHealthChecks = async () => {
     ])
 }
 
-// Bắt đầu health check ngay — lần đầu sẽ fail (providers chưa online), các lần sau tự ổn định
+// Bắt đầu application-level probe ngay — lần đầu có thể fail khi providers chưa online.
 const healthInterval = setInterval(runHealthChecks, 600)
 
 setTimeout(() => {

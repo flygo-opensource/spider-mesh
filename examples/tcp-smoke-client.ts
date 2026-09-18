@@ -15,7 +15,7 @@ type GreetingService = {
 }
 
 async function main() {
-    const { mesh } = createMesh()
+    const { mesh, events } = createMesh()
     console.log('TCP smoke client connected')
 
     const greeter = RemoteServiceLinker.link<GreetingService>(mesh, {
@@ -34,7 +34,7 @@ async function main() {
         const result = await firstValueFrom(greeter.hello('tcp smoke').pipe(timeout(5000)))
         console.log(result)
 
-        await mesh.linkEvent(SmokeEvent).publish(new SmokeEvent('pubsub-ok', 'client'))
+        await events.link(SmokeEvent).publish(new SmokeEvent('pubsub-ok', 'client'))
         process.exit(0)
     } catch (error) {
         console.error(error)

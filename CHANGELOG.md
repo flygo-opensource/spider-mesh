@@ -1,5 +1,43 @@
 # Changelog
 
+## 3.0.0 — generic discovery and TCP-owned liveness
+
+- `Http2Rpc.name = 'http2'`; metadata và routing không còn suy luận từ tên class.
+- Nhận Topology qua SpiderMesh lifecycle, hỗ trợ infrastructure `resolveService` và probe.
+- Tách membership khỏi HTTP/2 reachability để transporter không xóa node thay Discovery.
+- `Http2Pubsub.name = 'http2-pubsub'` và đọc topic membership từ Topology.
+- Xử lý `ERR_STREAM_DESTROYED` phát sinh sau khi Node đã gửi terminal frame, tránh provider Linux
+  crash khi caller dùng RPC như một Promise.
+- Xác nhận matrix ba host theo cả 6 hướng và round-robin qua hai provider Linux.
+- `Http2Rpc` báo endpoint `suspect`/`unreachable`/`reachable` vào Topology; không tự sở hữu hoặc
+  xóa membership.
+
+### Breaking
+- `Http2Pubsub` remains exported here, but is registered on `EventBus` from
+  `@spider-mesh/events` instead of `SpiderMesh`.
+- Removed `UdpDiscovery` and all UDP configuration from `@spider-mesh/tcp`. Bind a generic
+  implementation such as `UdpDiscovery<SpiderMeshNode>` from `@ohayo/udp` with
+  `bindMeshDiscovery()` from `@spider-mesh/discovery`.
+- The legacy `{ hi, node }` UDP wire format is no longer supported by this package.
+
+### Changed
+- `Http2Rpc` proactively connects to every routable discovered peer. HTTP/2 session and underlying
+  TCP socket `close`/`error`, followed by bounded reconnect, own online/offline state; UDP has no
+  periodic heartbeat.
+- Reconnect uses bounded exponential backoff. After the configured attempt limit, the peer is
+  removed from Registry and retry stops; a new discovery announcement is required to return online.
+- Added `SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS` (default `2000`).
+- `Http2Rpc` exposes its TCP Registry directly through `watchService()` / `listNodes()`;
+  `SpiderMesh` stays registry-free and the separate `ServiceDirectory` type is removed.
+- Tests/examples share Registry among Ohayo integration, `Http2Rpc`, and `Http2Pubsub` only.
+
+### Validation
+- Standard TCP E2E: 16/16 pass.
+- TCP resilience: 6/6 pass, including bounded retry stop, restart soak, SIGKILL
+  eviction/recovery, full-snapshot replacement, duplicate-ID isolation, and interrupted RPC streams.
+- Three-host Bun test: Service A discovered and called both Service B providers and both Service C
+  providers across two remote servers; lifecycle tests passed against each remote server.
+
 ## 2.0.154 — UDP discovery survives ICMP errors on Linux
 
 ### Fixed

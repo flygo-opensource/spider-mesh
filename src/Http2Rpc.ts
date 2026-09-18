@@ -1,31 +1,69 @@
-import { firstValueFrom, fromEvent, reduce, Subject, takeUntil } from "rxjs"
-import { connect, createServer, type ClientHttp2Session, type ClientHttp2Stream, type IncomingHttpHeaders, type ServerHttp2Stream } from 'node:http2'
-import { SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE } from "./const.js"
+import { firstValueFrom, fromEvent, reduce, Subject, Subscription, takeUntil } from "rxjs"
+import { connect, createServer, type ClientHttp2Session, type ClientHttp2Stream, type IncomingHttpHeaders, type ServerHttp2Session, type ServerHttp2Stream } from 'node:http2'
+import { SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS, SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS, SPIDERMESH_HTTP2_RECONNECT_DELAY_MS } from "./const.js"
 import { AddressInfo } from "node:net"
 import { unpack, pack } from 'msgpackr'
-import type { Registry, RpcCancelPacket, RpcEvent, RpcRequestPacket, RpcResponsePacket, RpcTransporter, SpiderMeshError, SpiderMeshNode } from '@spider-mesh/core'
+import { Topology } from '@spider-mesh/core'
+import type { RpcCancelPacket, RpcEvent, RpcProbeRequest, RpcProbeResult, RpcRequestPacket, RpcResponsePacket, RpcTransporter, RpcTransporterContext, SpiderMeshError, SpiderMeshNode, TopologyRoute } from '@spider-mesh/core'
 
+const delay = (ms: number) => new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, ms)
+    timer.unref?.()
+})
 
+/** Địa chỉ HTTP/2 đã được resolver từ logical service name. */
+export type Http2RpcTarget = {
+    host: string
+    port: number
+}
+
+/** Cấu hình network của HTTP/2 transporter, không chứa dependency môi trường. */
+export type Http2RpcOptions = {
+    port?: number
+    resolveService?: (service: string) => Http2RpcTarget | undefined
+}
+
+/** Transporter RPC qua HTTP/2, dùng Topology nếu SpiderMesh được cấu hình Topology. */
 export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
 
+    public readonly name = 'http2'
+
     #connections = new Map<string, ClientHttp2Session>()
+    #connecting = new Map<string, Promise<ClientHttp2Session>>()
+    #reconnecting = new Map<string, Promise<void>>()
+    #exhaustedTargets = new Map<string, string>()
+    #pendingConnections = new Set<ClientHttp2Session>()
     #responseStreams = new Map<string, ServerHttp2Stream>()
     #metadata: RpcEvent['endpoints'] | null = null
     #server = createServer({})
+    #serverSessions = new Set<ServerHttp2Session>()
     #isDisposing = false
-    #registry?: Registry
+    #topology?: Topology
+    readonly #options: Http2RpcOptions
+    #serverStreamSubscription: Subscription
+    #topologySubscription = Subscription.EMPTY
 
-    constructor(registry?: Registry) {
+    /**
+     * Code mới truyền `Http2RpcOptions`; overload Topology chỉ giữ cho standalone fixture cũ.
+     * Trong ứng dụng, SpiderMesh sẽ inject Topology qua `start()`.
+     */
+    constructor(options: Http2RpcOptions | Topology = {}) {
         super()
-        this.#registry = registry
+        this.#options = options instanceof Topology ? {} : options
+        if (options instanceof Topology) this.#bindTopology(options)
 
-        fromEvent(this.#server, 'stream').subscribe(args => {
+        this.#server.on('session', session => {
+            this.#serverSessions.add(session)
+            session.once('close', () => this.#serverSessions.delete(session))
+        })
+
+        this.#serverStreamSubscription = fromEvent(this.#server, 'stream').subscribe(args => {
             const [stream] = args as [ServerHttp2Stream]
             void this.#handleStream(stream)
         })
 
         this.#server.listen({
-            port: 0,
+            port: this.#options.port ?? 0,
             isIPv4: true,
             isIPv6: true
         }, () => {
@@ -39,18 +77,50 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         return this.#metadata
     }
 
+    /** Core truyền Topology optional vào transporter khi đăng ký. */
+    start(context: RpcTransporterContext) {
+        if (context.topology && this.#topology !== context.topology) this.#bindTopology(context.topology)
+    }
+
+    /** Dừng toàn bộ server, stream và connection do transporter sở hữu. */
+    stop() {
+        if (!this.closed) this.unsubscribe()
+    }
+
     override unsubscribe() {
         this.#isDisposing = true
         for (const stream of this.#responseStreams.values()) {
             stream.close()
         }
         this.#responseStreams.clear()
+        this.#topologySubscription.unsubscribe()
+        for (const connection of this.#pendingConnections) connection.destroy()
+        this.#pendingConnections.clear()
         for (const connection of this.#connections.values()) {
             connection.destroy()
         }
         this.#connections.clear()
+        this.#connecting.clear()
+        this.#reconnecting.clear()
+        this.#exhaustedTargets.clear()
+        this.#serverStreamSubscription.unsubscribe()
+        for (const session of this.#serverSessions) {
+            session.destroy()
+        }
+        this.#serverSessions.clear()
         this.#server.close()
         super.unsubscribe()
+    }
+
+    #bindTopology(topology: Topology) {
+        this.#topologySubscription.unsubscribe()
+        this.#topology = topology
+        this.#topologySubscription = topology.nodes$.subscribe(nodes => {
+            for (const node of nodes.values()) {
+                if (!this.#hasRpcEndpoint(node)) continue
+                this.#ensureConnection(node)
+            }
+        })
     }
 
     async send(packet: RpcRequestPacket | RpcCancelPacket | RpcResponsePacket): Promise<{ cancel: () => void }> {
@@ -66,22 +136,19 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             return { cancel: () => {} }
         }
 
-        if (packet.kind === 'request' && !this.#registry) {
+        const route = packet.kind === 'request'
+            ? this.#resolveRequestRoute(packet)
+            : this.#resolveExactRoute(packet.destination_node_id)
+        const node = route?.node
+        if (!node) {
             throw {
                 code: 'MICROSERVICE_OFFLINE',
-                message: 'Http2Rpc requires a registry to route RPC requests'
+                message: packet.kind === 'request'
+                    ? `No HTTP/2 target for service ${packet.service}`
+                    : `Node ${packet.destination_node_id || '?'} is not available`,
             } satisfies SpiderMeshError
         }
-
-        // destination_node_id is embedded in the packet; fall back to registry round-robin for
-        // requests. Skip peers that have advertised the service but not yet their Http2Rpc port,
-        // so a half-formed provider mid-startup is never picked (it would throw "metadata missing").
-        const resolvedNodeId = packet.destination_node_id
-            ?? (packet.kind === 'request'
-                ? (this.#registry?.pickRpcNode(packet.service, { filter: node => this.#hasRpcEndpoint(node) }) ?? undefined)
-                : undefined)
-
-        const node = this.#resolveNode(resolvedNodeId)
+        const resolvedNodeId = node.node_id
 
         const connection = await this.#connect(node)
         const request = connection.request({
@@ -91,10 +158,12 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         })
 
         if (packet.kind === 'request') {
-            this.#bindResponseStream(packet, node, request)
+            this.#bindResponseStream(packet, request)
         }
 
-        await new Promise<void>((resolve, reject) => {
+        const startedAt = Date.now()
+        try {
+            await new Promise<void>((resolve, reject) => {
             let settled = false
 
             request.on('response', (headers: IncomingHttpHeaders) => {
@@ -124,8 +193,24 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
                 }
             })
 
-            request.end(pack(packet))
-        })
+                request.end(pack(packet))
+            })
+        } catch (error) {
+            if (route) {
+                this.#topology?.report(route, {
+                    status: 'failure',
+                    latency: Date.now() - startedAt,
+                })
+            }
+            throw error
+        }
+
+        if (route) {
+            this.#topology?.report(route, {
+                status: 'success',
+                latency: Date.now() - startedAt,
+            })
+        }
 
         if (packet.kind === 'request') {
             return {
@@ -142,15 +227,29 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         return { cancel: () => {} }
     }
 
-    async #connect(node: SpiderMeshNode) {
+    async #connect(node: SpiderMeshNode): Promise<ClientHttp2Session> {
         const current_connection = this.#connections.get(node.node_id)
         if (current_connection) {
             if (!current_connection.destroyed && !current_connection.closed) {
                 return current_connection
             }
+            this.#connections.delete(node.node_id)
+            current_connection.destroy()
         }
 
-        const auto = SPIDERMESH_HTTP2_AUTO_LOAD_BALANCE
+        const connecting = this.#connecting.get(node.node_id)
+        if (connecting) return connecting
+
+        const pending = this.#openConnection(node).finally(() => {
+            if (this.#connecting.get(node.node_id) === pending) {
+                this.#connecting.delete(node.node_id)
+            }
+        })
+        this.#connecting.set(node.node_id, pending)
+        return pending
+    }
+
+    async #openConnection(node: SpiderMeshNode): Promise<ClientHttp2Session> {
         const metadata = this.#getTransporterMetadata(node)
         const port = Number(metadata?.port)
 
@@ -161,34 +260,133 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             } satisfies SpiderMeshError
         }
 
-        const urls = [
-            `http://${node.host.includes(':') ? `[${node.host}]` : node.host}:${port}`,
-        ]
-
-
-        for (const url of urls) {
-            const connection = connect(url)
-            const connected = connection.connecting ? await new Promise<boolean>(resolve => {
-                connection.once('connect', () => resolve(true))
-                connection.once('error', () => resolve(false))
-            }) : true
-            if (connected) {
-                connection.once('close', () => {
-                    this.#connections.delete(node.node_id)
-                    this.#registry?.removePeer(node.node_id)
-                    if (!this.#isDisposing && !this.closed) {
-                        this.next({ offline: node.node_id })
-                    }
-                })
-                this.#connections.set(node.node_id, connection)
-                return connection
+        const url = `http://${node.host.includes(':') ? `[${node.host}]` : node.host}:${port}`
+        const connection = connect(url)
+        this.#pendingConnections.add(connection)
+        const connected = connection.connecting ? await new Promise<boolean>(resolve => {
+            let settled = false
+            const finish = (value: boolean) => {
+                if (settled) return
+                settled = true
+                clearTimeout(timer)
+                connection.off('connect', onConnect)
+                connection.off('error', onFailure)
+                connection.off('close', onFailure)
+                resolve(value)
             }
+            const onConnect = () => finish(true)
+            const onFailure = () => finish(false)
+            const timer = setTimeout(() => {
+                connection.destroy()
+                finish(false)
+            }, Math.max(100, SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS))
+            timer.unref?.()
+            connection.once('connect', onConnect)
+            connection.once('error', onFailure)
+            connection.once('close', onFailure)
+        }) : true
+        this.#pendingConnections.delete(connection)
+        if (connected) {
+            this.#reportReachability(node.node_id, 'reachable')
+            let lost = false
+            const handleLoss = () => {
+                if (lost) return
+                lost = true
+                this.#debug('connection closed', { node_id: node.node_id })
+                this.#handleConnectionLoss(node.node_id, connection)
+            }
+            const handleError = () => {
+                if (!connection.destroyed) connection.destroy()
+                handleLoss()
+            }
+            connection.once('close', handleLoss)
+            connection.once('error', handleError)
+            connection.socket.once('close', handleLoss)
+            connection.socket.once('error', handleError)
+            this.#connections.set(node.node_id, connection)
+            this.#debug('connection ready', { node_id: node.node_id, endpoint: url })
+            return connection
         }
+        connection.destroy()
+
         const e: SpiderMeshError = {
             code: 'MICROSERVICE_OFFLINE',
-            message: `All connection attempts to node ${node.node_id} failed` ,
+            message: `Connection attempt to node ${node.node_id} failed`,
         }
         throw e
+    }
+
+    #ensureConnection(node: SpiderMeshNode) {
+        if (this.#isDisposing || this.closed) return
+        const connection = this.#connections.get(node.node_id)
+        if (connection && !connection.destroyed && !connection.closed) {
+            this.#reportReachability(node.node_id, 'reachable')
+            return
+        }
+        if (this.#reconnecting.has(node.node_id)) return
+        if (this.#exhaustedTargets.get(node.node_id) === this.#targetKey(node)) {
+            this.#reportReachability(node.node_id, 'unreachable', 'reconnect-exhausted')
+            return
+        }
+        // Lần kết nối đầu tiên chưa phải bằng chứng endpoint có vấn đề. Giữ state mặc định
+        // reachable để request đầu tiên vẫn có thể chọn node rồi await chính connection này.
+        // Chỉ connection đã từng hoạt động nhưng bị mất mới chuyển sang `suspect`.
+        const task = this.#connectWithRetry(node).finally(() => {
+            if (this.#reconnecting.get(node.node_id) !== task) return
+            this.#reconnecting.delete(node.node_id)
+        })
+        this.#reconnecting.set(node.node_id, task)
+    }
+
+    async #connectWithRetry(node: SpiderMeshNode) {
+        const maxAttempts = Math.max(1, SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS)
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            if (this.#isDisposing || this.closed) return
+            if (this.#topology && !this.#topology.getPeer(node.node_id)) return
+
+            try {
+                await this.#connect(node)
+                this.#exhaustedTargets.delete(node.node_id)
+                return
+            } catch {
+                this.#debug('reconnect failed', { node_id: node.node_id, attempt, max_attempts: maxAttempts })
+                if (attempt === maxAttempts) break
+                const base = Math.max(10, SPIDERMESH_HTTP2_RECONNECT_DELAY_MS)
+                const backoff = Math.min(30_000, base * (2 ** Math.min(attempt - 1, 8)))
+                const jitter = Math.floor(Math.random() * Math.max(1, backoff * 0.2))
+                await delay(backoff + jitter)
+            }
+        }
+
+        if (this.#topology?.getPeer(node.node_id)) {
+            this.#exhaustedTargets.set(node.node_id, this.#targetKey(node))
+            this.#reportReachability(node.node_id, 'unreachable', 'reconnect-exhausted')
+            this.#debug('peer offline', { node_id: node.node_id, attempts: maxAttempts })
+        }
+    }
+
+    #handleConnectionLoss(nodeId: string, connection: ClientHttp2Session) {
+        if (this.#connections.get(nodeId) === connection) this.#connections.delete(nodeId)
+        this.#reportReachability(nodeId, 'suspect', 'connection-lost')
+        const node = this.#topology?.getPeer(nodeId)
+        if (!this.#isDisposing && !this.closed && node) this.#ensureConnection(node)
+    }
+
+    /** Gửi trạng thái endpoint vào Topology; transporter không được tự xóa membership. */
+    #reportReachability(node_id: string, status: 'reachable' | 'suspect' | 'unreachable', reason?: string) {
+        this.#topology?.reportReachability({
+            node_id,
+            transporter: this.name,
+            status,
+            reason,
+        })
+    }
+
+    #debug(message: string, data: Record<string, unknown>) {
+        if (process.env.SPIDERMESH_TCP_DEBUG) {
+            console.error(`[spider-mesh/tcp] ${message}`, data)
+        }
     }
 
     async #handleStream(stream: ServerHttp2Stream) {
@@ -234,8 +432,14 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         const isTerminal = packet.kind === 'response' && (packet.completed || packet.error != undefined)
 
         await new Promise<void>((resolve, reject) => {
-            const done = (error?: Error | null) => {
+            const done = (error?: (Error & { code?: string }) | null) => {
                 if (error) {
+                    // Node có thể gọi callback của end() sau khi peer đã nhận terminal
+                    // frame và đóng stream. Frame đã tới caller nên đây không phải lỗi RPC.
+                    if (isTerminal && error.code === 'ERR_STREAM_DESTROYED') {
+                        resolve()
+                        return
+                    }
                     reject(error)
                     return
                 }
@@ -251,7 +455,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         })
     }
 
-    #bindResponseStream(packet: RpcRequestPacket, node: SpiderMeshNode, request: ClientHttp2Stream) {
+    #bindResponseStream(packet: RpcRequestPacket, request: ClientHttp2Stream) {
         let buffer = Buffer.alloc(0)
         let completed = false
         let accepted = false
@@ -338,42 +542,114 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
 
     #getTransporterMetadata(node?: SpiderMeshNode | null) {
         if (!node) return undefined
-        return node.transporters?.[this.constructor.name]
-            || node.transporters?.Http2Rpc
-            || node.transporters?.http2rpc
+        return node.transporters?.[this.name]
     }
 
-    // A peer is RPC-routable only once it has advertised an Http2Rpc endpoint port.
-    // NOTE: this keys on the 'Http2Rpc' transporter name (matching `#getTransporterMetadata`);
-    // registering Http2Rpc under a custom name would defeat this lookup — see UdpDiscovery#isRpcReady.
+    /** Khóa endpoint giúp discovery snapshot có host/port mới mở lại reconnect cycle. */
+    #targetKey(node: SpiderMeshNode) {
+        return `${node.host}:${JSON.stringify(this.#getTransporterMetadata(node) ?? null)}`
+    }
+
+    /** Node chỉ route được sau khi đã quảng bá port dưới wire name `http2`. */
     #hasRpcEndpoint(node: SpiderMeshNode): boolean {
         return Number((this.#getTransporterMetadata(node) as { port?: number } | undefined)?.port) > 0
     }
 
-    // Reachability probe used by core's #selectRpcTransport. Side-effect free: mirrors the
-    // condition #resolveNode/#connect need (a peer serving `service` that has advertised its
-    // Http2Rpc endpoint port) WITHOUT advancing the registry's round-robin index.
+    /** Kiểm tra route đã biết mà không thay đổi routing state. */
     canRoute(service: string, node_id?: string): boolean {
-        const registry = this.#registry
-        if (!registry) return false
         if (node_id) {
-            const node = registry.getPeer(node_id)
-            return !!node && node.services?.[service] != undefined && this.#hasRpcEndpoint(node)
+            const node = this.#topology?.getPeer(node_id)
+            return !!node
+                && !!this.#topology?.isReachable(node_id, this.name)
+                && node.services?.[service] != undefined
+                && this.#hasRpcEndpoint(node)
         }
-        return registry.listPeers(service).some(node => this.#hasRpcEndpoint(node))
+        return !!this.#options.resolveService?.(service)
+            || !!this.#topology?.list(service).some(node => {
+                return this.#topology?.isReachable(node.node_id, this.name) && this.#hasRpcEndpoint(node)
+            })
     }
 
-    #resolveNode(node_id?: string) {
-        const node = node_id ? this.#registry?.getPeer(node_id) : undefined
-        if (node) {
-            return node
+    /** Probe thật qua connection HTTP/2 khi không có Topology để Core dùng cho wait(). */
+    async probe(request: RpcProbeRequest): Promise<RpcProbeResult> {
+        const startedAt = Date.now()
+        const route = request.node_id
+            ? this.#resolveExactRoute(request.node_id)
+            : this.#resolveRequestRoute({
+                kind: 'request',
+                request_id: 'probe',
+                sender_node_id: 'probe',
+                service: request.service,
+                method: '__probe__',
+                args: [],
+            })
+        if (!route) return { reachable: false }
+
+        try {
+            const connection = await this.#connect(route.node)
+            return {
+                reachable: !connection.closed && !connection.destroyed,
+                node_id: route.node.node_id.startsWith('@service:') ? undefined : route.node.node_id,
+                latency: Date.now() - startedAt,
+            }
+        } catch {
+            return { reachable: false, latency: Date.now() - startedAt }
+        }
+    }
+
+    #resolveRequestRoute(packet: RpcRequestPacket): TopologyRoute | undefined {
+        const shouldUseTopology = !!packet.destination_node_id
+            || !!packet.routing
+            || !this.#options.resolveService
+
+        if (shouldUseTopology && this.#topology) {
+            const route = this.#topology.route({
+                service: packet.service,
+                transporter: this.name,
+                node_id: packet.destination_node_id,
+                // Direct HTTP/2 không có infrastructure router nên dùng round-robin mặc định.
+                routing: packet.routing ?? (this.#options.resolveService ? undefined : { strategy: 'round-robin' }),
+            })
+            if (route) {
+                this.#debug('route selected', {
+                    service: packet.service,
+                    node_id: route.node.node_id,
+                    strategy: packet.routing?.strategy ?? 'round-robin',
+                })
+                return route
+            }
         }
 
-        throw {
-            code: 'MICROSERVICE_OFFLINE',
-            message: node_id
-                ? `Node ${node_id} is not available`
-                : 'RPC target node is not available'
-        } satisfies SpiderMeshError
+        const target = this.#options.resolveService?.(packet.service)
+        return target ? this.#serviceRoute(packet.service, target) : undefined
     }
-} 
+
+    #resolveExactRoute(nodeId?: string): TopologyRoute | undefined {
+        if (!nodeId || !this.#topology) return undefined
+        const node = this.#topology.getPeer(nodeId)
+        if (!node || !this.#hasRpcEndpoint(node)) return undefined
+        return {
+            node,
+            endpoint: this.#getTransporterMetadata(node),
+        }
+    }
+
+    #serviceRoute(service: string, target: Http2RpcTarget): TopologyRoute {
+        const node: SpiderMeshNode = {
+            node_id: `@service:${service}:${target.host}:${target.port}`,
+            namespace: 'infrastructure',
+            host: target.host,
+            version: 0,
+            topics: [],
+            services: { [service]: {} },
+            nodes: {},
+            transporters: {
+                [this.name]: { port: target.port },
+            },
+        }
+        return {
+            node,
+            endpoint: node.transporters[this.name],
+        }
+    }
+}

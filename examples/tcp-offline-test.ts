@@ -14,7 +14,7 @@ async function main() {
     console.log(firstOutput.trim())
 
     // Kill the provider to simulate a crash — connection drop triggers offline event
-    provider.kill('SIGTERM')
+    provider.kill('SIGKILL')
 
     // Client detects offline and reports; emit that output too
     const offlineOutput = await waitForOutput(client, /"offlineDetected":true/, 12000, 'client')

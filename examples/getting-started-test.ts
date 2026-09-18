@@ -1,6 +1,6 @@
 /**
  * E2E orchestrator: runs the tcp getting-started example as REAL child processes
- * (provider + client), proving the registry-free construction works across processes.
+ * (provider + client), proving generic discovery + a transporter-owned Registry across processes.
  * Exits 0 on success.
  */
 import { createTcpTestEnv, start, waitForOutput, stopAll } from './helpers/e2eHarness.js'
