@@ -41,7 +41,7 @@
     "test:tcp:e2e:matrix": "bun run examples/tcp-e2e-matrix-test.ts",
     "test:tcp:e2e:reverse": "bun run examples/tcp-e2e-reverse-test.ts",
     "test:resilience": "bun test tests/tcp-resilience.e2e.test.ts",
-    "test:e2e": "bun test tests/topology-discovery-adapter.test.ts && bun test tests/tcp-transporters.e2e.test.ts && bun test tests/tcp-contracts.e2e.test.ts && bun test tests/tcp-session-recovery.e2e.test.ts && bun test tests/tcp-spidermesh.e2e.test.ts && bun test tests/tcp-spidermesh-reverse.e2e.test.ts && bun test tests/tcp-spidermesh-matrix.e2e.test.ts && bun test tests/tcp-spidermesh-round-robin.e2e.test.ts && bun test tests/tcp-getting-started.e2e.test.ts && bun test tests/tcp-registry-free-wait.e2e.test.ts && bun test tests/tcp-missing.e2e.test.ts && bun test tests/tcp-multi-provider-noretry.e2e.test.ts"
+    "test:e2e": "bun test tests/topology-discovery-adapter.test.ts && bun test tests/tcp-transporters.e2e.test.ts && bun test tests/tcp-contracts.e2e.test.ts && bun test tests/tcp-session-recovery.e2e.test.ts && bun test tests/tcp-spidermesh.e2e.test.ts && bun test tests/tcp-spidermesh-reverse.e2e.test.ts && bun test tests/tcp-spidermesh-matrix.e2e.test.ts && bun test tests/tcp-spidermesh-round-robin.e2e.test.ts && bun test tests/tcp-getting-started.e2e.test.ts && bun test tests/tcp-registry-free-wait.e2e.test.ts && bun test tests/tcp-missing.e2e.test.ts && bun test tests/tcp-multi-provider-noretry.e2e.test.ts && bun test tests/tcp-rpc-contract.e2e.test.ts"
   },
   "author": "Duong Van Ba",
   "license": "ISC",

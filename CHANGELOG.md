@@ -21,6 +21,11 @@
 - The legacy `{ hi, node }` UDP wire format is no longer supported by this package.
 
 ### Changed
+- Added an RPC contract e2e suite (`examples/contract/`, shared verbatim with the other transport
+  package): 35 checks covering sync/async values, `null`/`undefined`, argument shapes, `Date`,
+  `Uint8Array`, a 1 MB payload, sync/async/empty/long streams, unsubscribe, every error path (sync,
+  async, immediate and mid-stream observable errors, async observable errors, custom codes, strings,
+  `Error` with code), method/service not found, timeout, Promise chaining and 50 concurrent calls.
 - **`Http2Rpc` never gives up on a node that is still in Topology.** After
   `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` failures it reports the node `unreachable` (so it is not
   chosen for calls) but keeps retrying with exponential backoff capped at
