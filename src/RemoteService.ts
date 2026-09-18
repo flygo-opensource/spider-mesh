@@ -113,14 +113,16 @@ export class RemoteServiceLinker<Service> {
                         args
                     })
 
+                    // Vừa là Observable (subscribe để nhận stream), vừa dùng được như Promise.
+                    // Promise được tạo lười một lần: `await` nhiều lần chỉ gửi một RPC, và
+                    // then/catch/finally trả về Promise thật để chain được như Promise thường.
+                    let settled: Promise<unknown> | undefined
+                    const asPromise = () => settled ??= firstValueFrom(Service)
                     return Object.assign(Service, {
-                        then: async (s: Function, r: Function) => {
-                            try {
-                                s(await firstValueFrom(Service))
-                            } catch (e) {
-                                r(e)
-                            }
-                        }
+                        then: (onFulfilled?: (value: any) => unknown, onRejected?: (reason: any) => unknown) =>
+                            asPromise().then(onFulfilled, onRejected),
+                        catch: (onRejected?: (reason: any) => unknown) => asPromise().catch(onRejected),
+                        finally: (onFinally?: () => void) => asPromise().finally(onFinally),
                     })
 
                 }

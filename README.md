@@ -124,8 +124,10 @@ new OrderService()
 
 `RemoteServiceLinker.link()` trả về một proxy có đủ method của service:
 
-- Method của provider trả giá trị hoặc `Promise` thì bên gọi dùng được với `await`.
-- Method trả `Observable` thì bên gọi nhận `Observable`. Unsubscribe sẽ huỷ stream ở provider.
+- Kết quả dùng được như `Promise`: `await`, `.then()`, `.catch()`, `.finally()`. Dùng nhiều lần vẫn
+  chỉ gửi một request.
+- Kết quả cũng là `Observable`: method của provider trả `Observable` thì bên gọi nhận đủ các giá trị.
+  Mỗi lần subscribe là một lời gọi mới; unsubscribe sẽ huỷ stream ở provider.
 
 ```ts
 import { RemoteServiceLinker, SpiderMesh } from '@spider-mesh/core'
@@ -190,7 +192,19 @@ Lỗi luôn có dạng `{ code?: string, message: string }`.
 | `MICROSERVICE_OFFLINE` | Không có node nào phục vụ service, hoặc kết nối tới node/relay mất giữa chừng. Request **không** tự gửi lại; dùng `retry` nếu muốn. |
 | `MICROSERVICE_NOT_FOUND` | Node nhận request nhưng không có service/method đó. |
 | `MICROSERVICE_RPC_TIMEOUT` | Hết `timeout`. |
-| mã tuỳ ý | Provider ném `{ code, message }` hoặc `Error` (khi đó chỉ có `message`). |
+| mã tuỳ ý | Provider ném `{ code, message }`, hoặc `Error` có thuộc tính `code`. `Error` thường hoặc chuỗi thì chỉ có `message`. |
+
+Stream lỗi giữa chừng vẫn giao đủ các giá trị trước lỗi. Stream hoàn tất mà không phát giá trị nào
+thì subscribe chỉ nhận `complete`, còn `await` sẽ ném `EmptyError` của RxJS.
+
+### Dữ liệu truyền qua RPC
+
+| Kiểu | Hỗ trợ |
+| --- | --- |
+| `string`, `number`, `boolean`, `null`, mảng, object lồng nhau | ✅ |
+| `Date`, `Uint8Array` | ✅ giữ nguyên kiểu |
+| `undefined` | ⚠️ tuỳ transporter: `@spider-mesh/ws` nhận `null`, `@spider-mesh/tcp` nhận `undefined`. Dùng `null` khi cần giá trị rỗng như nhau. |
+| `Map`, `Set`, instance của class | ❌ không giữ kiểu (với `ws`, `Map` còn mất hết dữ liệu). Dùng object/mảng; instance đến nơi thành object thường, không có method. |
 
 ### Chờ và theo dõi service
 

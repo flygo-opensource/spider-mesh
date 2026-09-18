@@ -25,6 +25,12 @@
 - Removed the separate `ServiceDirectory` type. Availability is now part of transporter capability.
 
 ### Fixed
+- A remote call now behaves like a real Promise. The proxy's hand-written `then` dropped the
+  callback's return value (`await call.then(v => v + 1)` gave `undefined`) and there was no `catch`
+  or `finally`, so `call.catch(...)` — allowed by the `Promise` type — threw at runtime. It also sent
+  a new request on every `await` of the same call; the Promise is now created once, lazily.
+- Errors without a code no longer carry `code: undefined`. The msgpack codec of `@spider-mesh/ws`
+  turned it into `code: null`, contradicting `code?: string`.
 - `retry: N` now retries an offline call exactly `N` times. RxJS counts retries from 1 and the
   check used `count < retry`, so `retry: 1` never retried and `retry: N` retried only `N - 1` times.
 - An in-flight RPC whose provider node goes offline now errors with `MICROSERVICE_OFFLINE`
