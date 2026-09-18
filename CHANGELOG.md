@@ -25,6 +25,9 @@
 - Removed the separate `ServiceDirectory` type. Availability is now part of transporter capability.
 
 ### Fixed
+- Dropped runtime dependencies that nothing imports (`buffer`, `uuid`, `react-native-uuid`) and moved
+  `@types/bun` to dev dependencies. As a runtime dependency it pushed Bun's global typings into every
+  consumer's project, where they can clash with DOM typings in browser and React Native apps.
 - `@spider-mesh/core` loads in browsers and React Native. `const.ts` read `process.env` at import
   time, so any app without a `process` global crashed with `ReferenceError: process is not defined`
   before running anything. Environment variables are now read only when `process` exists, falling

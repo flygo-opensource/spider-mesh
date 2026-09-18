@@ -14,8 +14,8 @@
     "yarn.lock"
   ],
   "devDependencies": {
+    "@types/bun": "^1.3.13",
     "@types/node": "^25.6.0",
-    "@types/uuid": "^10.0.0",
     "typescript": "^6.0.3"
   },
   "exports": {
@@ -33,12 +33,8 @@
   "author": "Duong Van Ba",
   "license": "ISC",
   "dependencies": {
-    "@types/bun": "^1.3.13",
-    "buffer": "^6.0.3",
-    "react-native-uuid": "^2.0.2",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2",
-    "uuid": "^10.0.0"
+    "rxjs": "^7.8.2"
   },
   "browser": {
     "crypto": false
