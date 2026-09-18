@@ -18,6 +18,9 @@
   the separate core `ServiceDirectory` type no longer exists.
 
 ### Fixed
+- `@types/ws` is now a runtime dependency. The published `WebsocketRelayServer` declarations import
+  `WebSocket` from `ws`, which ships no types; as a dev dependency it was not installed for users, so
+  strict projects without `skipLibCheck` failed to compile and others silently typed it as `any`.
 - The relay no longer abandons an in-flight RPC when one end disconnects. `#pendingRequests` now
   holds `{ caller, provider, service }`, and `on_close` closes both directions: a dead provider
   sends `MICROSERVICE_OFFLINE` back to its caller, and a dead caller sends `cancel` to its
