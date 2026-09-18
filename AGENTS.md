@@ -43,7 +43,7 @@ bun test tests/websocket-spidermesh-round-robin.e2e.test.ts
 - **No root export** — four subpaths only: `./node`, `./browser`, `./react-native`, `./relay-server`. Always edit/import via a subpath.
 - **RPC/node contracts come from `@spider-mesh/core`** — the only peer dependency. Keep it on the
   matching major version.
-- **Discovery envelope types live in `src/discoveryTypes.ts`**, copied from `@spider-mesh/discovery`
+- **Discovery envelope types live in `src/discoveryTypes.ts`**, copied from the former `@spider-mesh/discovery` (dropped)
   so `ws` does not depend on that package for four types. Keep them structurally identical:
   discovery implementations interoperate through structural typing, not imports.
 - **Binary frames use `msgpackr` with its default `pack`/`unpack`** — the same codec and settings as

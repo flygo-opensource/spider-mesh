@@ -1,6 +1,6 @@
 import type { Observable } from 'rxjs'
 
-// Chép từ `@spider-mesh/discovery` để `ws` không phải phụ thuộc gói đó chỉ vì vài type.
+// Chép từ gói `@spider-mesh/discovery` cũ (đã bỏ) để `ws` không phụ thuộc gói nào chỉ vì vài type.
 // Giữ nguyên cấu trúc: mọi discovery (kể cả `@ohayo/udp` và `TopologyDiscoveryAdapter`) khớp
 // nhau theo structural typing, không qua import.
 
