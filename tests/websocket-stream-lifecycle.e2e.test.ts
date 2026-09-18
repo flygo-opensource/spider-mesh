@@ -63,3 +63,37 @@ test('websocket provider stream stops when the caller disappears', async () => {
     expect(report.activeStreamsChecked).toBe(true)
     expect(report.activeStreams).toBe(0)
 })
+
+type RelayLossReport = { relayLoss: string, detectedAfterMs: number, code: string }
+
+async function runRelayLoss(mode: 'stream' | 'unary') {
+    const result = await runBunScript(['run', 'examples/websocket-relay-loss-test.ts', mode], 45000)
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe('')
+
+    const line = result.stdout.split('\n').find(l => l.includes('"relayLoss"'))
+    expect(line).toBeDefined()
+    return JSON.parse(line!) as RelayLossReport
+}
+
+// Relay chết giữa stream / Relay dies mid-stream
+// Input:  Client subscribe stream dài hạn, KHÔNG đặt timeout; relay bị SIGKILL
+// Output: Stream error MICROSERVICE_OFFLINE trong < 1s — relay không thể tự báo, transporter phải báo
+test('websocket in-flight stream errors when the relay connection drops', async () => {
+    const report = await runRelayLoss('stream')
+
+    expect(report.relayLoss).toBe('stream')
+    expect(report.code).toBe('MICROSERVICE_OFFLINE')
+    expect(report.detectedAfterMs).toBeLessThan(1000)
+})
+
+// Relay chết khi unary đang chờ / Relay dies while a unary call is pending
+// Input:  Client await một method không bao giờ trả lời, KHÔNG đặt timeout; relay bị SIGKILL
+// Output: Promise reject MICROSERVICE_OFFLINE trong < 1s thay vì treo vô hạn
+test('websocket pending unary rpc rejects when the relay connection drops', async () => {
+    const report = await runRelayLoss('unary')
+
+    expect(report.relayLoss).toBe('unary')
+    expect(report.code).toBe('MICROSERVICE_OFFLINE')
+    expect(report.detectedAfterMs).toBeLessThan(1000)
+})

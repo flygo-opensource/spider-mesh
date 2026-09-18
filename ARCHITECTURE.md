@@ -29,15 +29,21 @@ Core không cần copy các state này khi không có nhu cầu enumerate node.
 ## Đóng RPC đang bay khi một đầu rớt
 
 Một RPC trả `Observable` có thể sống rất lâu, nên mất kết nối giữa chừng phải thành một sự kiện
-terminal thay vì một stream im lặng. Hai lớp cùng lo việc này và cố ý dư thừa:
+terminal thay vì một stream im lặng. Ba lớp cùng lo việc này, mỗi lớp phủ một kiểu đứt khác nhau:
 
 1. **Relay** giữ `{ caller, provider, service }` cho mỗi request đang bay. Provider rớt →
    caller nhận `MICROSERVICE_OFFLINE`; caller rớt → provider nhận `cancel`. Với request
    round-robin, relay là nơi duy nhất biết chắc cặp này.
 2. **Core** lưu `destination_node_id` trong `#rpc.pending` (từ `node_id` được pin, từ
    `destination_node_id` mà transporter trả về, hoặc từ `sender_node_id` của response đầu
-   tiên) và `error()` mọi stream trỏ tới node vừa offline. Lớp này phủ trường hợp relay chết
-   cùng lúc và các transporter không có relay.
+   tiên) và `error()` mọi stream trỏ tới node vừa offline. Lớp này phủ các transporter không có
+   relay.
+3. **Transporter** giữ `request_id → socket` cho mọi request đã gửi mà chưa có response kết thúc.
+   Khi socket tới relay mất (close, error hay `close()` chủ động), nó tự phát response
+   `MICROSERVICE_OFFLINE` cho các request trên socket đó. Đây là lớp duy nhất phủ được ca **chính
+   relay chết**: relay không còn để báo, còn transporter cố ý không phát `offline` cho node vì mất
+   relay không có nghĩa là node chết. Membership giữ nguyên, và request không được tự gửi lại qua
+   relay khác vì có thể đã chạy ở provider.
 
 ## Discovery-only variant
 

@@ -25,6 +25,12 @@
   long-lived `Observable` used to hang silently forever.
 - A request routed to a node whose socket just closed answers `MICROSERVICE_OFFLINE` instead of
   being dropped without a reply.
+- In-flight RPCs no longer hang when the connection to the relay itself drops. The transporter
+  tracks which socket carried each request and, when that socket is torn down, ends every
+  request still pending on it with `MICROSERVICE_OFFLINE`. Previously both streams and awaited
+  calls stayed silent forever unless the caller had set a `timeout`. Membership is untouched —
+  losing the relay still does not mean a node is offline — and requests are not resent through
+  another relay, since they may already have run on the provider.
 - `BaseWebsocketTransporter.send()` reports the `destination_node_id` it resolved through
   Topology, letting core close the matching stream when that node goes offline.
 - WebSocket discovery transporters implement `@spider-mesh/discovery`'s generic envelope contract;

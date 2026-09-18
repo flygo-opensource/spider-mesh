@@ -63,6 +63,11 @@ function toDiscoveryEvent(node: SpiderMeshNode): DiscoveryEvent<SpiderMeshNode> 
 export abstract class BaseWebsocketTransporter extends Subject<any> implements RpcTransporter, DiscoveryTransporter<SpiderMeshNode> {
     public readonly name = 'websocket'
     #connections = new Map<string, RelayConnection>()
+    /**
+     * Request đã gửi đi mà chưa nhận response kết thúc, theo socket đã mang nó. Khi socket đó
+     * mất, relay không thể báo gì cho caller nữa, nên transporter phải tự kết thúc các request này.
+     */
+    #inflight = new Map<string, WebSocketLike>()
     #topics = new Map<string, TopicStream>()
     #nodes = new Map<string, KnownNode>()
     #nodes$ = new BehaviorSubject<KnownNode[]>([])
@@ -163,10 +168,12 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         })
 
         if (packet.kind === 'request') {
+            this.#inflight.set(packet.request_id, socket)
             return {
                 // Core cần biết node đã được Topology chọn để đóng stream khi node đó offline.
                 destination_node_id: outboundPacket.destination_node_id,
                 cancel: () => {
+                    this.#inflight.delete(packet.request_id)
                     void this.#sendFrame(socket, {
                         type: 'rpc',
                         data: {
@@ -305,6 +312,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
                     finalize(() => {
                         clearSocket()
                         this.#disconnectSocket(socket)
+                        this.#failInflight(socket, url)
                     })
                 )
             }),
@@ -315,7 +323,35 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
 
     private on_rpc(_url: string, frame: RelayFrame) {
         if (frame.type !== 'rpc') return
-        this.next({ rpc: frame.data } satisfies RpcEvent)
+        const packet = frame.data
+        if (packet.kind === 'response' && (packet.completed || packet.error != undefined)) {
+            this.#inflight.delete(packet.request_id)
+        }
+        this.next({ rpc: packet } satisfies RpcEvent)
+    }
+
+    /**
+     * Kết thúc mọi request đang bay trên một socket vừa mất bằng `MICROSERVICE_OFFLINE`, như thể
+     * relay đã trả lời. Không đụng tới membership: mất relay không có nghĩa là node đã chết.
+     * Cũng không tự gửi lại qua relay khác, vì request có thể đã chạy ở provider; caller tự quyết
+     * bằng `retry`.
+     */
+    #failInflight(socket: WebSocketLike, url: string) {
+        for (const [request_id, owner] of this.#inflight) {
+            if (owner !== socket) continue
+            this.#inflight.delete(request_id)
+            this.next({
+                rpc: {
+                    kind: 'response',
+                    request_id,
+                    error: {
+                        code: 'MICROSERVICE_OFFLINE',
+                        message: `WebSocket relay connection ${url} was lost while the request was in flight`,
+                    },
+                    completed: true,
+                },
+            } satisfies RpcEvent)
+        }
     }
 
     private on_hello(url: string, frame: Extract<RelayFrame, { type: 'hello' }>) {

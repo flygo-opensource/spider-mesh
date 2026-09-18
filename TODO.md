@@ -1,6 +1,6 @@
 # TODO
 
-## 🔴 RPC đang bay treo vô hạn khi mất kết nối tới relay — CHƯA FIX
+## ✅ RPC đang bay treo vô hạn khi mất kết nối tới relay — ĐÃ FIX (18/09/2026)
 
 Phát hiện 18/09/2026, kiểm chứng thực nghiệm bằng cách SIGKILL relay (caller không đặt `timeout`):
 
@@ -30,8 +30,13 @@ request thuộc socket đó, phát
 - Không đụng tới membership: vẫn giữ nguyên tắc "mất relay ≠ node offline".
 - Không tự gửi lại qua relay khác: request có thể đã chạy ở provider, để caller tự quyết bằng `retry`.
 
-**Test cần thêm** vào `tests/websocket-stream-lifecycle.e2e.test.ts`: SIGKILL relay trong lúc
-stream và unary đang chạy; caller phải nhận `MICROSERVICE_OFFLINE` trong < 1 s mà không đặt `timeout`.
+**Đã sửa đúng theo đề xuất trên**: `#inflight` và `#failInflight()` trong
+`src/BaseWebsocketTransporter.ts`, gọi từ `finalize` của vòng đời socket nên phủ cả close, error và
+`close()` chủ động. Sau khi sửa, cả stream lẫn unary đều nhận `MICROSERVICE_OFFLINE` khoảng 2 ms sau
+khi relay chết.
+
+**Test**: 2 ca mới trong `tests/websocket-stream-lifecycle.e2e.test.ts` (kịch bản
+`examples/websocket-relay-loss-test.ts stream|unary`), đã xác nhận đỏ trước khi sửa và xanh sau khi sửa.
 
 ## ✅ RPC stream đang mở không được kết thúc khi provider offline — ĐÃ FIX (17/09/2026)
 
