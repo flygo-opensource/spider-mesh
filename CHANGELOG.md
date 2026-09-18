@@ -18,6 +18,11 @@
   the separate core `ServiceDirectory` type no longer exists.
 
 ### Fixed
+- Added an RPC contract e2e suite (`examples/contract/`, run over relay routing and Topology routing (``, shared verbatim with the other transport
+  package): 35 checks covering sync/async values, `null`/`undefined`, argument shapes, `Date`,
+  `Uint8Array`, a 1 MB payload, sync/async/empty/long streams, unsubscribe, every error path (sync,
+  async, immediate and mid-stream observable errors, async observable errors, custom codes, strings,
+  `Error` with code), method/service not found, timeout, Promise chaining and 50 concurrent calls.
 - `@types/ws` is now a runtime dependency. The published `WebsocketRelayServer` declarations import
   `WebSocket` from `ws`, which ships no types; as a dev dependency it was not installed for users, so
   strict projects without `skipLibCheck` failed to compile and others silently typed it as `any`.

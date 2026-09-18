@@ -56,7 +56,7 @@
     "test:websocket:e2e": "bun run examples/websocket-e2e-test.ts",
     "test:websocket:e2e:matrix": "bun run examples/websocket-e2e-matrix-test.ts",
     "test:websocket:e2e:reverse": "bun run examples/websocket-e2e-reverse-test.ts",
-    "test:e2e": "bun test tests/websocket-transporter.e2e.test.ts && bun test tests/websocket-spidermesh.e2e.test.ts && bun test tests/websocket-spidermesh-reverse.e2e.test.ts && bun test tests/websocket-spidermesh-matrix.e2e.test.ts && bun test tests/websocket-spidermesh-round-robin.e2e.test.ts && bun test tests/websocket-getting-started.e2e.test.ts && bun test tests/websocket-registry-free-wait.e2e.test.ts && bun test tests/websocket-missing.e2e.test.ts && bun test tests/node-online-spam.e2e.test.ts && bun test tests/websocket-registry-free-watch.e2e.test.ts && bun test tests/websocket-stream-lifecycle.e2e.test.ts"
+    "test:e2e": "bun test tests/websocket-transporter.e2e.test.ts && bun test tests/websocket-spidermesh.e2e.test.ts && bun test tests/websocket-spidermesh-reverse.e2e.test.ts && bun test tests/websocket-spidermesh-matrix.e2e.test.ts && bun test tests/websocket-spidermesh-round-robin.e2e.test.ts && bun test tests/websocket-getting-started.e2e.test.ts && bun test tests/websocket-registry-free-wait.e2e.test.ts && bun test tests/websocket-missing.e2e.test.ts && bun test tests/node-online-spam.e2e.test.ts && bun test tests/websocket-registry-free-watch.e2e.test.ts && bun test tests/websocket-stream-lifecycle.e2e.test.ts && bun test tests/websocket-rpc-contract.e2e.test.ts"
   },
   "author": "Duong Van Ba",
   "license": "ISC",
