@@ -9,7 +9,8 @@
   "files": [
     "build/**/*",
     "tsconfig.json",
-    "yarn.lock"
+    "yarn.lock",
+    "CHANGELOG.md"
   ],
   "peerDependencies": {
     "@spider-mesh/core": "^3.0.0"

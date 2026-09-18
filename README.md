@@ -86,8 +86,36 @@ console.log(await greeting.hello('Spider Mesh'))
 ```
 
 Có nhiều provider cùng service thì relay chia request lần lượt cho từng provider (round-robin).
-Trong trình duyệt và React Native, chỉ đổi import thành `@spider-mesh/ws/browser` hoặc
-`@spider-mesh/ws/react-native`.
+
+## Trình duyệt và React Native
+
+API giống hệt bản Node; chỉ đổi import. Transporter dùng `WebSocket` có sẵn của môi trường, không cần
+module nào của Node.
+
+```ts
+import { SpiderMesh } from '@spider-mesh/core'
+import { WebsocketTransporter } from '@spider-mesh/ws/browser' // React Native: '@spider-mesh/ws/react-native'
+
+const transporter = new WebsocketTransporter()
+transporter.connect('wss://relay.example.com')
+
+const mesh = new SpiderMesh({ transporters: [transporter] })
+```
+
+- **Dùng `wss://` ở production.** Trang tải qua `https://` không được mở `ws://` (mixed content). App
+  Android bản release chặn kết nối không mã hoá (`usesCleartextTraffic=false` mặc định), nên `ws://`
+  thất bại mà không báo lỗi rõ ràng.
+- **Relay không tự làm TLS.** Đặt nó sau một reverse proxy (nginx, Caddy, load balancer) nhận `wss://`
+  và chuyển tiếp WebSocket tới cổng của relay.
+- Khi phát triển trên Android, có thể tạm cho phép `ws://` bằng `android:usesCleartextTraffic="true"`
+  trong `AndroidManifest.xml`; không dùng cho bản phát hành.
+- **App mobile chạy nền hoặc máy khoá màn hình**: hệ điều hành có thể cắt mạng của app mà không đóng
+  kết nối ngay, và `WebSocket` của trình duyệt/React Native không có ping để phát hiện sớm. **Hãy đặt
+  `timeout`** cho lời gọi trên mobile để chúng không chờ vô hạn. Transporter tự thử kết nối lại theo
+  `reconnectIntervalMs`, nên sẽ nối lại khi mạng có trở lại.
+
+Bộ kiểm thử hợp đồng RPC đầy đủ đã chạy qua trong trình duyệt và trên React Native 0.86 (bản release,
+Hermes, Android 16).
 
 ## Tuỳ chọn transporter
 
@@ -95,7 +123,7 @@ Trong trình duyệt và React Native, chỉ đổi import thành `@spider-mesh/
 import { WebsocketTransporter } from '@spider-mesh/ws/node'
 
 const transporter = new WebsocketTransporter({
-  heartbeatIntervalMs: 30_000, // gửi ping giữ kết nối
+  heartbeatIntervalMs: 30_000, // gửi ping giữ kết nối (chỉ bản Node/Bun; WebSocket của trình duyệt không có ping)
   reconnectIntervalMs: 1_000,  // chờ bao lâu trước khi kết nối lại
   unsubscribeDelayMs: 10_000,  // giữ subscription event thêm một lúc sau khi không còn ai nghe
 })
