@@ -22,8 +22,10 @@ Behavior references when changing runtime/routing:
 ## Conventions
 
 - **ESM-only.** Source uses emitted `.js` relative specifiers (`moduleResolution: NodeNext`). Import `./Foo.js`, not `./Foo`.
-- **`src/types.ts` is the RPC/Topology contract source of truth.** Generic discovery contracts belong to
-  `@spider-mesh/discovery`; keep companion packages aligned in the same change.
+- **`src/types.ts` is the RPC/Topology contract source of truth**, including `TopologyDiscovery`. The
+  generic discovery envelope and `TopologyDiscoveryAdapter` live in `@spider-mesh/tcp` (the former
+  `@spider-mesh/discovery` package was dropped); `@spider-mesh/ws` keeps a structural copy of the envelope
+  types. Keep companion packages aligned in the same change.
 - **Keep this package runtime-agnostic.** No sockets, UDP, HTTP, or transport-specific code in `core`. Concrete transports belong in companion packages.
 - **Transporter tự hardcode `readonly name`** và được truyền vào `new SpiderMesh({ transporters })`.
   Không suy luận bằng tên class và không có availability registration riêng.
