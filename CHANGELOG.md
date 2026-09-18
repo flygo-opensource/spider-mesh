@@ -22,6 +22,7 @@
   the separate core `ServiceDirectory` type no longer exists.
 
 ### Fixed
+- `msgpackr` is pinned to `^1.12.1`, the version every browser, React Native and Node test ran against.
 - Verified in a real browser: the browser build (including `msgpackr`'s browser entry) passes the
   full RPC contract matrix; `examples/browser-contract/serve.ts` reproduces the run.
 - Added an RPC contract e2e matrix (`examples/contract/`, shared verbatim by `@spider-mesh/ws` and
