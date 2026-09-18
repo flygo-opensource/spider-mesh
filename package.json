@@ -20,7 +20,8 @@
     }
   },
   "files": [
-    "build"
+    "build",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "rm -rf build && tsc -b tsconfig.json",
