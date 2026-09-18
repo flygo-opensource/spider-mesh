@@ -1,5 +1,5 @@
 import type { SpiderMeshNode } from '../src/types.js'
-import type { DiscoveryMessage } from '@spider-mesh/discovery'
+import type { DiscoveryMessage } from '../src/index.js'
 import { createDiscovery } from './helpers/createDiscovery.js'
 
 const localNode: SpiderMeshNode = {

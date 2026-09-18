@@ -9,7 +9,7 @@
  */
 import { Microservice, SpiderMesh, Topology } from '@spider-mesh/core'
 import { EventBus } from '@spider-mesh/events'
-import { TopologyDiscoveryAdapter } from '@spider-mesh/discovery'
+import { TopologyDiscoveryAdapter } from '../../src/index.js'
 import { Http2Pubsub, Http2Rpc } from '../../src/index.js'
 import { createDiscovery } from '../helpers/createDiscovery.js'
 

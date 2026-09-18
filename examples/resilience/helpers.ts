@@ -1,5 +1,5 @@
 import type { RpcRequestPacket, SpiderMeshNode } from '@spider-mesh/core'
-import type { DiscoveryMessage } from '@spider-mesh/discovery'
+import type { DiscoveryMessage } from '../../src/index.js'
 import type { Http2Rpc } from '../../src/index.js'
 
 export function makeNode(options: {

@@ -1,6 +1,6 @@
 import { firstValueFrom, filter, timeout } from 'rxjs'
 import { Registry, type RpcRequestPacket, type SpiderMeshNode } from '@spider-mesh/core'
-import type { DiscoveryMessage } from '@spider-mesh/discovery'
+import type { DiscoveryMessage } from '../src/index.js'
 import { Http2Rpc } from '../src/index.js'
 import { createDiscovery } from './helpers/createDiscovery.js'
 

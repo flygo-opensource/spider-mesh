@@ -21,6 +21,10 @@
 - The legacy `{ hi, node }` UDP wire format is no longer supported by this package.
 
 ### Changed
+- `TopologyDiscoveryAdapter` (plus `DiscoveryMessage`, `DiscoveryTransporter` and the adapter
+  options) is now exported from `@spider-mesh/tcp`. It plugs a discovery such as `@ohayo/udp` into
+  Topology, which is the setup this package is used with, so the separate `@spider-mesh/discovery`
+  package is not needed and is not published.
 - `Http2Rpc` proactively connects to every routable discovered peer. HTTP/2 session and underlying
   TCP socket `close`/`error`, followed by bounded reconnect, own online/offline state; UDP has no
   periodic heartbeat.

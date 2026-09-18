@@ -15,7 +15,7 @@ Cách khai báo và gọi service được mô tả trong `@spider-mesh/core`.
 ## Linux/PM2 với UDP discovery
 
 ```bash
-bun add @spider-mesh/core @spider-mesh/tcp @spider-mesh/discovery @ohayo/udp rxjs
+bun add @spider-mesh/core @spider-mesh/tcp @ohayo/udp rxjs
 ```
 
 Mọi process (provider lẫn client) dùng cùng một cấu hình:
@@ -23,9 +23,8 @@ Mọi process (provider lẫn client) dùng cùng một cấu hình:
 ```ts
 // mesh.ts
 import { SpiderMesh, Topology, type SpiderMeshNode } from '@spider-mesh/core'
-import { TopologyDiscoveryAdapter } from '@spider-mesh/discovery'
+import { Http2Rpc, TopologyDiscoveryAdapter } from '@spider-mesh/tcp'
 import { UdpDiscovery } from '@ohayo/udp'
-import { Http2Rpc } from '@spider-mesh/tcp'
 
 // Phải trùng namespace của mesh (đọc từ cùng biến SPIDERMESH_NAMESPACE, mặc định 'default').
 const namespace = process.env.SPIDERMESH_NAMESPACE ?? 'default'
@@ -54,6 +53,17 @@ export const mesh = new SpiderMesh({
 })
 export { topology }
 ```
+
+`TopologyDiscoveryAdapter` nối discovery vào `Topology`: broadcast node local mỗi khi đổi, và đưa node
+nhận được vào Topology. Nó nhận mọi discovery có `broadcast()` và phát ra message, không riêng
+`@ohayo/udp`.
+
+| Tuỳ chọn adapter | Mặc định | Ý nghĩa |
+| --- | --- | --- |
+| `heartbeatIntervalMs` | tắt | Broadcast lại định kỳ để node còn sống không bị `staleAfterMs` xoá. Khoảng 1/3 `staleAfterMs`. |
+| `onError` | bỏ qua | Nhận lỗi broadcast. **Nên luôn đặt**, xem bảng lỗi bên dưới. |
+| `tags` | `['spider-mesh', 'node']` | Tag gắn vào message; tag của `UdpDiscovery` phải nằm trong danh sách này. |
+| `closeTransporter` | `true` | Đóng discovery khi `Topology` đóng. |
 
 Chạy mỗi process với địa chỉ LAN của **chính máy đó**, để các node khác kết nối tới được:
 
