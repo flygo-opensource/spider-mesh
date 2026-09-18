@@ -23,7 +23,7 @@ import type {
     SpiderMeshNode,
     TopologyDiscoveryContext,
 } from '@spider-mesh/core'
-import type { DiscoveryEvent, DiscoveryMessage, DiscoveryTransporter } from '@spider-mesh/discovery'
+import type { DiscoveryEvent, DiscoveryMessage, DiscoveryTransporter } from './discoveryTypes.js'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayRawData } from './websocketProtocol.js'
 
 /** Cấu hình reconnect và heartbeat cho discovery-only WebSocket client. */

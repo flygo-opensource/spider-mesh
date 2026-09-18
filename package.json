@@ -12,12 +12,10 @@
     "yarn.lock"
   ],
   "peerDependencies": {
-    "@spider-mesh/core": "^3.0.0",
-    "@spider-mesh/discovery": "^3.0.0"
+    "@spider-mesh/core": "^3.0.0"
   },
   "devDependencies": {
     "@spider-mesh/core": "file:../core",
-    "@spider-mesh/discovery": "file:../discovery",
     "@spider-mesh/events": "file:../events",
     "@types/bun": "^1.3.13",
     "@types/node": "^25.6.0",

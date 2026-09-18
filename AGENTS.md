@@ -41,8 +41,11 @@ bun test tests/websocket-spidermesh-round-robin.e2e.test.ts
 
 - **ESM-only**, `.js` relative specifiers in TypeScript source.
 - **No root export** — four subpaths only: `./node`, `./browser`, `./react-native`, `./relay-server`. Always edit/import via a subpath.
-- **RPC/node contracts come from `@spider-mesh/core`; discovery contracts come from
-  `@spider-mesh/discovery`.** Keep the packages on matching major versions.
+- **RPC/node contracts come from `@spider-mesh/core`** — the only peer dependency. Keep it on the
+  matching major version.
+- **Discovery envelope types live in `src/discoveryTypes.ts`**, copied from `@spider-mesh/discovery`
+  so `ws` does not depend on that package for four types. Keep them structurally identical:
+  discovery implementations interoperate through structural typing, not imports.
 - **Keep binary frames on `@msgpack/msgpack`.** Don't switch encoders without updating both transporter and relay.
 - **Preserve `status$` semantics** (per-URL connection state) and the **delayed-unsubscribe** behavior for event listeners.
 - Transporter có wire name `websocket`; cùng instance chỉ bind Topology Discovery khi ứng dụng cần

@@ -4,7 +4,7 @@ import { WebsocketRelayServer } from '../src/relay-server.js'
 import { WebsocketTransporter } from '../src/node.js'
 import { encodeRelayFrame } from '../src/websocketProtocol.js'
 import type { RpcRequestPacket, SpiderMeshNode } from '@spider-mesh/core'
-import type { DiscoveryEvent, DiscoveryMessage } from '@spider-mesh/discovery'
+import type { DiscoveryEvent, DiscoveryMessage } from '../src/discoveryTypes.js'
 import { EventBus } from '@spider-mesh/events'
 
 const port = 8800 + Math.floor(Math.random() * 200)

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { SpiderMeshNode } from '@spider-mesh/core'
-import type { DiscoveryMessage } from '@spider-mesh/discovery'
+import type { DiscoveryMessage } from '../src/discoveryTypes.js'
 import { WebsocketRelayServer } from '../src/WebsocketRelayServer.js'
 import { WebsocketTransporter } from '../src/WebsocketTransporter.js'
 

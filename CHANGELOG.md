@@ -11,7 +11,7 @@
   thành tất cả node đều offline.
 
 ### Breaking
-- Requires `@spider-mesh/core@^3.0.0` and `@spider-mesh/discovery@^3.0.0`.
+- Requires `@spider-mesh/core@^3.0.0` (the only peer dependency).
 - Event methods remain on the shared WebSocket transporter, but the instance is registered on
   `EventBus` from `@spider-mesh/events`; `SpiderMesh` no longer owns pub/sub.
 - Availability is exposed directly through transporter `watchService()` / `listNodes()` methods;
@@ -33,8 +33,10 @@
   another relay, since they may already have run on the provider.
 - `BaseWebsocketTransporter.send()` reports the `destination_node_id` it resolved through
   Topology, letting core close the matching stream when that node goes offline.
-- WebSocket discovery transporters implement `@spider-mesh/discovery`'s generic envelope contract;
-  applications bind local announcements with `bindMeshDiscovery()`.
+- WebSocket discovery transporters implement the generic discovery envelope contract. The types
+  are kept inside `ws` (`src/discoveryTypes.ts`) rather than imported from `@spider-mesh/discovery`,
+  so installing `ws` needs no discovery package; they stay structurally identical, so a `ws`
+  transporter still plugs into any consumer of that contract.
 - Explicit transporter close tears down Node `ws` connections and clears connection status
   deterministically; synchronous socket creation no longer defers listener registration.
 

@@ -1,7 +1,7 @@
 import { decode, encode } from '@msgpack/msgpack'
 import { BehaviorSubject, defer, distinctUntilChanged, finalize, from, fromEvent, ignoreElements, map, merge, Observable, of, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
 import type { NodeRef, RpcCancelPacket, RpcEvent, RpcProbeRequest, RpcProbeResult, RpcRequestPacket, RpcResponsePacket, RpcTransporter, RpcTransporterContext, SpiderMeshNode, Topology, TopologyDiscoveryContext } from '@spider-mesh/core'
-import type { DiscoveryEvent, DiscoveryMessage, DiscoveryTransporter } from '@spider-mesh/discovery'
+import type { DiscoveryEvent, DiscoveryMessage, DiscoveryTransporter } from './discoveryTypes.js'
 import { decodeRelayFrame, encodeRelayFrame, normalizeRelayRawData, type RelayFrame, type RelayRawData } from './websocketProtocol.js'
 
 /** Cấu hình heartbeat, reconnect và thời gian giữ subscription của WebSocket transporter. */
