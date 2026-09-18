@@ -11,7 +11,8 @@
   "files": [
     "build/**/*",
     "tsconfig.json",
-    "yarn.lock"
+    "yarn.lock",
+    "CHANGELOG.md"
   ],
   "peerDependencies": {
     "@ohayo/udp": "^3.0.0",
