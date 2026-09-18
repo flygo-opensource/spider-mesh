@@ -46,7 +46,14 @@ bun test tests/websocket-spidermesh-round-robin.e2e.test.ts
 - **Discovery envelope types live in `src/discoveryTypes.ts`**, copied from `@spider-mesh/discovery`
   so `ws` does not depend on that package for four types. Keep them structurally identical:
   discovery implementations interoperate through structural typing, not imports.
-- **Keep binary frames on `@msgpack/msgpack`.** Don't switch encoders without updating both transporter and relay.
+- **Binary frames use `msgpackr` with its default `pack`/`unpack`** — the same codec and settings as
+  `@spider-mesh/tcp`, so data arrives identically over both transports (the RPC contract suite checks
+  this). Default settings keep `useRecords: false`: no `new Function` code generation, so it works
+  under strict CSP and on React Native. `encodeRelayFrame` copies the packed view into its own buffer.
+  Changing the codec is a wire-protocol break for relay and every client.
+- **RPC contract suite**: `examples/contract/ContractService.ts` and `runContract.ts` are identical in
+  `@spider-mesh/tcp`; keep them in sync. `bun run examples/browser-contract/serve.ts` runs the same
+  matrix in a real browser against the browser build (manual; prints a URL, page title becomes PASS/FAIL).
 - **Preserve `status$` semantics** (per-URL connection state) and the **delayed-unsubscribe** behavior for event listeners.
 - Transporter có wire name `websocket`; cùng instance chỉ bind Topology Discovery khi ứng dụng cần
   enumerate/watch node. Không có Topology thì relay tự route và transporter cung cấp probe.

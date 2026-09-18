@@ -18,7 +18,7 @@ function expectAllPass(results: ContractResult[]) {
     const failures = results.filter(result => !result.pass)
     // In ra từng ca sai kèm giá trị thật/mong đợi để dễ đọc khi fail.
     expect(failures.map(({ name, actual, expected }) => ({ name, actual, expected }))).toEqual([])
-    expect(results.length).toBeGreaterThanOrEqual(35)
+    expect(results.length).toBeGreaterThanOrEqual(74)
 }
 
 // Mọi dạng trả về/lỗi của RPC qua relay tự chọn provider (không Topology).

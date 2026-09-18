@@ -12,6 +12,9 @@ bun add @spider-mesh/core @spider-mesh/ws rxjs
 
 Cách khai báo và gọi service được mô tả trong `@spider-mesh/core`.
 
+Relay và mọi node phải cùng dùng `@spider-mesh/ws` 3.x: bản 3.0 đổi cách mã hoá frame (sang
+`msgpackr`, giống `@spider-mesh/tcp`), nên không kết nối được với relay hoặc client 2.x.
+
 | Import | Class | Dùng ở |
 | --- | --- | --- |
 | `@spider-mesh/ws/relay-server` | `WebsocketRelayServer` | Node/Bun (process relay) |

@@ -61,8 +61,8 @@
   "author": "Duong Van Ba",
   "license": "ISC",
   "dependencies": {
-    "@msgpack/msgpack": "^3.1.3",
     "@types/ws": "^8.18.1",
+    "msgpackr": "^1.11.5",
     "rxjs": "^7.8.2",
     "ws": "^8.20.0"
   },

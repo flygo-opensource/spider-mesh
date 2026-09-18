@@ -1,4 +1,4 @@
-import { decode, encode } from '@msgpack/msgpack'
+import { pack, unpack } from 'msgpackr'
 import type { RpcCancelPacket, RpcRequestPacket, RpcResponsePacket, SpiderMeshNode } from '@spider-mesh/core'
 
 /** Các dạng raw payload có thể nhận từ WebSocket ở nhiều runtime. */
@@ -46,13 +46,19 @@ export type RelayOfflineFrame = {
 export type RelayFrame = RelayRpcFrame | RelayPublishFrame | RelaySubscribeFrame | RelayUnsubscribeFrame | RelayHelloFrame | RelayOfflineFrame
 
 
-export function encodeRelayFrame(frame: RelayFrame) {
-    return encode(frame)
+/**
+ * Cùng codec (`msgpackr`, cấu hình mặc định) với `@spider-mesh/tcp`, để mọi transporter truyền dữ liệu
+ * giống hệt nhau (ví dụ `undefined` vẫn là `undefined`).
+ */
+export function encodeRelayFrame(frame: RelayFrame): Uint8Array {
+    // `pack()` trả về một view nằm giữa buffer dùng chung của msgpackr. Chép ra mảng riêng để mọi
+    // WebSocket (kể cả React Native) chỉ gửi đúng các byte của frame, không kèm phần còn lại.
+    return new Uint8Array(pack(frame))
 }
 
 export function decodeRelayFrame(raw: Uint8Array) {
     try {
-        return decode(raw) as RelayFrame
+        return unpack(raw) as RelayFrame
     } catch {
         return null
     }

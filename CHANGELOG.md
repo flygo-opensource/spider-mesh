@@ -11,6 +11,10 @@
   thành tất cả node đều offline.
 
 ### Breaking
+- Frames are now encoded with `msgpackr` (default `pack`/`unpack`), the codec `@spider-mesh/tcp`
+  already used. With `@msgpack/msgpack`, `undefined` arrived as `null` and a `Map` arrived as `{}`
+  (its data lost), so the same service returned different data depending on the transport. Relay and
+  every client must upgrade together; a 3.0 relay cannot talk to 2.x clients and vice versa.
 - Requires `@spider-mesh/core@^3.0.0` (the only peer dependency).
 - Event methods remain on the shared WebSocket transporter, but the instance is registered on
   `EventBus` from `@spider-mesh/events`; `SpiderMesh` no longer owns pub/sub.
@@ -18,11 +22,16 @@
   the separate core `ServiceDirectory` type no longer exists.
 
 ### Fixed
-- Added an RPC contract e2e suite (`examples/contract/`, run over relay routing and Topology routing (``, shared verbatim with the other transport
-  package): 35 checks covering sync/async values, `null`/`undefined`, argument shapes, `Date`,
-  `Uint8Array`, a 1 MB payload, sync/async/empty/long streams, unsubscribe, every error path (sync,
-  async, immediate and mid-stream observable errors, async observable errors, custom codes, strings,
-  `Error` with code), method/service not found, timeout, Promise chaining and 50 concurrent calls.
+- Verified in a real browser: the browser build (including `msgpackr`'s browser entry) passes the
+  full RPC contract matrix; `examples/browser-contract/serve.ts` reproduces the run.
+- Added an RPC contract e2e matrix (`examples/contract/`, shared verbatim by `@spider-mesh/ws` and
+  `@spider-mesh/tcp`), 74 checks: 17 method shapes (sync, async, sync/async observable with immediate
+  or delayed values, empty streams, and every error position — sync throw, async reject, observable
+  method throwing before returning, async observable rejecting, observable erroring immediately,
+  after values or inside an operator) each consumed with both `subscribe` and `await`; 5 error kinds
+  (`Error`, `{ code, message }`, string, `Error` with `code`, `Error` subclass) × 4 error paths; data
+  types; unsubscribe and `await` both stopping the provider stream; not found, timeout, Promise
+  chaining and concurrency.
 - `@types/ws` is now a runtime dependency. The published `WebsocketRelayServer` declarations import
   `WebSocket` from `ws`, which ships no types; as a dev dependency it was not installed for users, so
   strict projects without `skipLibCheck` failed to compile and others silently typed it as `any`.

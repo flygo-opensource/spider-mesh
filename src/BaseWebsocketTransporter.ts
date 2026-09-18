@@ -1,4 +1,4 @@
-import { decode, encode } from '@msgpack/msgpack'
+import { pack, unpack } from 'msgpackr'
 import { BehaviorSubject, defer, distinctUntilChanged, finalize, from, fromEvent, ignoreElements, map, merge, Observable, of, ReplaySubject, retry, share, Subject, Subscription, switchMap, take, takeUntil, tap, throwError, timer } from 'rxjs'
 import type { NodeRef, RpcCancelPacket, RpcEvent, RpcProbeRequest, RpcProbeResult, RpcRequestPacket, RpcResponsePacket, RpcTransporter, RpcTransporterContext, SpiderMeshNode, Topology, TopologyDiscoveryContext } from '@spider-mesh/core'
 import type { DiscoveryEvent, DiscoveryMessage, DiscoveryTransporter } from './discoveryTypes.js'
@@ -199,7 +199,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         await this.#sendFrameToAll({
             type: 'publish',
             topic,
-            payload: encode(data),
+            payload: pack(data),
         })
     }
 
@@ -477,7 +477,7 @@ export abstract class BaseWebsocketTransporter extends Subject<any> implements R
         if (!topic) return
 
         try {
-            topic.subject.next(decode(frame.payload) as any)
+            topic.subject.next(unpack(frame.payload) as any)
         } catch {
             topic.subject.next(frame.payload)
         }
