@@ -42,6 +42,10 @@
   `SPIDERMESH_NODE_ID`, `HOSTNAME`, or any constant derived from environment state.
 
 ### Changed
+- `Topology` accepts `removeUnreachableAfterMs`: a remote node is removed once every transporter has
+  reported it `unreachable` continuously for that long (event reason `'unreachable'`). Repeated
+  `unreachable` reports do not restart the window. This lets a discovery be used only for finding
+  nodes (UDP) while real connections decide liveness, without heartbeats or `staleAfterMs`.
 - `RpcResponsePacket.sender_node_id` (optional) reports the node that answered, so a caller can
   close the right stream when that node disappears.
 - `RpcTransporter.send()` may return `destination_node_id` alongside `cancel`, reporting the node

@@ -26,7 +26,20 @@ export type TopologyOptions = {
     discovery?: TopologyDiscovery
     /** Thời gian tối đa giữ remote node nếu Discovery không phát sự kiện offline. */
     staleAfterMs?: number
+    /**
+     * Xoá remote node khi mọi transporter đã báo nó `unreachable` liên tục trong khoảng này.
+     * Dùng khi discovery chỉ để các node tìm thấy nhau (như UDP) và kết nối của transporter mới là
+     * bằng chứng node còn sống: không cần heartbeat hay `staleAfterMs`.
+     */
+    removeUnreachableAfterMs?: number
 }
+
+type ReachabilityEntry = Required<Pick<TopologyReachabilityReport, 'status' | 'observed_at'>>
+    & Pick<TopologyReachabilityReport, 'reason'>
+    & {
+        /** Thời điểm endpoint chuyển sang `status` hiện tại; không đổi khi báo lặp lại cùng status. */
+        since: number
+    }
 
 /** Tùy chọn tương thích cho API chọn node trực tiếp trước đây của Registry. */
 export type TopologyPickRpcTargetOptions = {
@@ -59,21 +72,32 @@ export class Topology {
     readonly #staleAfterMs?: number
     readonly #lastSeen = new Map<string, number>()
     readonly #routingStates = new Map<string, RouteState>()
-    readonly #reachability = new Map<string, Map<string, Required<Pick<TopologyReachabilityReport, 'status' | 'observed_at'>> & Pick<TopologyReachabilityReport, 'reason'>>>()
+    readonly #reachability = new Map<string, Map<string, ReachabilityEntry>>()
     readonly #verifyingNodes = new Map<string, Promise<TopologyNodeVerificationResult>>()
     readonly #localNode$ = new ReplaySubject<SpiderMeshNode>(1)
     #localNodeId?: string
     #localBinding = Subscription.EMPTY
     #discoveryBinding?: { unsubscribe(): void }
     #staleTimer?: ReturnType<typeof setInterval>
+    readonly #removeUnreachableAfterMs?: number
+    #unreachableTimer?: ReturnType<typeof setInterval>
 
     constructor(options: TopologyOptions = {}) {
         this.#discovery = options.discovery
         this.#staleAfterMs = options.staleAfterMs
+        this.#removeUnreachableAfterMs = options.removeUnreachableAfterMs
 
         if (this.#staleAfterMs && this.#staleAfterMs > 0) {
             this.#staleTimer = setInterval(() => this.#removeStaleNodes(), Math.max(100, this.#staleAfterMs / 2))
             this.#staleTimer.unref?.()
+        }
+
+        if (this.#removeUnreachableAfterMs && this.#removeUnreachableAfterMs > 0) {
+            this.#unreachableTimer = setInterval(
+                () => this.#removeUnreachableNodes(),
+                Math.max(100, Math.min(this.#removeUnreachableAfterMs / 2, 30_000)),
+            )
+            this.#unreachableTimer.unref?.()
         }
     }
 
@@ -173,7 +197,7 @@ export class Topology {
     }
 
     /** Xóa remote node; local node không thể bị Discovery xóa. */
-    removeRemote(nodeId: string, reason: 'discovery' | 'verification' | 'stale' = 'discovery') {
+    removeRemote(nodeId: string, reason: 'discovery' | 'verification' | 'stale' | 'unreachable' = 'discovery') {
         if (nodeId === this.#localNodeId) return false
         const nodes = new Map(this.nodes$.value)
         const node = nodes.get(nodeId)
@@ -206,6 +230,7 @@ export class Topology {
             status: report.status,
             reason: report.reason,
             observed_at: observedAt,
+            since: previous?.status === report.status ? previous.since : observedAt,
         })
         this.#reachability.set(report.node_id, byTransporter)
 
@@ -391,6 +416,7 @@ export class Topology {
         this.#localBinding.unsubscribe()
         this.#discoveryBinding?.unsubscribe()
         if (this.#staleTimer) clearInterval(this.#staleTimer)
+        if (this.#unreachableTimer) clearInterval(this.#unreachableTimer)
         await this.#discovery?.close?.()
         this.#localNode$.complete()
         this.#events.complete()
@@ -447,6 +473,22 @@ export class Topology {
             hash = Math.imul(hash, 16777619)
         }
         return hash >>> 0
+    }
+
+    /** Xoá node mà mọi transporter đã báo `unreachable` liên tục quá `removeUnreachableAfterMs`. */
+    #removeUnreachableNodes() {
+        if (!this.#removeUnreachableAfterMs) return
+        const now = Date.now()
+        for (const [nodeId, byTransporter] of this.#reachability) {
+            if (nodeId === this.#localNodeId || byTransporter.size === 0) continue
+            const entries = [...byTransporter.values()]
+            if (!entries.every(entry => entry.status === 'unreachable')) continue
+            // Tính từ lần chuyển sang unreachable gần nhất: mọi endpoint đều phải đứt đủ lâu.
+            const unreachableSince = Math.max(...entries.map(entry => entry.since))
+            if (now - unreachableSince >= this.#removeUnreachableAfterMs) {
+                this.removeRemote(nodeId, 'unreachable')
+            }
+        }
     }
 
     #removeStaleNodes() {

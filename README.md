@@ -258,7 +258,8 @@ topology.events$.subscribe(event => console.log(event.type))
 | Tuỳ chọn `Topology` | Ý nghĩa |
 | --- | --- |
 | `discovery` | Nguồn danh sách node. |
-| `staleAfterMs` | Xoá node không nhận được thông báo nào trong khoảng này. Cần khi discovery không tự báo node rời đi (như UDP). |
+| `removeUnreachableAfterMs` | Xoá node khi mọi transporter báo không kết nối được tới nó liên tục trong khoảng này. Dùng khi discovery chỉ để các node tìm thấy nhau và kết nối của transporter mới cho biết node còn sống (như `@spider-mesh/tcp` với UDP). |
+| `staleAfterMs` | Xoá node không nhận được thông báo nào từ discovery trong khoảng này. Chỉ dùng khi discovery tự phát lại định kỳ (heartbeat). |
 
 | `routing.strategy` | Cách chọn node |
 | --- | --- |
@@ -297,8 +298,9 @@ const discovery: TopologyDiscovery = {
 const topology = new Topology({ discovery, staleAfterMs: 15_000 })
 ```
 
-Topology chỉ xoá node khi discovery báo rời đi, `verify()` trả `'dead'`, hoặc quá `staleAfterMs`.
-Transporter mất kết nối chỉ loại node khỏi việc chọn đích, không xoá node.
+Topology xoá node khi discovery báo rời đi, `verify()` trả `'dead'`, quá `staleAfterMs`, hoặc mọi
+transporter không kết nối được liên tục quá `removeUnreachableAfterMs`. Transporter vừa mất kết nối
+chỉ khiến node không được chọn để gọi; tự nó không xoá node.
 
 ## Viết transporter
 

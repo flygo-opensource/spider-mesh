@@ -218,7 +218,7 @@ export type TopologyEvent =
     | {
         type: 'node-offline';
         node: SpiderMeshNode;
-        reason: 'discovery' | 'verification' | 'stale';
+        reason: 'discovery' | 'verification' | 'stale' | 'unreachable';
         observed_at: number;
     }
     | {
