@@ -101,8 +101,11 @@ try {
             await Bun.sleep(100)
             const replacement = await startProvider(node_id, generation)
             providers.set(node_id, replacement)
+            // Đợi cả kết nối tới cổng mới: ngay sau restart endpoint còn `suspect` và route() cố ý
+            // không chọn nó, nên gọi sớm hơn sẽ nhận MICROSERVICE_OFFLINE (flaky trước đây).
             await waitFor(
-                () => consumerRegistry.getPeer(node_id)?.transporters.http2?.port === replacement.port,
+                () => consumerRegistry.getPeer(node_id)?.transporters.http2?.port === replacement.port
+                    && consumerRegistry.getReachability(node_id, 'http2') === 'reachable',
                 3000,
                 `${node_id} replacement endpoint`,
             )

@@ -38,11 +38,10 @@ const udp = new UdpDiscovery<SpiderMeshNode>({
 
 const topology = new Topology({
   discovery: new TopologyDiscoveryAdapter(udp, {
-    // UDP không báo khi node rời đi: phát lại định kỳ, node im lặng quá staleAfterMs thì bị xoá.
-    heartbeatIntervalMs: 5_000,
     onError: error => console.error('discovery broadcast failed', error),
   }),
-  staleAfterMs: 15_000,
+  // Xoá node khi kết nối HTTP/2 tới nó đứt liên tục 5 phút (process đã chết hẳn).
+  removeUnreachableAfterMs: 5 * 60_000,
 })
 
 export const mesh = new SpiderMesh({
@@ -54,13 +53,19 @@ export const mesh = new SpiderMesh({
 export { topology }
 ```
 
-`TopologyDiscoveryAdapter` nối discovery vào `Topology`: broadcast node local mỗi khi đổi, và đưa node
-nhận được vào Topology. Nó nhận mọi discovery có `broadcast()` và phát ra message, không riêng
-`@ohayo/udp`.
+Hai lớp làm hai việc khác nhau:
+
+- **UDP chỉ để các node tìm thấy nhau.** `TopologyDiscoveryAdapter` broadcast node local mỗi khi nó
+  thay đổi, và đưa node nhận được vào `Topology`. Không cần heartbeat.
+- **Kết nối HTTP/2 quyết định node còn sống hay không.** `Http2Rpc` giữ kết nối tới mọi node và tự
+  nối lại khi đứt; node không kết nối được thì không được chọn để gọi, và bị xoá khỏi `Topology` sau
+  `removeUnreachableAfterMs`.
+
+Adapter nhận mọi discovery có `broadcast()` và phát ra message, không riêng `@ohayo/udp`.
 
 | Tuỳ chọn adapter | Mặc định | Ý nghĩa |
 | --- | --- | --- |
-| `heartbeatIntervalMs` | tắt | Broadcast lại định kỳ để node còn sống không bị `staleAfterMs` xoá. Khoảng 1/3 `staleAfterMs`. |
+| `heartbeatIntervalMs` | tắt | Broadcast lại định kỳ. **Không cần** với `Http2Rpc`; chỉ dùng khi discovery là nguồn duy nhất cho biết node còn sống (kèm `staleAfterMs`). |
 | `onError` | bỏ qua | Nhận lỗi broadcast. **Nên luôn đặt**, xem bảng lỗi bên dưới. |
 | `tags` | `['spider-mesh', 'node']` | Tag gắn vào message; tag của `UdpDiscovery` phải nằm trong danh sách này. |
 | `closeTransporter` | `true` | Đóng discovery khi `Topology` đóng. |
@@ -190,14 +195,15 @@ Event được gửi thẳng tới những node đang lắng nghe topic, không 
 
 ## Khi mất kết nối
 
-- Node mất kết nối bị loại khỏi danh sách chọn đích ngay; lời gọi đang chạy tới node đó kết thúc
-  bằng `MICROSERVICE_OFFLINE`.
-- `Http2Rpc` thử nối lại `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` lần (mặc định 3), với độ trễ tăng dần.
-- **Hết lượt thì dừng hẳn với node đó.** Node chỉ được thử lại khi nó xuất hiện với `node_id` mới
-  (process khởi động lại) hoặc địa chỉ mới. Heartbeat của cùng node **không** kích hoạt nối lại, nên
-  một lần mất mạng dài hơn tổng thời gian thử lại sẽ làm node đó không gọi được cho tới khi một trong
-  hai process khởi động lại. Tăng `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` nếu mạng hay chập chờn.
-- Node chỉ bị xoá khỏi danh sách khi quá `staleAfterMs` mà không có tin tức.
+- Kết nối tới một node đứt: node bị loại khỏi danh sách chọn đích ngay, và lời gọi đang chạy tới node
+  đó kết thúc bằng `MICROSERVICE_OFFLINE`.
+- `Http2Rpc` **tự nối lại, không bỏ cuộc**, với thời gian chờ tăng dần tới
+  `SPIDERMESH_HTTP2_RECONNECT_MAX_DELAY_MS` (mặc định 30 s). Mạng phục hồi là node gọi được lại, không
+  cần discovery làm gì.
+- Node đổi địa chỉ hoặc cổng (process khởi động lại) thì được thử ngay, không đợi hết thời gian chờ.
+- Không kết nối được liên tục quá `removeUnreachableAfterMs` thì node bị xoá khỏi `Topology`. Đặt đủ
+  dài để một lần mất mạng không xoá nhầm node còn sống: node đã bị xoá chỉ quay lại khi nó broadcast
+  lần nữa (khi khởi động lại, hoặc khi thấy một node mới vào mạng).
 
 ## Tuỳ chọn và biến môi trường
 
@@ -211,7 +217,8 @@ Event được gửi thẳng tới những node đang lắng nghe topic, không 
 | `SPIDERMESH_NODE_HOSTNAME` | *(rỗng)* | Địa chỉ node khác dùng để kết nối tới node này. **Bắt buộc** với UDP discovery. |
 | `SPIDERMESH_NAMESPACE` | `default` | Namespace của mesh. |
 | `SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS` | `2000` | Thời gian chờ mở kết nối. |
-| `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` | `3` | Số lần thử nối lại trước khi dừng. |
-| `SPIDERMESH_HTTP2_RECONNECT_DELAY_MS` | `250` | Độ trễ giữa các lần nối lại (tăng dần). |
+| `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` | `3` | Số lần thất bại liên tiếp trước khi coi node là không kết nối được. Vẫn tiếp tục thử sau đó. |
+| `SPIDERMESH_HTTP2_RECONNECT_DELAY_MS` | `250` | Độ trễ ban đầu giữa các lần nối lại (tăng dần). |
+| `SPIDERMESH_HTTP2_RECONNECT_MAX_DELAY_MS` | `30000` | Độ trễ tối đa giữa các lần nối lại. |
 
 Tên transporter trên wire: `'http2'` (RPC) và `'http2-pubsub'` (event).

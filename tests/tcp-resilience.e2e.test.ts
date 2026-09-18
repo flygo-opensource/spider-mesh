@@ -25,23 +25,22 @@ test('full metadata announcement removes stale services and replaces endpoints',
     expect(result.stdout).toContain('"metadataShrink":true')
 })
 
-test('bounded reconnect preserves membership and only a new discovery target starts a cycle', async () => {
+test('reconnects on its own after the network recovers, and stops once the node leaves Topology', async () => {
     const result = await runBunScript(
-        ['run', 'examples/resilience/bounded-retry-test.ts'],
-        10000,
-        resilienceEnv('bounded-retry', {
+        ['run', 'examples/resilience/reconnect-recovery-test.ts'],
+        15000,
+        resilienceEnv('reconnect-recovery', {
             SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS: '200',
+            SPIDERMESH_HTTP2_RECONNECT_MAX_DELAY_MS: '300',
         }),
     )
     expect(result.code).toBe(0)
     expect(result.stderr).toBe('')
-    expect(result.stdout).toContain('"boundedRetryStopped":true')
-    expect(result.stdout).toContain('"topologyMembershipPreserved":true')
-    expect(result.stdout).toContain('"discoveryRestartedConnection":true')
+    expect(result.stdout).toContain('"markedUnreachable":true')
+    // Không có discovery nào phát lại: tự nối lại là cách duy nhất để thấy endpoint-recovered.
+    expect(result.stdout).toContain('"recoveredWithoutDiscovery":true')
+    expect(result.stdout).toContain('"stoppedAfterRemoval":true')
     expect(result.stdout).toContain('endpoint-unreachable')
-    // provider-1 không bao giờ hồi phục (retry đã dừng), còn provider-2 là node mới kết nối lần
-    // đầu. Topology không phát recovery giả cho kết nối đầu tiên, nên không được có event này.
-    expect(result.stdout).not.toContain('endpoint-recovered')
 })
 
 test('soak: registry count stays stable through repeated provider restarts', async () => {

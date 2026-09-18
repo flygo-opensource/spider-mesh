@@ -17,8 +17,9 @@ type GreetingService = {
 }
 
 const topology = new Topology({
-    discovery: new TopologyDiscoveryAdapter(createDiscovery(), { heartbeatIntervalMs: 5_000 }),
-    staleAfterMs: 15_000,
+    discovery: new TopologyDiscoveryAdapter(createDiscovery()),
+    // UDP chỉ để tìm thấy nhau; node bị xoá khi kết nối HTTP/2 tới nó đứt liên tục đủ lâu.
+    removeUnreachableAfterMs: 60_000,
 })
 const mesh = new SpiderMesh({
     topology,

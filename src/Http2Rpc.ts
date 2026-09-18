@@ -1,15 +1,18 @@
 import { firstValueFrom, fromEvent, reduce, Subject, Subscription, takeUntil } from "rxjs"
 import { connect, createServer, type ClientHttp2Session, type ClientHttp2Stream, type IncomingHttpHeaders, type ServerHttp2Session, type ServerHttp2Stream } from 'node:http2'
-import { SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS, SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS, SPIDERMESH_HTTP2_RECONNECT_DELAY_MS } from "./const.js"
+import { SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS, SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS, SPIDERMESH_HTTP2_RECONNECT_DELAY_MS, SPIDERMESH_HTTP2_RECONNECT_MAX_DELAY_MS } from "./const.js"
 import { AddressInfo } from "node:net"
 import { unpack, pack } from 'msgpackr'
 import { Topology } from '@spider-mesh/core'
 import type { RpcCancelPacket, RpcEvent, RpcProbeRequest, RpcProbeResult, RpcRequestPacket, RpcResponsePacket, RpcTransporter, RpcTransporterContext, SpiderMeshError, SpiderMeshNode, TopologyRoute } from '@spider-mesh/core'
 
-const delay = (ms: number) => new Promise<void>(resolve => {
-    const timer = setTimeout(resolve, ms)
-    timer.unref?.()
-})
+/** Vòng thử kết nối tới một node; `wake()` cắt ngang lần chờ hiện tại để thử ngay. */
+type ReconnectLoop = {
+    task: Promise<void>
+    /** Địa chỉ (host + metadata cổng) của lần thử gần nhất. */
+    target: string
+    wake: () => void
+}
 
 /** Địa chỉ HTTP/2 đã được resolver từ logical service name. */
 export type Http2RpcTarget = {
@@ -30,8 +33,7 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
 
     #connections = new Map<string, ClientHttp2Session>()
     #connecting = new Map<string, Promise<ClientHttp2Session>>()
-    #reconnecting = new Map<string, Promise<void>>()
-    #exhaustedTargets = new Map<string, string>()
+    #reconnecting = new Map<string, ReconnectLoop>()
     #pendingConnections = new Set<ClientHttp2Session>()
     #responseStreams = new Map<string, ServerHttp2Stream>()
     #metadata: RpcEvent['endpoints'] | null = null
@@ -101,8 +103,9 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
         }
         this.#connections.clear()
         this.#connecting.clear()
+        // Đánh thức các vòng đang chờ để chúng thấy transporter đã đóng và thoát ngay.
+        for (const loop of this.#reconnecting.values()) loop.wake()
         this.#reconnecting.clear()
-        this.#exhaustedTargets.clear()
         this.#serverStreamSubscription.unsubscribe()
         for (const session of this.#serverSessions) {
             session.destroy()
@@ -323,46 +326,70 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             this.#reportReachability(node.node_id, 'reachable')
             return
         }
-        if (this.#reconnecting.has(node.node_id)) return
-        if (this.#exhaustedTargets.get(node.node_id) === this.#targetKey(node)) {
-            this.#reportReachability(node.node_id, 'unreachable', 'reconnect-exhausted')
+        const running = this.#reconnecting.get(node.node_id)
+        if (running) {
+            // Discovery báo địa chỉ/cổng mới (ví dụ process khởi động lại): thử ngay, không đợi hết
+            // thời gian chờ đã tăng dần. Thay đổi khác trong Topology không đánh thức vòng thử.
+            if (running.target !== this.#targetKey(node)) running.wake()
             return
         }
         // Lần kết nối đầu tiên chưa phải bằng chứng endpoint có vấn đề. Giữ state mặc định
         // reachable để request đầu tiên vẫn có thể chọn node rồi await chính connection này.
         // Chỉ connection đã từng hoạt động nhưng bị mất mới chuyển sang `suspect`.
-        const task = this.#connectWithRetry(node).finally(() => {
-            if (this.#reconnecting.get(node.node_id) !== task) return
-            this.#reconnecting.delete(node.node_id)
+        const loop: ReconnectLoop = { task: Promise.resolve(), target: this.#targetKey(node), wake: () => {} }
+        this.#reconnecting.set(node.node_id, loop)
+        loop.task = this.#connectWithRetry(node, loop).finally(() => {
+            if (this.#reconnecting.get(node.node_id) === loop) this.#reconnecting.delete(node.node_id)
         })
-        this.#reconnecting.set(node.node_id, task)
     }
 
-    async #connectWithRetry(node: SpiderMeshNode) {
-        const maxAttempts = Math.max(1, SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS)
+    /**
+     * Kết nối tới node cho tới khi thành công hoặc node rời Topology. Kết nối HTTP/2 là bằng chứng
+     * node còn sống: không bỏ cuộc sau một số lần thất bại, vì discovery (như UDP) không phát lại để
+     * "gõ cửa" lần nữa. Thất bại đủ `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` lần thì báo `unreachable`
+     * để node bị loại khỏi việc chọn đích; việc xoá hẳn node do Topology quyết định
+     * (`removeUnreachableAfterMs`).
+     */
+    async #connectWithRetry(node: SpiderMeshNode, loop: ReconnectLoop) {
+        const unreachableAfter = Math.max(1, SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS)
+        const base = Math.max(10, SPIDERMESH_HTTP2_RECONNECT_DELAY_MS)
+        const maxDelay = Math.max(base, SPIDERMESH_HTTP2_RECONNECT_MAX_DELAY_MS)
 
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        for (let attempt = 1; ; attempt++) {
             if (this.#isDisposing || this.closed) return
-            if (this.#topology && !this.#topology.getPeer(node.node_id)) return
+            // Luôn lấy snapshot mới nhất: node có thể đổi địa chỉ/cổng giữa hai lần thử.
+            const current = this.#topology?.getPeer(node.node_id)
+            if (!current) return
+            const target = this.#targetKey(current)
+            if (target !== loop.target) {
+                // Địa chỉ mới: tính lại từ đầu, không mang theo thời gian chờ của địa chỉ cũ.
+                loop.target = target
+                attempt = 1
+            }
 
             try {
-                await this.#connect(node)
-                this.#exhaustedTargets.delete(node.node_id)
+                await this.#connect(current)
                 return
             } catch {
-                this.#debug('reconnect failed', { node_id: node.node_id, attempt, max_attempts: maxAttempts })
-                if (attempt === maxAttempts) break
-                const base = Math.max(10, SPIDERMESH_HTTP2_RECONNECT_DELAY_MS)
-                const backoff = Math.min(30_000, base * (2 ** Math.min(attempt - 1, 8)))
-                const jitter = Math.floor(Math.random() * Math.max(1, backoff * 0.2))
-                await delay(backoff + jitter)
+                this.#debug('reconnect failed', { node_id: node.node_id, attempt })
             }
-        }
 
-        if (this.#topology?.getPeer(node.node_id)) {
-            this.#exhaustedTargets.set(node.node_id, this.#targetKey(node))
-            this.#reportReachability(node.node_id, 'unreachable', 'reconnect-exhausted')
-            this.#debug('peer offline', { node_id: node.node_id, attempts: maxAttempts })
+            if (attempt === unreachableAfter) {
+                this.#reportReachability(node.node_id, 'unreachable', 'reconnect-failed')
+                this.#debug('peer unreachable, still retrying', { node_id: node.node_id, attempts: attempt })
+            }
+
+            const backoff = Math.min(maxDelay, base * (2 ** Math.min(attempt - 1, 16)))
+            const jitter = Math.floor(Math.random() * Math.max(1, backoff * 0.2))
+            await new Promise<void>(resolve => {
+                const timer = setTimeout(resolve, backoff + jitter)
+                timer.unref?.()
+                loop.wake = () => {
+                    clearTimeout(timer)
+                    resolve()
+                }
+            })
+            loop.wake = () => {}
         }
     }
 
@@ -374,6 +401,11 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
     }
 
     /** Gửi trạng thái endpoint vào Topology; transporter không được tự xóa membership. */
+    /** Địa chỉ kết nối của node; đổi khi process khởi động lại với host/cổng mới. */
+    #targetKey(node: SpiderMeshNode) {
+        return `${node.host}:${JSON.stringify(this.#getTransporterMetadata(node) ?? null)}`
+    }
+
     #reportReachability(node_id: string, status: 'reachable' | 'suspect' | 'unreachable', reason?: string) {
         this.#topology?.reportReachability({
             node_id,
@@ -546,9 +578,6 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
     }
 
     /** Khóa endpoint giúp discovery snapshot có host/port mới mở lại reconnect cycle. */
-    #targetKey(node: SpiderMeshNode) {
-        return `${node.host}:${JSON.stringify(this.#getTransporterMetadata(node) ?? null)}`
-    }
 
     /** Node chỉ route được sau khi đã quảng bá port dưới wire name `http2`. */
     #hasRpcEndpoint(node: SpiderMeshNode): boolean {

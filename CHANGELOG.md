@@ -21,6 +21,16 @@
 - The legacy `{ hi, node }` UDP wire format is no longer supported by this package.
 
 ### Changed
+- **`Http2Rpc` never gives up on a node that is still in Topology.** After
+  `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` failures it reports the node `unreachable` (so it is not
+  chosen for calls) but keeps retrying with exponential backoff capped at
+  `SPIDERMESH_HTTP2_RECONNECT_MAX_DELAY_MS` (default 30 s). Previously it stopped for good and only a
+  new `node_id` or address restarted it; UDP heartbeats re-announcing the same node never did, so a
+  few seconds of network trouble left a live node uncallable until a process restarted.
+- A node announced with a new address or port (process restart) is retried immediately instead of
+  waiting out the current backoff.
+- The recommended UDP setup no longer uses heartbeats or `staleAfterMs`: UDP only finds nodes, and
+  `Topology.removeUnreachableAfterMs` removes nodes whose HTTP/2 connection stays down.
 - `TopologyDiscoveryAdapter` (plus `DiscoveryMessage`, `DiscoveryTransporter` and the adapter
   options) is now exported from `@spider-mesh/tcp`. It plugs a discovery such as `@ohayo/udp` into
   Topology, which is the setup this package is used with, so the separate `@spider-mesh/discovery`

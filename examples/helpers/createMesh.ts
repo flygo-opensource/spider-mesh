@@ -7,8 +7,9 @@ import { createDiscovery } from './createDiscovery.js'
 export function createMesh() {
     const discovery = createDiscovery()
     const topology = new Topology({
-        discovery: new TopologyDiscoveryAdapter(discovery, { heartbeatIntervalMs: 5_000 }),
-        staleAfterMs: 15_000,
+        discovery: new TopologyDiscoveryAdapter(discovery),
+        // UDP chỉ để tìm thấy nhau; node bị xoá khi kết nối HTTP/2 tới nó đứt liên tục đủ lâu.
+        removeUnreachableAfterMs: 60_000,
     })
     const mesh = new SpiderMesh({
         topology,
