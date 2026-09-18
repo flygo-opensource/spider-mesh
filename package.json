@@ -20,7 +20,7 @@
     }
   },
   "files": [
-    "build",
+    "build/src/**/*",
     "CHANGELOG.md"
   ],
   "scripts": {
