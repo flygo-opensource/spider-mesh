@@ -11,6 +11,8 @@ Node/Bun, trình duyệt và React Native.
 | [`@spider-mesh/ws`](packages/ws/README.md) | [`packages/ws/`](packages/ws) | Transporter WebSocket và relay server; dùng được trong trình duyệt và React Native |
 | [`@spider-mesh/tcp`](packages/tcp/README.md) | [`packages/tcp/`](packages/tcp) | HTTP/2 giữa các node, discovery qua UDP ([`@simple-discovery/udp`](https://github.com/flygo-opensource/simple-discovery)) |
 
+Tích hợp bằng agent: đưa cho nó [`AGENT_GUIDE.md`](AGENT_GUIDE.md) (mẫu chép được, quy tắc bắt buộc, cách tự kiểm tra).
+
 ## Chọn transporter
 
 | Môi trường | Dùng |
