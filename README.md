@@ -33,7 +33,7 @@ const udp = new UdpDiscovery<SpiderMeshNode>({
   namespace,
   tags: ['spider-mesh', 'node'],
   // Khoá ký gói discovery; mọi node trong mesh dùng cùng một khoá bí mật.
-  key: process.env.DISCOVERY_KEY!,
+  key: process.env.SIMPLE_DISCOVERY_KEY!,
 })
 
 const topology = new Topology({
@@ -73,7 +73,7 @@ Adapter nhận mọi discovery có `broadcast()` và phát ra message, không ri
 Chạy mỗi process với địa chỉ LAN của **chính máy đó**, để các node khác kết nối tới được:
 
 ```bash
-SPIDERMESH_NODE_HOSTNAME=192.168.1.21 SPIDERMESH_NAMESPACE=shop DISCOVERY_KEY=... bun run provider.ts
+SPIDERMESH_NODE_HOSTNAME=192.168.1.21 SPIDERMESH_NAMESPACE=shop SIMPLE_DISCOVERY_KEY=... bun run provider.ts
 ```
 
 Provider và client chỉ cần import `mesh.ts`:
@@ -115,6 +115,7 @@ console.log(await greeting.hello('Spider Mesh'))
 | Node thấy nhau nhưng gọi bị `MICROSERVICE_OFFLINE` | Chưa đặt `SPIDERMESH_NODE_HOSTNAME`, hoặc đặt địa chỉ mà máy khác không tới được. |
 | Máy khác subnet / mạng chặn multicast không thấy nhau | Khai báo `peers` (xem bên dưới). |
 | Thấy node lạ | Các mesh dùng chung `key` và `namespace`. Đặt `key` riêng. |
+| Node không thấy nhau, không có lỗi nào | Khác `key` hoặc khác cổng discovery, hoặc đồng hồ các máy lệch quá 30 giây (gói bị bỏ im lặng; đồng bộ giờ bằng NTP). Bật `SIMPLE_DISCOVERY_UDP_DEBUG=1` để xem lỗi mạng. |
 
 ### Mạng cần mở
 
@@ -137,7 +138,7 @@ import { UdpDiscovery } from '@simple-discovery/udp'
 const udp = new UdpDiscovery<SpiderMeshNode>({
   namespace: process.env.SPIDERMESH_NAMESPACE ?? 'default',
   tags: ['spider-mesh', 'node'],
-  key: process.env.DISCOVERY_KEY!,
+  key: process.env.SIMPLE_DISCOVERY_KEY!,
   peers: ['192.168.1.21', '192.168.1.22', '10.0.5'],
 })
 ```
@@ -154,7 +155,7 @@ node công bố cho HTTP/2 cũng phải là địa chỉ trong VPN:
 SPIDERMESH_NODE_HOSTNAME=worker-1.netbird.cloud \
 SIMPLE_DISCOVERY_UDP_MULTICAST=off \
 SIMPLE_DISCOVERY_UDP_WHITELIST_ADDRESS=worker-2.netbird.cloud,worker-3.netbird.cloud \
-DISCOVERY_KEY=... bun run provider.ts
+SIMPLE_DISCOVERY_KEY=... bun run provider.ts
 ```
 
 Chính sách truy cập của VPN phải mở UDP cổng discovery (mặc định `11001`) và cổng TCP của `Http2Rpc`

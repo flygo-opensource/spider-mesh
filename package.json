@@ -22,7 +22,7 @@
     }
   },
   "devDependencies": {
-    "@simple-discovery/udp": "file:../../simple-discovery/packages/udp",
+    "@simple-discovery/udp": "^3.0.0",
     "@spider-mesh/core": "file:../core",
     "@spider-mesh/events": "file:../events",
     "@types/bun": "^1.2.23",

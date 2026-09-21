@@ -18,7 +18,7 @@ jobs:
         working-directory: spider-mesh/tcp
     steps:
       # Các package phát triển qua `file:../<pkg>`, nên dựng lại đúng layout thư mục của
-      # workspace local: spider-mesh/<pkg> nằm cạnh nhau, simple-discovery/ nằm cạnh spider-mesh/.
+      # workspace local: spider-mesh/<pkg> nằm cạnh nhau.
       - name: Checkout tcp
         uses: actions/checkout@v4
         with:
@@ -40,13 +40,6 @@ jobs:
           # Repo private: GITHUB_TOKEN mặc định chỉ đọc được repo hiện tại.
           token: ${{ secrets.SPIDER_MESH_CI_TOKEN }}
 
-      # @simple-discovery/udp chưa có trên npm nên lấy từ monorepo simple-discovery (public).
-      - name: Checkout simple-discovery
-        uses: actions/checkout@v4
-        with:
-          repository: flygo-opensource/simple-discovery
-          path: simple-discovery
-
       # 1.2.x cài dependency `file:` thành symlink tự trỏ vào chính nó, nên clone mới không build
       # được; 1.4.2 tạo symlink tuyệt đối về source.
       - uses: oven-sh/setup-bun@v2
@@ -60,10 +53,6 @@ jobs:
       - name: Build @spider-mesh/events
         working-directory: spider-mesh/events
         run: bun install --frozen-lockfile && bun run build
-
-      - name: Build @simple-discovery/udp
-        working-directory: simple-discovery
-        run: bun install --frozen-lockfile && cd packages/udp && bun run build
 
       - name: Install
         run: bun install --frozen-lockfile
