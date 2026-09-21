@@ -1,0 +1,10 @@
+{
+  "name": "spider-mesh-remote-multiservice-test",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@simple-discovery/udp": "file:./simple-discovery-udp-3.0.0.tgz",
+    "@spider-mesh/core": "file:./spider-mesh-core-3.0.0.tgz",
+    "@spider-mesh/tcp": "file:./spider-mesh-tcp-3.0.0.tgz"
+  }
+}

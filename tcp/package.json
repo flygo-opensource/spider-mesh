@@ -1,0 +1,57 @@
+{
+  "name": "@spider-mesh/tcp",
+  "type": "module",
+  "version": "3.0.0",
+  "description": "HTTP/2 RPC and pubsub transporters for @spider-mesh/core",
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "repository": {
+    "url": "https://github.com/spider-mesh/tcp"
+  },
+  "files": [
+    "build/src/**/*",
+    "CHANGELOG.md"
+  ],
+  "peerDependencies": {
+    "@simple-discovery/udp": "^3.0.0",
+    "@spider-mesh/core": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@simple-discovery/udp": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@simple-discovery/udp": "^3.0.0",
+    "@spider-mesh/core": "file:../core",
+    "@spider-mesh/events": "file:../events",
+    "@types/bun": "^1.2.23",
+    "@types/msgpack": "^0.0.34",
+    "@types/node": "^25.6.0",
+    "typescript": "^5.8.2"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./build/src/index.d.ts",
+        "default": "./build/src/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "dev": "clear; npx tsx ",
+    "build": "tsc -v; rm -rf build && tsc -b tsconfig.json",
+    "test:tcp": "bun run examples/tcp-smoke-test.ts",
+    "test:tcp:e2e": "bun run examples/tcp-e2e-test.ts",
+    "test:tcp:e2e:matrix": "bun run examples/tcp-e2e-matrix-test.ts",
+    "test:tcp:e2e:reverse": "bun run examples/tcp-e2e-reverse-test.ts",
+    "test:resilience": "bun test tests/tcp-resilience.e2e.test.ts",
+    "test:e2e": "bun test tests/topology-discovery-adapter.test.ts && bun test tests/tcp-transporters.e2e.test.ts && bun test tests/tcp-contracts.e2e.test.ts && bun test tests/tcp-session-recovery.e2e.test.ts && bun test tests/tcp-spidermesh.e2e.test.ts && bun test tests/tcp-spidermesh-reverse.e2e.test.ts && bun test tests/tcp-spidermesh-matrix.e2e.test.ts && bun test tests/tcp-spidermesh-round-robin.e2e.test.ts && bun test tests/tcp-getting-started.e2e.test.ts && bun test tests/tcp-registry-free-wait.e2e.test.ts && bun test tests/tcp-missing.e2e.test.ts && bun test tests/tcp-multi-provider-noretry.e2e.test.ts && bun test tests/tcp-rpc-contract.e2e.test.ts"
+  },
+  "author": "Duong Van Ba",
+  "license": "ISC",
+  "dependencies": {
+    "msgpackr": "^1.12.1",
+    "rxjs": "^7.8.2"
+  }
+}
