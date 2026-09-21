@@ -8,9 +8,9 @@
 - [x] Chuẩn hóa discovery constructor options: `namespace` và `tags` bắt buộc, `node_id?` tùy chọn.
 - [x] `TopologyDiscoveryAdapter` (trong `@spider-mesh/tcp`) map `SpiderMeshNode` vào `DiscoveryMessage<SpiderMeshNode>` qua `data`.
 - [x] Dùng `tags` để phân biệt message của Spider Mesh, ví dụ `["spider-mesh", "node"]`, và để transport có thể lọc contains-all trước khi emit.
-- [x] Tách UDP discovery khỏi `@spider-mesh/tcp`; dùng generic `@ohayo/udp` implement protocol ở `https://github.com/flygo-opensource/ohayo/blob/main/udp/README.md`.
-- [ ] Thiết kế HTTP discovery companion transport theo `https://github.com/flygo-opensource/ohayo/blob/main/http/README.md` cho môi trường không dùng multicast.
-- [x] Tất cả env của UDP discovery bắt đầu bằng `OHAYO_` và dùng `OHAYO_DISCOVERY_PORT`.
+- [x] Tách UDP discovery khỏi `@spider-mesh/tcp`; dùng generic `@simple-discovery/udp` implement protocol ở `https://github.com/flygo-opensource/simple-discovery/blob/main/packages/udp/README.md`.
+- [ ] Thiết kế HTTP discovery companion transport theo `https://github.com/flygo-opensource/simple-discovery/blob/main/packages/http/README.md` cho môi trường không dùng multicast.
+- [x] Tất cả env của UDP discovery bắt đầu bằng `SIMPLE_DISCOVERY_` và dùng `SIMPLE_DISCOVERY_PORT`.
 - [x] Xác định cách đồng bộ `seq` và `version` với `SpiderMeshNode.version` hiện tại để consumer bỏ qua message cũ/trùng.
 - [x] Cập nhật README/ARCHITECTURE sau khi contract ổn định để nhấn mạnh core chỉ biết abstraction, transport cụ thể nằm ngoài core.
 
