@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.0.1
 
 - The `transporter` call option takes a transporter **name** (`'websocket'`, `'http2'`). Passing a
   class (an easy mistake when moving from 2.x) or an unregistered name used to fail with a generic

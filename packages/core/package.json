@@ -1,7 +1,7 @@
 {
   "name": "@spider-mesh/core",
   "type": "module",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Runtime-agnostic TypeScript RPC core with optional topology and pluggable transporters",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
