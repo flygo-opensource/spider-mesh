@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Các gói trỏ tới nhau bằng `file:../<gói>`, nên build theo thứ tự phụ thuộc.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: core
+        working-directory: core
+        run: bun install --frozen-lockfile && bun run build && bun run test:e2e
+
+      - name: events
+        working-directory: events
+        run: bun install --frozen-lockfile && bun run build && bun run test:e2e
+
+      - name: ws
+        working-directory: ws
+        run: bun install --frozen-lockfile && bun run build && bun run test:e2e
+
+      - name: tcp
+        working-directory: tcp
+        run: bun install --frozen-lockfile && bun run build && bun run test:e2e && bun run test:resilience

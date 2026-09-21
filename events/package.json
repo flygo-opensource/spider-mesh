@@ -4,7 +4,9 @@
   "type": "module",
   "description": "Transport-independent event API for Spider Mesh",
   "repository": {
-    "url": "https://github.com/spider-mesh/events"
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/spider-mesh.git",
+    "directory": "events"
   },
   "author": "Duong Van Ba",
   "license": "ISC",
@@ -34,5 +36,6 @@
     "@types/bun": "^1.3.13",
     "@types/node": "^25.6.0",
     "typescript": "^6.0.3"
-  }
+  },
+  "homepage": "https://github.com/flygo-opensource/spider-mesh/tree/main/events#readme"
 }

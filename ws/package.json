@@ -4,7 +4,9 @@
   "version": "3.0.0",
   "description": "Built-in WebSocket transporter and relay server for Spider Mesh",
   "repository": {
-    "url": "https://github.com/spider-mesh/ws"
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/spider-mesh.git",
+    "directory": "ws"
   },
   "files": [
     "build/src/**/*",
@@ -67,5 +69,6 @@
   },
   "browser": {
     "crypto": false
-  }
+  },
+  "homepage": "https://github.com/flygo-opensource/spider-mesh/tree/main/ws#readme"
 }

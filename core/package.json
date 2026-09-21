@@ -6,7 +6,9 @@
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "repository": {
-    "url": "https://github.com/spider-mesh/core"
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/spider-mesh.git",
+    "directory": "core"
   },
   "files": [
     "build/src/**/*",
@@ -38,5 +40,6 @@
   },
   "browser": {
     "crypto": false
-  }
+  },
+  "homepage": "https://github.com/flygo-opensource/spider-mesh/tree/main/core#readme"
 }
