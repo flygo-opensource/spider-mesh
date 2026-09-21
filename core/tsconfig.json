@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "types": ["node","bun"],
+    "strict": true,   
+    "module": "NodeNext",
+    "declaration": true,
+    "removeComments": true,
+    "allowSyntheticDefaultImports": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "target": "ESNext",
+    "sourceMap": true,
+    "moduleResolution": "NodeNext", 
+    "strictPropertyInitialization": false ,
+    "allowImportingTsExtensions": false,
+    "outDir": "./build",
+    "incremental": false,
+    "useDefineForClassFields": true,
+    "rootDir": ".",
+    "lib": [
+      "esnext.asynciterable",
+      "dom",
+      "ESNext.Array",
+      "ESNext.String",
+      "ESNext"
+    ],
+    "esModuleInterop": true,
+    "importHelpers": true,
+    "strictNullChecks": true
+  },
+  "exclude": [
+    "node_modules",
+    "out",
+    "bin",
+    "./build/**/*"
+  ]
+}
