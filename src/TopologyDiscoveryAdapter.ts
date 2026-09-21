@@ -2,7 +2,7 @@ import { Subscription, type Observable } from 'rxjs'
 import type { SpiderMeshNode, TopologyDiscovery, TopologyDiscoveryContext } from '@spider-mesh/core'
 
 /**
- * Envelope mà discovery trao đổi, ví dụ `DiscoveryMessage<T>` của `@ohayo/udp`. Hai phía khớp nhau
+ * Envelope mà discovery trao đổi, ví dụ `DiscoveryMessage<T>` của `@simple-discovery/udp`. Hai phía khớp nhau
  * theo cấu trúc, nên `tcp` không phụ thuộc gói discovery cụ thể nào.
  */
 export type DiscoveryMessage<T> = {
@@ -52,7 +52,7 @@ const toDiscoveryMessage = (node: SpiderMeshNode, tags: readonly string[]): Disc
 })
 
 /**
- * Nối một discovery generic (ví dụ `UdpDiscovery` của `@ohayo/udp`) vào `Topology`: node local được
+ * Nối một discovery generic (ví dụ `UdpDiscovery` của `@simple-discovery/udp`) vào `Topology`: node local được
  * broadcast ra ngoài, message nhận được thì đưa node vào Topology.
  */
 export class TopologyDiscoveryAdapter implements TopologyDiscovery {

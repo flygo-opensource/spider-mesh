@@ -1,5 +1,5 @@
 import { Registry } from '@spider-mesh/core'
-import { UdpDiscovery } from '@ohayo/udp'
+import { UdpDiscovery } from '@simple-discovery/udp'
 import { Http2Rpc } from '@spider-mesh/tcp'
 
 const namespace = process.env.SPIDERMESH_NAMESPACE || 'remote-multiservice-test'
@@ -14,7 +14,7 @@ const discovery = new UdpDiscovery({
     namespace,
     tags: ['spider-mesh', 'node'],
     node_id: nodeId,
-    key: process.env.OHAYO_DISCOVERY_KEY || 'spider-mesh',
+    key: process.env.SIMPLE_DISCOVERY_KEY || 'spider-mesh',
 })
 discovery.subscribe(message => {
     registry.upsertPeer(message.data)

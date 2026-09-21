@@ -16,12 +16,12 @@
 - `Http2Pubsub` remains exported here, but is registered on `EventBus` from
   `@spider-mesh/events` instead of `SpiderMesh`.
 - Removed `UdpDiscovery` and all UDP configuration from `@spider-mesh/tcp`. Bind a generic
-  implementation such as `UdpDiscovery<SpiderMeshNode>` from `@ohayo/udp` with
+  implementation such as `UdpDiscovery<SpiderMeshNode>` from `@simple-discovery/udp` with
   `bindMeshDiscovery()` from `@spider-mesh/discovery`.
 - The legacy `{ hi, node }` UDP wire format is no longer supported by this package.
 
 ### Changed
-- Declares `@ohayo/udp@^3.0.0` as an optional peer dependency: the documented UDP setup pairs the two,
+- Declares `@simple-discovery/udp@^3.0.0` as an optional peer dependency: the documented UDP setup pairs the two,
   so package managers now warn about a mismatched major. `msgpackr` is pinned to the tested `^1.12.1`.
 - Added an RPC contract e2e matrix (`examples/contract/`, shared verbatim by `@spider-mesh/ws` and
   `@spider-mesh/tcp`), 74 checks: 17 method shapes (sync, async, sync/async observable with immediate
@@ -42,7 +42,7 @@
 - The recommended UDP setup no longer uses heartbeats or `staleAfterMs`: UDP only finds nodes, and
   `Topology.removeUnreachableAfterMs` removes nodes whose HTTP/2 connection stays down.
 - `TopologyDiscoveryAdapter` (plus `DiscoveryMessage`, `DiscoveryTransporter` and the adapter
-  options) is now exported from `@spider-mesh/tcp`. It plugs a discovery such as `@ohayo/udp` into
+  options) is now exported from `@spider-mesh/tcp`. It plugs a discovery such as `@simple-discovery/udp` into
   Topology, which is the setup this package is used with, so the separate `@spider-mesh/discovery`
   package is not needed and is not published.
 - `Http2Rpc` proactively connects to every routable discovered peer. HTTP/2 session and underlying

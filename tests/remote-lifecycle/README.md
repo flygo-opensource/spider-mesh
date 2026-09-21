@@ -10,10 +10,10 @@ Expected observer sequence:
 4. Start the provider as a new process with a new `SPIDERMESH_NODE_ID`.
 5. `provider-online` with `occurrence: 2` and `rediscovered: true`.
 
-Both scripts use generic `@ohayo/udp` one-shot discovery, share a `Topology`, and use a real
+Both scripts use generic `@simple-discovery/udp` one-shot discovery, share a `Topology`, and use a real
 ephemeral `Http2Rpc` endpoint. Discovery owns membership; TCP reachability produces the observed
 online/offline transition without deleting the old node. Set
-`OHAYO_UDP_WHITELIST_ADDRESS` when multicast is unavailable.
+`SIMPLE_DISCOVERY_UDP_WHITELIST_ADDRESS` when multicast is unavailable.
 
 The harness builds node snapshots directly, so `SPIDERMESH_NODE_ID` is a deterministic test label.
 Production `SpiderMesh` instances ignore that environment variable and generate a random ID.
@@ -23,10 +23,10 @@ Production `SpiderMesh` instances ignore that environment variable and generate 
 Use the same values on observer and provider:
 
 ```bash
-export SPIDERMESH_NAMESPACE=ohayo-lifecycle
-export OHAYO_DISCOVERY_KEY=ohayo-lifecycle-key
-export OHAYO_DISCOVERY_PORT=28447
-export OHAYO_UDP_WHITELIST_ADDRESS=192.168.1.10,192.168.1.20
+export SPIDERMESH_NAMESPACE=spider-mesh-lifecycle
+export SIMPLE_DISCOVERY_KEY=spider-mesh-lifecycle-key
+export SIMPLE_DISCOVERY_PORT=28447
+export SIMPLE_DISCOVERY_UDP_WHITELIST_ADDRESS=192.168.1.10,192.168.1.20
 export SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS=3
 export SPIDERMESH_HTTP2_RECONNECT_DELAY_MS=100
 export SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS=1000

@@ -34,13 +34,13 @@ Place these package archives next to `package.json`:
 
 - `spider-mesh-core-3.0.0.tgz`
 - `spider-mesh-tcp-3.0.0.tgz`
-- `ohayo-udp-3.0.0.tgz`
+- `simple-discovery-udp-3.0.0.tgz`
 
 Then install using Bun only:
 
 ```bash
-mkdir -p /tmp/spider-mesh-ohayo-3host/remote-multiservice
-cd /tmp/spider-mesh-ohayo-3host/remote-multiservice
+mkdir -p /tmp/spider-mesh-3host/remote-multiservice
+cd /tmp/spider-mesh-3host/remote-multiservice
 bun install
 ```
 
@@ -48,10 +48,10 @@ Use one namespace, key, UDP port, and explicit peer list on every host. Explicit
 test independent of whether multicast is allowed:
 
 ```bash
-export SPIDERMESH_NAMESPACE=ohayo-3host
-export OHAYO_DISCOVERY_KEY=ohayo-3host-key
-export OHAYO_DISCOVERY_PORT=28446
-export OHAYO_UDP_WHITELIST_ADDRESS=192.168.1.10,192.168.1.20,192.168.1.30
+export SPIDERMESH_NAMESPACE=spider-mesh-3host
+export SIMPLE_DISCOVERY_KEY=spider-mesh-3host-key
+export SIMPLE_DISCOVERY_PORT=28446
+export SIMPLE_DISCOVERY_UDP_WHITELIST_ADDRESS=192.168.1.10,192.168.1.20,192.168.1.30
 export SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS=3
 export SPIDERMESH_HTTP2_RECONNECT_DELAY_MS=100
 export SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS=1000

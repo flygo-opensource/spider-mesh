@@ -3,7 +3,7 @@ import { createTcpTestEnv, start, stopAll, waitForOutput } from './helpers/e2eHa
 async function main() {
     const env = {
         ...createTcpTestEnv(),
-        OHAYO_DISCOVERY_PORT: String(26000 + Math.floor(Math.random() * 1000)),
+        SIMPLE_DISCOVERY_PORT: String(26000 + Math.floor(Math.random() * 1000)),
     }
 
     const provider = start('provider', 'examples/contract/provider.ts', env)

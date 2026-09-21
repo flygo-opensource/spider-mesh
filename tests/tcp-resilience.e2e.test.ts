@@ -6,7 +6,7 @@ setDefaultTimeout(180000)
 function resilienceEnv(name: string, overrides: Record<string, string> = {}) {
     return {
         SPIDERMESH_NAMESPACE: `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        OHAYO_DISCOVERY_PORT: String(27000 + Math.floor(Math.random() * 1000)),
+        SIMPLE_DISCOVERY_PORT: String(27000 + Math.floor(Math.random() * 1000)),
         SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS: '2',
         SPIDERMESH_HTTP2_RECONNECT_DELAY_MS: '50',
         SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS: '500',

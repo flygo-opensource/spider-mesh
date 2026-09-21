@@ -7,7 +7,7 @@ Có hai cách dùng:
 
 | Cách | Khi nào | Cần gì |
 | --- | --- | --- |
-| **Linux/PM2 với UDP discovery** | Các server tự tìm nhau trong mạng LAN | `Topology` + `@ohayo/udp` |
+| **Linux/PM2 với UDP discovery** | Các server tự tìm nhau trong mạng LAN | `Topology` + `@simple-discovery/udp` |
 | **Hạ tầng tự chọn đích** | Có sẵn load balancer/DNS (ví dụ Kubernetes Service) | Chỉ `resolveService` |
 
 Cách khai báo và gọi service được mô tả trong `@spider-mesh/core`.
@@ -15,7 +15,7 @@ Cách khai báo và gọi service được mô tả trong `@spider-mesh/core`.
 ## Linux/PM2 với UDP discovery
 
 ```bash
-bun add @spider-mesh/core @spider-mesh/tcp @ohayo/udp rxjs
+bun add @spider-mesh/core @spider-mesh/tcp @simple-discovery/udp rxjs
 ```
 
 Mọi process (provider lẫn client) dùng cùng một cấu hình:
@@ -24,7 +24,7 @@ Mọi process (provider lẫn client) dùng cùng một cấu hình:
 // mesh.ts
 import { SpiderMesh, Topology, type SpiderMeshNode } from '@spider-mesh/core'
 import { Http2Rpc, TopologyDiscoveryAdapter } from '@spider-mesh/tcp'
-import { UdpDiscovery } from '@ohayo/udp'
+import { UdpDiscovery } from '@simple-discovery/udp'
 
 // Phải trùng namespace của mesh (đọc từ cùng biến SPIDERMESH_NAMESPACE, mặc định 'default').
 const namespace = process.env.SPIDERMESH_NAMESPACE ?? 'default'
@@ -61,7 +61,7 @@ Hai lớp làm hai việc khác nhau:
   nối lại khi đứt; node không kết nối được thì không được chọn để gọi, và bị xoá khỏi `Topology` sau
   `removeUnreachableAfterMs`.
 
-Adapter nhận mọi discovery có `broadcast()` và phát ra message, không riêng `@ohayo/udp`.
+Adapter nhận mọi discovery có `broadcast()` và phát ra message, không riêng `@simple-discovery/udp`.
 
 | Tuỳ chọn adapter | Mặc định | Ý nghĩa |
 | --- | --- | --- |
@@ -132,7 +132,7 @@ chỉ cần liệt kê các node đã có; node cũ tự nhớ địa chỉ củ
 
 ```ts
 import { type SpiderMeshNode } from '@spider-mesh/core'
-import { UdpDiscovery } from '@ohayo/udp'
+import { UdpDiscovery } from '@simple-discovery/udp'
 
 const udp = new UdpDiscovery<SpiderMeshNode>({
   namespace: process.env.SPIDERMESH_NAMESPACE ?? 'default',
@@ -152,8 +152,8 @@ node công bố cho HTTP/2 cũng phải là địa chỉ trong VPN:
 
 ```bash
 SPIDERMESH_NODE_HOSTNAME=worker-1.netbird.cloud \
-OHAYO_UDP_MULTICAST=off \
-OHAYO_UDP_WHITELIST_ADDRESS=worker-2.netbird.cloud,worker-3.netbird.cloud \
+SIMPLE_DISCOVERY_UDP_MULTICAST=off \
+SIMPLE_DISCOVERY_UDP_WHITELIST_ADDRESS=worker-2.netbird.cloud,worker-3.netbird.cloud \
 DISCOVERY_KEY=... bun run provider.ts
 ```
 

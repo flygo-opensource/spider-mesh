@@ -1,6 +1,6 @@
 # Bug: UDP Discovery Registry Drops All Nodes Over Time
 
-> Historical investigation for TCP 2.0.156. Current code uses generic `@ohayo/udp`,
+> Historical investigation for TCP 2.0.156. Current code uses generic `@simple-discovery/udp`,
 > optional Core Topology, generic Discovery ingestion và HTTP/2 reachability tách biệt;
 > `@spider-mesh/tcp` no longer
 > contains `UdpDiscovery`.

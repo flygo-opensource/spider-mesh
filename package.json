@@ -13,16 +13,16 @@
     "CHANGELOG.md"
   ],
   "peerDependencies": {
-    "@ohayo/udp": "^3.0.0",
+    "@simple-discovery/udp": "^3.0.0",
     "@spider-mesh/core": "^3.0.0"
   },
   "peerDependenciesMeta": {
-    "@ohayo/udp": {
+    "@simple-discovery/udp": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@ohayo/udp": "file:../../ohayo/udp",
+    "@simple-discovery/udp": "file:../../simple-discovery/packages/udp",
     "@spider-mesh/core": "file:../core",
     "@spider-mesh/events": "file:../events",
     "@types/bun": "^1.2.23",

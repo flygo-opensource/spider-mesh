@@ -41,9 +41,9 @@ bun test tests/tcp-resilience.e2e.test.ts
 - **ESM-only**, `.js` relative specifiers in TypeScript source.
 - **Node/Bun only** — this package uses HTTP/2; never add browser/RN code here (that is `@spider-mesh/ws`).
 - **`src/types.ts` re-exports core RPC contracts.** `src/TopologyDiscoveryAdapter.ts` owns the
-  discovery envelope types and the adapter that plugs a discovery (e.g. `@ohayo/udp`) into Topology;
+  discovery envelope types and the adapter that plugs a discovery (e.g. `@simple-discovery/udp`) into Topology;
   it was moved here from the former `@spider-mesh/discovery` package, which was dropped. Keep the envelope
-  structurally identical to `@ohayo/udp`'s `DiscoveryMessage`.
+  structurally identical to `@simple-discovery/udp`'s `DiscoveryMessage`.
 - **`Http2Rpc.name` luôn là `http2`.** Endpoint metadata chỉ đọc/ghi bằng wire name này.
 - **Topology thuộc Core và optional trên SpiderMesh.** `Http2Rpc` nhận nó qua lifecycle; Discovery là
   nguồn membership duy nhất, còn transporter chỉ giữ connection reachability.

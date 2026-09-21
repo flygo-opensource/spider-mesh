@@ -1,12 +1,12 @@
 # Tài liệu kiểm thử `@spider-mesh/tcp`
 
 Các suite local dùng Bun và giao tiếp qua HTTP/2 socket thật. Những test cần discovery dùng generic
-`@ohayo/udp`; package TCP không còn chứa `UdpDiscovery`.
+`@simple-discovery/udp`; package TCP không còn chứa `UdpDiscovery`.
 
 ## Kiến trúc được kiểm tra
 
 ```text
-@ohayo/udp ──► Topology ◄── SpiderMesh localNode$
+@simple-discovery/udp ──► Topology ◄── SpiderMesh localNode$
                    │
           ┌────────┴────────┐
           ▼                 ▼
@@ -73,7 +73,7 @@ bun run test:resilience
 | Interrupted stream | Nhận phần dữ liệu đã phát và đúng một terminal `MICROSERVICE_OFFLINE`. |
 
 UDP packet signing, namespace/tag filtering, anti-replay, duplicate delivery, socket relay và
-`close()` được kiểm tra trong package `@ohayo/udp`, không lặp lại trong TCP resilience.
+`close()` được kiểm tra trong package `@simple-discovery/udp`, không lặp lại trong TCP resilience.
 
 ## Cross-host tests
 
@@ -91,9 +91,9 @@ Hai harness dưới đây dùng package tarball và Bun trong `/tmp`:
 | Biến | Vai trò |
 | --- | --- |
 | `SPIDERMESH_NAMESPACE` | Cô lập mesh/test run. |
-| `OHAYO_DISCOVERY_KEY` | HMAC key dùng chung. |
-| `OHAYO_DISCOVERY_PORT` | UDP discovery port. |
-| `OHAYO_UDP_WHITELIST_ADDRESS` | Danh sách explicit peers khi multicast không dùng được. |
+| `SIMPLE_DISCOVERY_KEY` | HMAC key dùng chung. |
+| `SIMPLE_DISCOVERY_PORT` | UDP discovery port. |
+| `SIMPLE_DISCOVERY_UDP_WHITELIST_ADDRESS` | Danh sách explicit peers khi multicast không dùng được. |
 | `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` | Số lỗi liên tiếp trước khi đánh dấu endpoint unreachable. |
 | `SPIDERMESH_HTTP2_RECONNECT_DELAY_MS` | Base reconnect backoff. |
 | `SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS` | Timeout tối đa cho mỗi lần mở HTTP/2 connection. |

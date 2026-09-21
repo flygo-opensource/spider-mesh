@@ -9,7 +9,7 @@
         "rxjs": "^7.8.2",
       },
       "devDependencies": {
-        "@ohayo/udp": "file:../../ohayo/udp",
+        "@simple-discovery/udp": "file:../../simple-discovery/packages/udp",
         "@spider-mesh/core": "file:../core",
         "@spider-mesh/events": "file:../events",
         "@types/bun": "^1.2.23",
@@ -18,11 +18,11 @@
         "typescript": "^5.8.2",
       },
       "peerDependencies": {
-        "@ohayo/udp": "^3.0.0",
+        "@simple-discovery/udp": "^3.0.0",
         "@spider-mesh/core": "^3.0.0",
       },
       "optionalPeers": [
-        "@ohayo/udp",
+        "@simple-discovery/udp",
       ],
     },
   },
@@ -39,7 +39,7 @@
 
     "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4", "", { "os": "win32", "cpu": "x64" }, "sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ=="],
 
-    "@ohayo/udp": ["@ohayo/udp@file:../../ohayo/udp", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "^7.8.2" }, "devDependencies": { "@types/bun": "^1.2.23", "@types/node": "^25.0.0", "typescript": "^5.9.3" } }],
+    "@simple-discovery/udp": ["@simple-discovery/udp@file:../../simple-discovery/packages/udp", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "^7.8.2" }, "devDependencies": { "@types/bun": "^1.2.23", "@types/node": "^25.0.0", "typescript": "^5.9.3" } }],
 
     "@spider-mesh/core": ["@spider-mesh/core@file:../core", { "dependencies": { "@types/bun": "^1.3.13", "buffer": "^6.0.3", "react-native-uuid": "^2.0.2", "reflect-metadata": "^0.2.2", "rxjs": "^7.8.2", "uuid": "^10.0.0" }, "devDependencies": { "@types/node": "^25.6.0", "@types/uuid": "^10.0.0", "typescript": "^6.0.3" } }],
 
