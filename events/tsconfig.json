@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "types": ["node", "bun"],
+    "strict": true,
+    "module": "NodeNext",
+    "declaration": true,
+    "removeComments": true,
+    "target": "ESNext",
+    "sourceMap": true,
+    "moduleResolution": "NodeNext",
+    "strictPropertyInitialization": false,
+    "outDir": "./build/src",
+    "incremental": false,
+    "rootDir": "src",
+    "lib": ["DOM", "ESNext"],
+    "esModuleInterop": true,
+    "strictNullChecks": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "build", "tests"]
+}
