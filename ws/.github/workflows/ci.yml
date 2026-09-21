@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: spider-mesh/ws
+    steps:
+      # Các package phát triển qua `file:../<pkg>`, nên dựng lại đúng layout thư mục của
+      # workspace local: spider-mesh/<pkg> nằm cạnh nhau, simple-discovery/ nằm cạnh spider-mesh/.
+      - name: Checkout ws
+        uses: actions/checkout@v4
+        with:
+          path: spider-mesh/ws
+
+      - name: Checkout spider-mesh/core
+        uses: actions/checkout@v4
+        with:
+          repository: spider-mesh/core
+          path: spider-mesh/core
+          # Repo private: GITHUB_TOKEN mặc định chỉ đọc được repo hiện tại.
+          token: ${{ secrets.SPIDER_MESH_CI_TOKEN }}
+
+      - name: Checkout spider-mesh/events
+        uses: actions/checkout@v4
+        with:
+          repository: spider-mesh/events
+          path: spider-mesh/events
+          # Repo private: GITHUB_TOKEN mặc định chỉ đọc được repo hiện tại.
+          token: ${{ secrets.SPIDER_MESH_CI_TOKEN }}
+
+      # 1.2.x cài dependency `file:` thành symlink tự trỏ vào chính nó, nên clone mới không build
+      # được; 1.4.2 tạo symlink tuyệt đối về source.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Build @spider-mesh/core
+        working-directory: spider-mesh/core
+        run: bun install --frozen-lockfile && bun run build
+
+      - name: Build @spider-mesh/events
+        working-directory: spider-mesh/events
+        run: bun install --frozen-lockfile && bun run build
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Test
+        run: bun run test:e2e

@@ -1,0 +1,43 @@
+import { firstValueFrom, timeout, type Observable } from 'rxjs'
+import { RemoteServiceLinker } from '@spider-mesh/core'
+import { createMesh } from './helpers/createMesh.js'
+
+const wsUrl = process.env.WS_URL || 'ws://127.0.0.1:8787'
+
+console.log('WebSocket reverse e2e server connected')
+
+type ClientResponderService = {
+    helloFromServer(name: string): Observable<string>
+}
+
+async function main() {
+    const { mesh } = createMesh({
+        wsUrl,
+        heartbeatIntervalMs: 1000,
+        reconnectIntervalMs: 500,
+    })
+    const responder = RemoteServiceLinker.link<ClientResponderService>(mesh, {
+        service: 'ClientResponderService',
+        timeout: 3000,
+        retry: 2,
+    })
+
+    const guard = setTimeout(() => {
+        console.error('WebSocket reverse e2e server timed out')
+        process.exit(1)
+    }, 10000)
+
+    try {
+        await responder.wait()
+        const result = await firstValueFrom(responder.helloFromServer('from server').pipe(timeout(5000)))
+        console.log(result)
+        process.exit(0)
+    } catch (error) {
+        console.error(error)
+        process.exit(1)
+    } finally {
+        clearTimeout(guard)
+    }
+}
+
+await main()

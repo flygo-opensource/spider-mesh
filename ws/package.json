@@ -1,0 +1,71 @@
+{
+  "name": "@spider-mesh/ws",
+  "type": "module",
+  "version": "3.0.0",
+  "description": "Built-in WebSocket transporter and relay server for Spider Mesh",
+  "repository": {
+    "url": "https://github.com/spider-mesh/ws"
+  },
+  "files": [
+    "build/src/**/*",
+    "CHANGELOG.md"
+  ],
+  "peerDependencies": {
+    "@spider-mesh/core": "^3.0.0"
+  },
+  "devDependencies": {
+    "@spider-mesh/core": "file:../core",
+    "@spider-mesh/events": "file:../events",
+    "@types/bun": "^1.3.13",
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  },
+  "exports": {
+    "./node": {
+      "import": {
+        "types": "./build/src/node.d.ts",
+        "default": "./build/src/node.js"
+      }
+    },
+    "./browser": {
+      "import": {
+        "types": "./build/src/browser.d.ts",
+        "default": "./build/src/browser.js"
+      }
+    },
+    "./react-native": {
+      "import": {
+        "types": "./build/src/react-native.d.ts",
+        "default": "./build/src/react-native.js"
+      }
+    },
+    "./relay-server": {
+      "import": {
+        "types": "./build/src/relay-server.d.ts",
+        "default": "./build/src/relay-server.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -v && tsc -b tsconfig.json",
+    "example:websocket:server": "bun run examples/websocket-server.ts",
+    "example:websocket:provider": "bun run examples/websocket-provider.ts",
+    "example:websocket:client": "bun run examples/websocket-client.ts",
+    "test:websocket": "bun run examples/websocket-smoke-test.ts",
+    "test:websocket:e2e": "bun run examples/websocket-e2e-test.ts",
+    "test:websocket:e2e:matrix": "bun run examples/websocket-e2e-matrix-test.ts",
+    "test:websocket:e2e:reverse": "bun run examples/websocket-e2e-reverse-test.ts",
+    "test:e2e": "bun test tests/websocket-transporter.e2e.test.ts && bun test tests/websocket-spidermesh.e2e.test.ts && bun test tests/websocket-spidermesh-reverse.e2e.test.ts && bun test tests/websocket-spidermesh-matrix.e2e.test.ts && bun test tests/websocket-spidermesh-round-robin.e2e.test.ts && bun test tests/websocket-getting-started.e2e.test.ts && bun test tests/websocket-registry-free-wait.e2e.test.ts && bun test tests/websocket-missing.e2e.test.ts && bun test tests/node-online-spam.e2e.test.ts && bun test tests/websocket-registry-free-watch.e2e.test.ts && bun test tests/websocket-stream-lifecycle.e2e.test.ts && bun test tests/websocket-rpc-contract.e2e.test.ts"
+  },
+  "author": "Duong Van Ba",
+  "license": "ISC",
+  "dependencies": {
+    "@types/ws": "^8.18.1",
+    "msgpackr": "^1.12.1",
+    "rxjs": "^7.8.2",
+    "ws": "^8.20.0"
+  },
+  "browser": {
+    "crypto": false
+  }
+}
