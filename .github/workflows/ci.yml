@@ -40,21 +40,12 @@ jobs:
           # Repo private: GITHUB_TOKEN mặc định chỉ đọc được repo hiện tại.
           token: ${{ secrets.SPIDER_MESH_CI_TOKEN }}
 
-      # @ohayo/udp chưa có trên npm nên phải lấy từ source; tên repo cấu hình qua biến.
-      - name: Require OHAYO_UDP_REPOSITORY
-        working-directory: .
-        run: |
-          if [ -z "${{ vars.OHAYO_UDP_REPOSITORY }}" ]; then
-            echo "::error::Set the repository variable OHAYO_UDP_REPOSITORY (owner/repo holding @ohayo/udp)."
-            exit 1
-          fi
-
-      - name: Checkout @ohayo/udp
+      # @ohayo/udp chưa có trên npm nên lấy từ monorepo ohayo (public); udp nằm ở ohayo/udp.
+      - name: Checkout ohayo
         uses: actions/checkout@v4
         with:
-          repository: ${{ vars.OHAYO_UDP_REPOSITORY }}
-          path: ohayo/udp
-          token: ${{ secrets.SPIDER_MESH_CI_TOKEN }}
+          repository: flygo-opensource/ohayo
+          path: ohayo
 
       # 1.2.x cài dependency `file:` thành symlink tự trỏ vào chính nó, nên clone mới không build
       # được; 1.4.2 tạo symlink tuyệt đối về source.
@@ -71,8 +62,8 @@ jobs:
         run: bun install --frozen-lockfile && bun run build
 
       - name: Build @ohayo/udp
-        working-directory: ohayo/udp
-        run: bun install --frozen-lockfile && bun run build
+        working-directory: ohayo
+        run: bun install --frozen-lockfile && cd udp && bun run build
 
       - name: Install
         run: bun install --frozen-lockfile
