@@ -127,7 +127,8 @@ console.log(await greeting.hello('Spider Mesh'))
 
 ### Khi multicast không dùng được
 
-Liệt kê địa chỉ các máy trong `peers`. Có thể ghi IP đầy đủ, hoặc 3 octet đầu để quét cả dải `/24`:
+Liệt kê các máy trong `peers`: IP đầy đủ, hostname, hoặc 3 octet đầu để quét cả dải `/24`. Node mới
+chỉ cần liệt kê các node đã có; node cũ tự nhớ địa chỉ của node vừa gửi tin tới.
 
 ```ts
 import { type SpiderMeshNode } from '@spider-mesh/core'
@@ -143,6 +144,21 @@ const udp = new UdpDiscovery<SpiderMeshNode>({
 
 Nhiều process trên cùng một máy chia nhau cùng cổng discovery; gói từ máy khác được chuyển tiếp cho
 mọi process trên máy.
+
+### Qua VPN (NetBird, WireGuard, Tailscale)
+
+VPN chỉ chuyển unicast, nên tắt multicast và liệt kê máy bằng IP hoặc tên DNS trong VPN. Địa chỉ mà
+node công bố cho HTTP/2 cũng phải là địa chỉ trong VPN:
+
+```bash
+SPIDERMESH_NODE_HOSTNAME=worker-1.netbird.cloud \
+OHAYO_UDP_MULTICAST=off \
+OHAYO_UDP_WHITELIST_ADDRESS=worker-2.netbird.cloud,worker-3.netbird.cloud \
+DISCOVERY_KEY=... bun run provider.ts
+```
+
+Chính sách truy cập của VPN phải mở UDP cổng discovery (mặc định `11001`) và cổng TCP của `Http2Rpc`
+giữa các máy; đặt `RPC_PORT` cố định nếu chính sách chỉ mở một số cổng.
 
 ### Chọn node cho từng lời gọi
 
