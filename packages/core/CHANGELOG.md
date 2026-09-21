@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The `transporter` call option takes a transporter **name** (`'websocket'`, `'http2'`). Passing a
+  class (an easy mistake when moving from 2.x) or an unregistered name used to fail with a generic
+  `No transporter available`; the `MICROSERVICE_OFFLINE` error now says the option is wrong and lists
+  the registered names.
+
 ## 3.0.0 — modular integrations, registry-free runtime, and random identity
 
 - `SpiderMesh` nhận `transporters` và optional `topology` trong constructor.

@@ -164,6 +164,21 @@ export class SpiderMesh {
         }))
     }
 
+    /**
+     * `transporter` là TÊN transporter (`'websocket'`, `'http2'`). Truyền nhầm class hay tên chưa đăng
+     * ký thì tra không ra; nói rõ lý do thay vì báo chung chung "No transporter available".
+     */
+    #describeUnknownTransporter(selector: unknown): string | undefined {
+        if (selector === undefined) return undefined
+        const registered = [...this.#transporters.rpcs.value.keys()]
+        if (typeof selector === 'string' && registered.includes(selector)) return undefined
+        const given = typeof selector === 'function'
+            ? `class ${selector.name || '(anonymous)'}`
+            : JSON.stringify(selector) ?? String(selector)
+        return `Option "transporter" must be the name of a registered transporter `
+            + `(${registered.map(name => `'${name}'`).join(', ') || 'none registered yet'}), got ${given}`
+    }
+
     #selectRpcTransport(filters: Partial<Pick<RpcOptions<any>, 'node_id' | 'service' | 'transporter'>> = {}): RpcTransporter | undefined {
         if (!filters.service) return undefined
         // Explicit binding always wins.
@@ -230,6 +245,8 @@ export class SpiderMesh {
     callRemoteService<R, T>(options: RpcOptions<T>) {
         return of(1).pipe(
             mergeMap(() => {
+                const unknownTransporter = this.#describeUnknownTransporter(options.transporter)
+                if (unknownTransporter) throw { code: 'MICROSERVICE_OFFLINE', message: unknownTransporter }
                 const transporter = this.#selectRpcTransport(options)
                 if (!transporter) throw { code: 'MICROSERVICE_OFFLINE', message: `No transporter available for service ${options.service}` }
                 return new Observable<R>(subscriber => {
