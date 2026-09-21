@@ -6,10 +6,10 @@ Node/Bun, trình duyệt và React Native.
 
 | Gói | Thư mục | Vai trò |
 | --- | --- | --- |
-| [`@spider-mesh/core`](core/README.md) | [`core/`](core) | `SpiderMesh`, `@Microservice`, `RemoteServiceLinker`, `Topology` |
-| [`@spider-mesh/events`](events/README.md) | [`events/`](events) | Pub/sub theo topic (`EventBus`) |
-| [`@spider-mesh/ws`](ws/README.md) | [`ws/`](ws) | Transporter WebSocket và relay server; dùng được trong trình duyệt và React Native |
-| [`@spider-mesh/tcp`](tcp/README.md) | [`tcp/`](tcp) | HTTP/2 giữa các node, discovery qua UDP ([`@simple-discovery/udp`](https://github.com/flygo-opensource/simple-discovery)) |
+| [`@spider-mesh/core`](packages/core/README.md) | [`packages/core/`](packages/core) | `SpiderMesh`, `@Microservice`, `RemoteServiceLinker`, `Topology` |
+| [`@spider-mesh/events`](packages/events/README.md) | [`packages/events/`](packages/events) | Pub/sub theo topic (`EventBus`) |
+| [`@spider-mesh/ws`](packages/ws/README.md) | [`packages/ws/`](packages/ws) | Transporter WebSocket và relay server; dùng được trong trình duyệt và React Native |
+| [`@spider-mesh/tcp`](packages/tcp/README.md) | [`packages/tcp/`](packages/tcp) | HTTP/2 giữa các node, discovery qua UDP ([`@simple-discovery/udp`](https://github.com/flygo-opensource/simple-discovery)) |
 
 ## Chọn transporter
 
@@ -59,7 +59,7 @@ await greeting.wait()
 console.log(await greeting.hello('Spider Mesh'))
 ```
 
-Relay: xem [`ws/README.md`](ws/README.md).
+Relay: xem [`packages/ws/README.md`](packages/ws/README.md).
 
 ## Phát triển
 
@@ -69,7 +69,7 @@ theo thứ tự phụ thuộc:
 ```bash
 git clone git@github.com:flygo-opensource/spider-mesh.git && cd spider-mesh
 for pkg in core events ws tcp; do
-  (cd $pkg && bun install && bun run build && bun run test:e2e) || break
+  (cd packages/$pkg && bun install && bun run build && bun run test:e2e) || break
 done
 ```
 

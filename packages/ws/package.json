@@ -6,7 +6,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/flygo-opensource/spider-mesh.git",
-    "directory": "ws"
+    "directory": "packages/ws"
   },
   "files": [
     "build/src/**/*",
@@ -70,5 +70,5 @@
   "browser": {
     "crypto": false
   },
-  "homepage": "https://github.com/flygo-opensource/spider-mesh/tree/main/ws#readme"
+  "homepage": "https://github.com/flygo-opensource/spider-mesh/tree/main/packages/ws#readme"
 }

@@ -8,7 +8,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/flygo-opensource/spider-mesh.git",
-    "directory": "tcp"
+    "directory": "packages/tcp"
   },
   "files": [
     "build/src/**/*",
@@ -56,5 +56,5 @@
     "msgpackr": "^1.12.1",
     "rxjs": "^7.8.2"
   },
-  "homepage": "https://github.com/flygo-opensource/spider-mesh/tree/main/tcp#readme"
+  "homepage": "https://github.com/flygo-opensource/spider-mesh/tree/main/packages/tcp#readme"
 }

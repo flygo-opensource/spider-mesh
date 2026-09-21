@@ -16,17 +16,17 @@ jobs:
           bun-version: 1.4.2
 
       - name: core
-        working-directory: core
+        working-directory: packages/core
         run: bun install --frozen-lockfile && bun run build && bun run test:e2e
 
       - name: events
-        working-directory: events
+        working-directory: packages/events
         run: bun install --frozen-lockfile && bun run build && bun run test:e2e
 
       - name: ws
-        working-directory: ws
+        working-directory: packages/ws
         run: bun install --frozen-lockfile && bun run build && bun run test:e2e
 
       - name: tcp
-        working-directory: tcp
+        working-directory: packages/tcp
         run: bun install --frozen-lockfile && bun run build && bun run test:e2e && bun run test:resilience
