@@ -18,7 +18,7 @@ jobs:
         working-directory: spider-mesh/ws
     steps:
       # Các package phát triển qua `file:../<pkg>`, nên dựng lại đúng layout thư mục của
-      # workspace local: spider-mesh/<pkg> nằm cạnh nhau, ohayo/ nằm cạnh spider-mesh/.
+      # workspace local: spider-mesh/<pkg> nằm cạnh nhau, simple-discovery/ nằm cạnh spider-mesh/.
       - name: Checkout ws
         uses: actions/checkout@v4
         with:
