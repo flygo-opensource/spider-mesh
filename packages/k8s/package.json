@@ -1,0 +1,44 @@
+{
+  "name": "@spider-mesh/k8s",
+  "type": "module",
+  "version": "3.0.0",
+  "description": "Kubernetes discovery for @spider-mesh/core: membership from EndpointSlices, node metadata pulled from each pod",
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/spider-mesh.git",
+    "directory": "packages/k8s"
+  },
+  "files": [
+    "build/src/**/*",
+    "CHANGELOG.md"
+  ],
+  "peerDependencies": {
+    "@spider-mesh/core": "^3.0.0"
+  },
+  "devDependencies": {
+    "@spider-mesh/core": "file:../core",
+    "@types/bun": "^1.2.23",
+    "@types/node": "^25.6.0",
+    "typescript": "^5.8.2"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./build/src/index.d.ts",
+        "default": "./build/src/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -v; rm -rf build && tsc -b tsconfig.json",
+    "test:e2e": "bun test tests/"
+  },
+  "author": "Duong Van Ba",
+  "license": "ISC",
+  "dependencies": {
+    "rxjs": "^7.8.2"
+  },
+  "homepage": "https://github.com/flygo-opensource/spider-mesh/tree/main/packages/k8s#readme"
+}

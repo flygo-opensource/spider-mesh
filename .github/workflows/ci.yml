@@ -30,3 +30,7 @@ jobs:
       - name: tcp
         working-directory: packages/tcp
         run: bun install --frozen-lockfile && bun run build && bun run test:e2e && bun run test:resilience
+
+      - name: k8s
+        working-directory: packages/k8s
+        run: bun install --frozen-lockfile && bun run build && bun run test:e2e

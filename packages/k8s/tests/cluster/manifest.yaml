@@ -1,0 +1,93 @@
+# Thử @spider-mesh/k8s trên một cluster 1 node: mã nguồn (core, tcp, k8s đã build, kèm node_modules)
+# được chép vào /opt/spider-mesh trên node và mount vào pod bằng hostPath.
+#
+#   kubectl apply -f manifest.yaml
+#   kubectl -n spider-mesh-test logs -f deploy/client
+apiVersion: v1
+kind: Namespace
+metadata: { name: spider-mesh-test }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: spider-mesh, namespace: spider-mesh-test }
+spec:
+  clusterIP: None
+  selector: { spider-mesh/namespace: default }
+  ports:
+    - { name: discovery, port: 7001 }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: spider-mesh, namespace: spider-mesh-test }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: spider-mesh-discovery, namespace: spider-mesh-test }
+rules:
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: spider-mesh-discovery, namespace: spider-mesh-test }
+subjects: [{ kind: ServiceAccount, name: spider-mesh, namespace: spider-mesh-test }]
+roleRef: { kind: Role, name: spider-mesh-discovery, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: provider, namespace: spider-mesh-test }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: provider } }
+  template:
+    metadata:
+      labels: { app: provider, spider-mesh/namespace: default }
+    spec:
+      serviceAccountName: spider-mesh
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: app
+          image: oven/bun:1.4.2
+          workingDir: /app/k8s
+          command: [bun, run, tests/cluster/demo.ts]
+          env: [{ name: ROLE, value: provider }]
+          ports:
+            - { name: discovery, containerPort: 7001 }
+            - { name: rpc, containerPort: 7000 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 7001 }
+            periodSeconds: 2
+          lifecycle:
+            preStop: { exec: { command: [sleep, '5'] } }
+          volumeMounts: [{ name: code, mountPath: /app, readOnly: true }]
+      volumes:
+        - name: code
+          hostPath: { path: /opt/spider-mesh, type: Directory }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: client, namespace: spider-mesh-test }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: client } }
+  template:
+    metadata:
+      labels: { app: client, spider-mesh/namespace: default }
+    spec:
+      serviceAccountName: spider-mesh
+      containers:
+        - name: app
+          image: oven/bun:1.4.2
+          workingDir: /app/k8s
+          command: [bun, run, tests/cluster/demo.ts]
+          env: [{ name: ROLE, value: client }]
+          ports:
+            - { name: discovery, containerPort: 7001 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 7001 }
+            periodSeconds: 2
+          volumeMounts: [{ name: code, mountPath: /app, readOnly: true }]
+      volumes:
+        - name: code
+          hostPath: { path: /opt/spider-mesh, type: Directory }

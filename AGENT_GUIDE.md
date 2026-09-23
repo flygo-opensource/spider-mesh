@@ -17,6 +17,7 @@ hoặc `Observable` (stream).
 | `@spider-mesh/ws` | Transporter WebSocket + relay server | client: Node, Bun, trình duyệt, React Native; relay: Node, Bun |
 | `@spider-mesh/tcp` | HTTP/2 nối thẳng giữa các node | Node, Bun |
 | `@simple-discovery/udp` | Các node tự tìm nhau qua UDP, dùng kèm `tcp` | Node, Bun |
+| `@spider-mesh/k8s` | Các pod tự tìm nhau qua EndpointSlice của Kubernetes, dùng kèm `tcp` | Node, Bun |
 
 Core không tự làm việc mạng; **transporter** (`ws` hoặc `tcp`) chở request. Mọi gói đều là ESM.
 
@@ -26,7 +27,8 @@ Core không tự làm việc mạng; **transporter** (`ws` hoặc `tcp`) chở r
 | --- | --- | --- |
 | Có trình duyệt/mobile, hoặc node nằm sau NAT, hoặc muốn một điểm kết nối duy nhất | WebSocket relay | 4.A |
 | Nhiều server Linux/PM2 trong mạng nội bộ hoặc VPN, muốn gọi thẳng không qua trung gian | HTTP/2 + UDP discovery | 4.B |
-| Đã có load balancer / Kubernetes Service cho mỗi service | HTTP/2 + `resolveService` | 4.C |
+| Đã có load balancer / Kubernetes Service cho mỗi service, chỉ cần RPC | HTTP/2 + `resolveService` | 4.C |
+| Chạy trên Kubernetes, cần event hoặc chọn node (`consistent-hash`, `least-active`), hoặc muốn pod chết rời mesh ngay | HTTP/2 + Kubernetes discovery | 4.D |
 
 Không chắc thì chọn **4.A**: dễ chạy nhất và dùng được ở mọi môi trường.
 
@@ -39,6 +41,8 @@ bun add @spider-mesh/core @spider-mesh/ws rxjs
 bun add @spider-mesh/core @spider-mesh/tcp @simple-discovery/udp rxjs
 # Mô hình C
 bun add @spider-mesh/core @spider-mesh/tcp rxjs
+# Mô hình D
+bun add @spider-mesh/core @spider-mesh/tcp @spider-mesh/k8s rxjs
 # Cần pub/sub thì thêm
 bun add @spider-mesh/events
 ```
@@ -187,6 +191,34 @@ const mesh = new SpiderMesh({
 
 Không cần `Topology` hay discovery; hạ tầng chọn pod.
 
+Lưu ý: HTTP/2 giữ **một** kết nối dài tới địa chỉ Service, mà kube-proxy chia tải theo kết nối, nên mọi
+lời gọi từ một process dồn vào một pod. Cần chia đều thì dùng 4.D, hoặc một proxy chia theo request
+(ví dụ waypoint của Istio).
+
+### 4.D. HTTP/2 + Kubernetes discovery
+
+```ts
+// mesh.ts
+import { SpiderMesh, Topology } from '@spider-mesh/core'
+import { Http2Rpc } from '@spider-mesh/tcp'
+import { KubernetesDiscovery } from '@spider-mesh/k8s'
+
+export const topology = new Topology({
+  discovery: new KubernetesDiscovery({ service: 'spider-mesh' }),
+})
+export const mesh = new SpiderMesh({ topology, transporters: [new Http2Rpc({ port: 7000 })] })
+```
+
+Cần trong cluster (manifest đầy đủ ở
+[README của k8s](https://github.com/flygo-opensource/spider-mesh/blob/main/packages/k8s/README.md#manifest)):
+
+- **Một** headless Service (`clusterIP: None`) chọn mọi pod của mesh, cổng tên `discovery` = 7001.
+- ServiceAccount có quyền `list`, `watch` trên `endpointslices.discovery.k8s.io` trong namespace đó.
+- Mỗi Deployment: label khớp selector của Service, `serviceAccountName`, `readinessProbe` phản ánh app
+  sẵn sàng thật, `preStop: sleep 5`.
+
+Không đặt `SPIDERMESH_NODE_HOSTNAME`: host của node là IP pod mà pod khác đã kéo được `/node`.
+
 ## 5. Viết service (provider)
 
 - **Tên service = tên class.** Client gọi đúng tên đó.
@@ -324,6 +356,11 @@ Không có `Topology` thì `wait()` bỏ qua tham số, `nodes` rỗng và `__ba
 9. **`retry` chỉ áp dụng cho `MICROSERVICE_OFFLINE`**, và request không bao giờ tự gửi lại. Method không
    idempotent thì cân nhắc trước khi đặt `retry`.
 10. **Dùng Bun ≥ 1.4.2** nếu cài gói bằng đường dẫn `file:`; bản cũ hơn cài sai.
+11. **Mô hình D:**
+    - Log có `[spider-mesh/k8s] Cannot watch EndpointSlices … Falling back to DNS` nghĩa là thiếu RBAC.
+      Mesh vẫn chạy nhưng pod vào/ra được nhận ra chậm vài giây; thêm Role/RoleBinding rồi khởi động lại pod.
+    - Cổng 7001 (`/node`) và cổng của `Http2Rpc` phải mở giữa các pod nếu có NetworkPolicy.
+    - `@spider-mesh/k8s` 2.x là thiết kế cũ (`K8sRpcTransporter`), không trộn với 3.x.
 
 ## 10. Biến môi trường
 
@@ -335,6 +372,9 @@ Không có `Topology` thì `wait()` bỏ qua tham số, `nodes` rỗng và `__ba
 | `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` | `3` | Số lần lỗi liên tiếp trước khi coi node là không kết nối được (vẫn tiếp tục thử). |
 | `SPIDERMESH_HTTP2_RECONNECT_DELAY_MS` | `250` | Độ trễ nối lại ban đầu. |
 | `SPIDERMESH_HTTP2_RECONNECT_MAX_DELAY_MS` | `30000` | Độ trễ nối lại tối đa. |
+| `SPIDERMESH_K8S_DISCOVERY_PORT` | `7001` | Mô hình D: cổng `GET /node` của mỗi pod. |
+| `SPIDERMESH_K8S_DNS_INTERVAL_MS` | `5000` | Mô hình D: chu kỳ phân giải DNS khi rơi về DNS. |
+| `SPIDERMESH_K8S_NODE_IDLE_TIMEOUT_MS` | `45000` | Mô hình D: stream `/node` im lặng quá mức này thì nối lại. |
 | `APP_VERSION`, `GIT_TAG`, `GIT_BRANCH`, `GIT_COMMIT`, `BUILD_TIME`, `APP_ENV`, `APP_TAGS` | – | Thông tin build công bố kèm node. |
 
 Biến `SIMPLE_DISCOVERY_*` của discovery: xem guide của `@simple-discovery/udp`.
@@ -350,6 +390,9 @@ Biến `SIMPLE_DISCOVERY_*` của discovery: xem guide của `@simple-discovery/
    TCP. Nếu không thấy nhau thì kiểm tra theo thứ tự: cùng `SIMPLE_DISCOVERY_KEY` → cùng cổng → cùng
    namespace → UDP mở → đồng hồ → mạng chặn multicast (dùng whitelist) và bật
    `SIMPLE_DISCOVERY_UDP_DEBUG=1`.
+6. Mô hình D: xoá một pod provider (`kubectl delete pod`) trong lúc client đang gọi; client phải ngừng
+   gọi tới pod đó trong dưới một giây và không có lời gọi nào lỗi khi `rollout restart`. Log không được
+   có cảnh báo `Falling back to DNS`.
 
 | Triệu chứng | Nguyên nhân thường gặp |
 | --- | --- |
@@ -366,6 +409,7 @@ Biến `SIMPLE_DISCOVERY_*` của discovery: xem guide của `@simple-discovery/
   [core](https://github.com/flygo-opensource/spider-mesh/blob/main/packages/core/README.md),
   [events](https://github.com/flygo-opensource/spider-mesh/blob/main/packages/events/README.md),
   [ws](https://github.com/flygo-opensource/spider-mesh/blob/main/packages/ws/README.md),
-  [tcp](https://github.com/flygo-opensource/spider-mesh/blob/main/packages/tcp/README.md)
-- npm: `@spider-mesh/core`, `@spider-mesh/events`, `@spider-mesh/ws`, `@spider-mesh/tcp`
+  [tcp](https://github.com/flygo-opensource/spider-mesh/blob/main/packages/tcp/README.md),
+  [k8s](https://github.com/flygo-opensource/spider-mesh/blob/main/packages/k8s/README.md)
+- npm: `@spider-mesh/core`, `@spider-mesh/events`, `@spider-mesh/ws`, `@spider-mesh/tcp`, `@spider-mesh/k8s`
 - Discovery: https://github.com/flygo-opensource/simple-discovery
