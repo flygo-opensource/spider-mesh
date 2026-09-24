@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.2
+
+- `registerTransporter()` rejects objects without `send()` with an error that says where they go:
+  an event transporter such as `Http2Pubsub` onto `EventBus` from `@spider-mesh/events`, a discovery
+  into `new Topology({ discovery })`. Both used to be accepted and fail later (easy mistakes when
+  moving from 2.x).
+
 ## 3.0.1
 
 - The `transporter` call option takes a transporter **name** (`'websocket'`, `'http2'`). Passing a

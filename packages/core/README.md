@@ -402,7 +402,7 @@ export class AppModule {}
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
 | `SPIDERMESH_NAMESPACE` | `default` | Namespace của node. |
-| `SPIDERMESH_NODE_HOSTNAME` | *(rỗng)* | Địa chỉ node khác dùng để kết nối tới node này. **Bắt buộc** với transporter kết nối thẳng như `@spider-mesh/tcp`. |
+| `SPIDERMESH_NODE_HOSTNAME` | *(rỗng)* | Địa chỉ node khác dùng để kết nối tới node này. Với `@spider-mesh/tcp` + UDP discovery, rỗng thì lấy địa chỉ nguồn gói UDP; đặt khi địa chỉ đó không kết nối được. |
 | `APP_VERSION`, `GIT_TAG`, `GIT_BRANCH`, `GIT_COMMIT`, `BUILD_TIME`, `APP_ENV`, `APP_TAGS` | – | Thông tin build được công bố kèm node (`node.build`). |
 
 Mỗi `SpiderMesh` luôn nhận một `node_id` ngẫu nhiên mới.

@@ -106,8 +106,20 @@ export class SpiderMesh {
     }
 
 
-    /** Đăng ký một transporter bằng tên ổn định do chính transporter khai báo. */
+    /**
+     * Đăng ký thêm một transporter RPC bằng tên ổn định do chính transporter khai báo. Thường truyền
+     * qua `new SpiderMesh({ transporters })`. Chỉ nhận transporter RPC: discovery đưa vào
+     * `new Topology({ discovery })`, event transporter (ví dụ `Http2Pubsub`) đăng ký trên `EventBus`
+     * của `@spider-mesh/events`.
+     */
     registerTransporter(rpcTransporter: RpcTransporter) {
+        if (typeof (rpcTransporter as Partial<RpcTransporter>)?.send !== 'function') {
+            const name = (rpcTransporter as { name?: string })?.name ?? rpcTransporter?.constructor?.name ?? 'transporter'
+            const isEventTransporter = typeof (rpcTransporter as { publish?: unknown })?.publish === 'function'
+            throw new Error(isEventTransporter
+                ? `"${name}" is an event transporter: register it with new EventBus({ mesh }).registerTransporter(...) from @spider-mesh/events`
+                : `"${name}" is not an RPC transporter (no send()). Discovery goes into new Topology({ discovery }) passed to new SpiderMesh({ topology })`)
+        }
         const resolvedName = rpcTransporter.name
         if (!resolvedName) throw new Error('RpcTransporter.name is required')
         if (this.#transporters.rpcs.value.has(resolvedName)) {

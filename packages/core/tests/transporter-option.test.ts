@@ -39,3 +39,17 @@ test('a registered name keeps the usual offline error', async () => {
     expect(error?.code).toBe('MICROSERVICE_OFFLINE')
     expect(error?.message).toBe('No transporter available for service PingService')
 })
+
+// Bẫy khi nâng từ 2.x: đăng ký event transporter hoặc discovery lên SpiderMesh. Trước đây được nhận
+// như transporter RPC rồi hỏng ở lần gọi đầu.
+test('registering an event transporter points to EventBus', () => {
+    const mesh = new SpiderMesh()
+    const pubsub = Object.assign(new Subject(), { name: 'http2-pubsub', publish: async () => {}, listen: () => new Subject() })
+    expect(() => mesh.registerTransporter(pubsub as unknown as RpcTransporter)).toThrow(/"http2-pubsub" is an event transporter.*EventBus/)
+})
+
+test('registering a discovery points to Topology', () => {
+    const mesh = new SpiderMesh()
+    const discovery = Object.assign(new Subject(), { broadcast: async () => {} })
+    expect(() => mesh.registerTransporter(discovery as unknown as RpcTransporter)).toThrow(/not an RPC transporter.*new Topology\(\{ discovery \}\)/)
+})
