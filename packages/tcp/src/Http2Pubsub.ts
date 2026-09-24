@@ -112,6 +112,7 @@ export class Http2Pubsub {
 
         const port = this.#resolvePort(node)
         if (!port) throw new Error(`Event endpoint metadata missing for node ${node.node_id}`)
+        if (!node.host) throw new Error(`Node ${node.node_id} has no host: set SPIDERMESH_NODE_HOSTNAME on that node`)
         const host = node.host.includes(':') ? `[${node.host}]` : node.host
         const connection = connect(`http://${host}:${port}`)
         this.#nodes.set(node.node_id, connection)

@@ -52,6 +52,16 @@ const toDiscoveryMessage = (node: SpiderMeshNode, tags: readonly string[]): Disc
 })
 
 /**
+ * Node không đặt `SPIDERMESH_NODE_HOSTNAME` công bố `host` rỗng; khi đó dùng địa chỉ nguồn của gói
+ * discovery (`remote_host`) để các node khác vẫn kết nối tới được.
+ */
+const withRemoteHost = (message: DiscoveryMessage<SpiderMeshNode>): SpiderMeshNode => {
+    const node = message.data
+    if (node.host || !message.remote_host) return node
+    return { ...node, host: message.remote_host }
+}
+
+/**
  * Nối một discovery generic (ví dụ `UdpDiscovery` của `@simple-discovery/udp`) vào `Topology`: node local được
  * broadcast ra ngoài, message nhận được thì đưa node vào Topology.
  */
@@ -90,7 +100,7 @@ export class TopologyDiscoveryAdapter implements TopologyDiscovery {
         }
 
         binding.add(this.transporter.subscribe(message => {
-            context.upsertRemote(message.data)
+            context.upsertRemote(withRemoteHost(message))
         }))
 
         this.#binding = binding

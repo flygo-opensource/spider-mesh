@@ -70,7 +70,9 @@ Adapter nhận mọi discovery có `broadcast()` và phát ra message, không ri
 | `tags` | `['spider-mesh', 'node']` | Tag gắn vào message; tag của `UdpDiscovery` phải nằm trong danh sách này. |
 | `closeTransporter` | `true` | Đóng discovery khi `Topology` đóng. |
 
-Chạy mỗi process với địa chỉ LAN của **chính máy đó**, để các node khác kết nối tới được:
+Địa chỉ để node khác kết nối tới: không đặt `SPIDERMESH_NODE_HOSTNAME` thì `TopologyDiscoveryAdapter`
+dùng địa chỉ nguồn của gói UDP (`remote_host`). Đặt biến này khi địa chỉ đó không phải địa chỉ kết
+nối được, ví dụ máy có nhiều card mạng, sau NAT, hoặc muốn dùng hostname trong VPN:
 
 ```bash
 SPIDERMESH_NODE_HOSTNAME=192.168.1.21 SPIDERMESH_NAMESPACE=shop SIMPLE_DISCOVERY_KEY=... bun run provider.ts
@@ -112,7 +114,7 @@ console.log(await greeting.hello('Spider Mesh'))
 | Triệu chứng | Nguyên nhân |
 | --- | --- |
 | Node không bao giờ thấy nhau, `onError` báo `namespace must be …` | Namespace của `UdpDiscovery` khác `SPIDERMESH_NAMESPACE`. Không có `onError` thì lỗi này **im lặng**. |
-| Node thấy nhau nhưng gọi bị `MICROSERVICE_OFFLINE` | Chưa đặt `SPIDERMESH_NODE_HOSTNAME`, hoặc đặt địa chỉ mà máy khác không tới được. |
+| Node thấy nhau nhưng gọi bị `MICROSERVICE_OFFLINE` | Địa chỉ node công bố (`SPIDERMESH_NODE_HOSTNAME`, hoặc địa chỉ nguồn gói UDP khi không đặt) không tới được từ máy gọi, hoặc firewall chặn cổng RPC. Thông báo lỗi có địa chỉ đã thử. |
 | Máy khác subnet / mạng chặn multicast không thấy nhau | Khai báo `peers` (xem bên dưới). |
 | Thấy node lạ | Các mesh dùng chung `key` và `namespace`. Đặt `key` riêng. |
 | Node không thấy nhau, không có lỗi nào | Khác `key` hoặc khác cổng discovery, hoặc đồng hồ các máy lệch quá 30 giây (gói bị bỏ im lặng; đồng bộ giờ bằng NTP). Bật `SIMPLE_DISCOVERY_UDP_DEBUG=1` để xem lỗi mạng. |
@@ -232,7 +234,7 @@ Event được gửi thẳng tới những node đang lắng nghe topic, không 
 
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
-| `SPIDERMESH_NODE_HOSTNAME` | *(rỗng)* | Địa chỉ node khác dùng để kết nối tới node này. **Bắt buộc** với UDP discovery. |
+| `SPIDERMESH_NODE_HOSTNAME` | *(rỗng)* | Địa chỉ node khác dùng để kết nối tới node này. Rỗng thì lấy địa chỉ nguồn gói discovery (cần `@simple-discovery/udp` ≥ 3.0.2). **Bắt buộc** với `resolveService` và discovery không báo địa chỉ người gửi. |
 | `SPIDERMESH_NAMESPACE` | `default` | Namespace của mesh. |
 | `SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS` | `2000` | Thời gian chờ mở kết nối. |
 | `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` | `3` | Số lần thất bại liên tiếp trước khi coi node là không kết nối được. Vẫn tiếp tục thử sau đó. |
@@ -240,3 +242,58 @@ Event được gửi thẳng tới những node đang lắng nghe topic, không 
 | `SPIDERMESH_HTTP2_RECONNECT_MAX_DELAY_MS` | `30000` | Độ trễ tối đa giữa các lần nối lại. |
 
 Tên transporter trên wire: `'http2'` (RPC) và `'http2-pubsub'` (event).
+
+## Chuyển từ 2.x
+
+Discovery không còn nằm trong `@spider-mesh/tcp`. `SpiderMesh` nhận `Topology` (giữ danh sách node) và
+transporter RPC; event đi qua `EventBus` của `@spider-mesh/events`.
+
+Trước (2.x, không còn biên dịch với 3.x):
+
+```js
+import { Registry, SpiderMesh } from '@spider-mesh/core'
+import { Http2Pubsub, Http2Rpc, UdpDiscovery } from '@spider-mesh/tcp'
+
+const mesh = new SpiderMesh()
+const registry = new Registry()
+mesh.registerTransporter(new UdpDiscovery(registry))
+mesh.registerTransporter(new Http2Rpc(registry))
+mesh.registerTransporter(new Http2Pubsub(registry))
+```
+
+Sau (3.x):
+
+```ts
+import { SpiderMesh, Topology, type SpiderMeshNode } from '@spider-mesh/core'
+import { EventBus } from '@spider-mesh/events'
+import { Http2Pubsub, Http2Rpc, TopologyDiscoveryAdapter } from '@spider-mesh/tcp'
+import { UdpDiscovery } from '@simple-discovery/udp'
+
+const topology = new Topology({
+  discovery: new TopologyDiscoveryAdapter(new UdpDiscovery<SpiderMeshNode>({
+    namespace: process.env.SPIDERMESH_NAMESPACE ?? 'default',
+    tags: ['spider-mesh', 'node'],
+    key: process.env.SIMPLE_DISCOVERY_KEY!,
+  })),
+  removeUnreachableAfterMs: 5 * 60_000,
+})
+const mesh = new SpiderMesh({ topology, transporters: [new Http2Rpc()] })
+
+const events = new EventBus({ mesh })
+events.registerTransporter(new Http2Pubsub(topology))
+```
+
+| 2.x | 3.x |
+| --- | --- |
+| `new SpiderMesh()` rồi `mesh.registerTransporter(...)` | `new SpiderMesh({ topology, transporters })`. Thiếu `topology` thì `Http2Rpc` vẫn chạy nhưng không bao giờ thấy node nào. |
+| `UdpDiscovery` từ `@spider-mesh/tcp` | `UdpDiscovery` từ `@simple-discovery/udp`, bọc trong `TopologyDiscoveryAdapter` |
+| `Registry` truyền vào từng transporter | `Topology`, truyền vào `SpiderMesh`; `Http2Rpc` nhận nó qua `SpiderMesh` |
+| `mesh.registerTransporter(new Http2Pubsub(registry))` | `new EventBus({ mesh }).registerTransporter(new Http2Pubsub(topology))` |
+| `host` lấy từ địa chỉ nguồn gói UDP | Như cũ khi không đặt `SPIDERMESH_NODE_HOSTNAME` (từ 3.0.1) |
+| `SPIDERMESH_WHITELIST_ADDRESS` | `SIMPLE_DISCOVERY_UDP_WHITELIST_ADDRESS` (hoặc option `peers`) |
+| `SPIDERMESH_MULTICAST_ADDRESS` | `SIMPLE_DISCOVERY_UDP_MULTICAST_ADDRESS` (hoặc option `multicastAddress`) |
+| `SPIDERMESH_MULTICAST_PORT` | `SIMPLE_DISCOVERY_PORT` (hoặc option `port`) |
+| *(không có)* | `SIMPLE_DISCOVERY_KEY` (hoặc option `key`): khoá ký gói discovery, mọi node dùng chung |
+| `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS`: hết lượt thì xoá node | Hết lượt thì node chỉ bị đánh dấu `unreachable`, vẫn thử lại; xoá do `removeUnreachableAfterMs` |
+
+Wire protocol UDP đổi: node 2.x và 3.x không thấy nhau, phải nâng mọi process cùng lúc.

@@ -263,8 +263,23 @@ export class Http2Rpc extends Subject<RpcEvent> implements RpcTransporter {
             } satisfies SpiderMeshError
         }
 
+        if (!node.host) {
+            throw {
+                code: 'MICROSERVICE_OFFLINE',
+                message: `Node ${node.node_id} has no host: set SPIDERMESH_NODE_HOSTNAME on that node, or use a discovery that reports the sender address`,
+            } satisfies SpiderMeshError
+        }
+
         const url = `http://${node.host.includes(':') ? `[${node.host}]` : node.host}:${port}`
-        const connection = connect(url)
+        let connection: ClientHttp2Session
+        try {
+            connection = connect(url)
+        } catch (error) {
+            throw {
+                code: 'MICROSERVICE_OFFLINE',
+                message: `Cannot connect to node ${node.node_id} at ${url}: ${(error as Error)?.message ?? error}`,
+            } satisfies SpiderMeshError
+        }
         this.#pendingConnections.add(connection)
         const connected = connection.connecting ? await new Promise<boolean>(resolve => {
             let settled = false

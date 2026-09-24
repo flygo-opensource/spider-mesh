@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.0.1
+
+### Fixed
+- A node started without `SPIDERMESH_NODE_HOSTNAME` announced an empty `host`, and calling it made
+  `Http2Rpc` build `http://:<port>`: the call failed with a bare `ERR_INVALID_URL` (no service, no
+  node). `TopologyDiscoveryAdapter` now fills an empty `host` from the discovery sender address
+  (`remote_host`), as 2.x did, so the variable is optional with UDP discovery.
+- `Http2Rpc` reports a node without a host, or an address `http2.connect()` rejects, as
+  `MICROSERVICE_OFFLINE` with the node id and address. `Http2Pubsub` names the node too.
+- CHANGELOG 3.0.0: removed the reference to `bindMeshDiscovery()` / `@spider-mesh/discovery` (never
+  published; use `TopologyDiscoveryAdapter`) and the leftover note that reconnect stops and removes
+  the peer (it keeps retrying; `Topology.removeUnreachableAfterMs` removes it).
+
+### Changed
+- `@simple-discovery/udp` peer range is `^3.0.2`: from that release `remote_host` is the real sender
+  even when the packet reached this process through the same-host relay.
+- README: "Chuyển từ 2.x" with before/after code and the renamed environment variables.
+
 ## 3.0.0 — generic discovery and TCP-owned liveness
 
 - `Http2Rpc.name = 'http2'`; metadata và routing không còn suy luận từ tên class.
@@ -15,9 +33,14 @@
 ### Breaking
 - `Http2Pubsub` remains exported here, but is registered on `EventBus` from
   `@spider-mesh/events` instead of `SpiderMesh`.
-- Removed `UdpDiscovery` and all UDP configuration from `@spider-mesh/tcp`. Bind a generic
-  implementation such as `UdpDiscovery<SpiderMeshNode>` from `@simple-discovery/udp` with
-  `bindMeshDiscovery()` from `@spider-mesh/discovery`.
+- Removed `UdpDiscovery` and all UDP configuration from `@spider-mesh/tcp`. Use
+  `UdpDiscovery<SpiderMeshNode>` from `@simple-discovery/udp`, wrapped in `TopologyDiscoveryAdapter`
+  (exported here) and passed to `new Topology({ discovery })`. `SPIDERMESH_WHITELIST_ADDRESS`,
+  `SPIDERMESH_MULTICAST_ADDRESS` and `SPIDERMESH_MULTICAST_PORT` become
+  `SIMPLE_DISCOVERY_UDP_WHITELIST_ADDRESS`, `SIMPLE_DISCOVERY_UDP_MULTICAST_ADDRESS` and
+  `SIMPLE_DISCOVERY_PORT`. See "Chuyển từ 2.x" in the README.
+- `SpiderMesh` takes `{ topology, transporters }`; `Registry` is no longer passed to transporters.
+  Without a `topology`, `Http2Rpc` finds no nodes.
 - The legacy `{ hi, node }` UDP wire format is no longer supported by this package.
 
 ### Changed
@@ -46,18 +69,13 @@
   Topology, which is the setup this package is used with, so the separate `@spider-mesh/discovery`
   package is not needed and is not published.
 - `Http2Rpc` proactively connects to every routable discovered peer. HTTP/2 session and underlying
-  TCP socket `close`/`error`, followed by bounded reconnect, own online/offline state; UDP has no
-  periodic heartbeat.
-- Reconnect uses bounded exponential backoff. After the configured attempt limit, the peer is
-  removed from Registry and retry stops; a new discovery announcement is required to return online.
+  TCP socket `close`/`error`, followed by reconnect, own online/offline state; UDP has no periodic
+  heartbeat.
 - Added `SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS` (default `2000`).
-- `Http2Rpc` exposes its TCP Registry directly through `watchService()` / `listNodes()`;
-  `SpiderMesh` stays registry-free and the separate `ServiceDirectory` type is removed.
-- Tests/examples share Registry among Ohayo integration, `Http2Rpc`, and `Http2Pubsub` only.
 
 ### Validation
 - Standard TCP E2E: 16/16 pass.
-- TCP resilience: 6/6 pass, including bounded retry stop, restart soak, SIGKILL
+- TCP resilience: 6/6 pass, including unreachable-then-recover, restart soak, SIGKILL
   eviction/recovery, full-snapshot replacement, duplicate-ID isolation, and interrupted RPC streams.
 - Three-host Bun test: Service A discovered and called both Service B providers and both Service C
   providers across two remote servers; lifecycle tests passed against each remote server.

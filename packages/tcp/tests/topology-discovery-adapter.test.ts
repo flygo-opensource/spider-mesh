@@ -116,3 +116,26 @@ test('topology adapter reports broadcast failures through onError', async () => 
     expect(errors.map(error => (error as Error).message)).toEqual(['Discovery message namespace must be my-app'])
     binding.unsubscribe()
 })
+
+test('topology adapter fills an empty host from the discovery sender address', async () => {
+    // Node không đặt SPIDERMESH_NODE_HOSTNAME công bố host rỗng; Http2Rpc từng dựng `http://:port`.
+    const discovery = new MockDiscovery()
+    const remoteNodes: SpiderMeshNode[] = []
+    const adapter = new TopologyDiscoveryAdapter(discovery)
+    const binding = adapter.bind({
+        localNode$: new BehaviorSubject(node('local')),
+        upsertRemote: remote => remoteNodes.push(remote),
+        removeRemote: () => undefined,
+    })
+
+    discovery.next({ ...message({ ...node('no-host'), host: '' }), remote_host: '192.0.2.10' })
+    discovery.next({ ...message(node('with-host')), remote_host: '192.0.2.11' })
+    discovery.next(message({ ...node('no-sender'), host: '' }))
+
+    expect(remoteNodes.map(remote => [remote.node_id, remote.host])).toEqual([
+        ['no-host', '192.0.2.10'],
+        ['with-host', '127.0.0.1'],
+        ['no-sender', ''],
+    ])
+    binding.unsubscribe()
+})

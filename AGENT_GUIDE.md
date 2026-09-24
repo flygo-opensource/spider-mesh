@@ -347,8 +347,9 @@ Không có `Topology` thì `wait()` bỏ qua tham số, `nodes` rỗng và `__ba
 7. **Dùng `wss://` ở production** cho trình duyệt và React Native. Relay không tự làm TLS: đặt sau
    reverse proxy (nginx, Caddy, load balancer). Android bản release chặn `ws://` mà không báo lỗi rõ.
 8. **Mô hình B:**
-   - `SPIDERMESH_NODE_HOSTNAME` phải là địa chỉ máy khác kết nối tới được. Thiếu nó thì node thấy nhau
-     nhưng gọi bị `MICROSERVICE_OFFLINE`.
+   - Không đặt `SPIDERMESH_NODE_HOSTNAME` thì node được gọi qua địa chỉ nguồn gói UDP (cần
+     `@spider-mesh/tcp` ≥ 3.0.1 và `@simple-discovery/udp` ≥ 3.0.2). Đặt nó khi địa chỉ đó không kết nối
+     được (nhiều card mạng, NAT, hostname VPN); đặt sai thì node thấy nhau nhưng gọi bị `MICROSERVICE_OFFLINE`.
    - `namespace` của `UdpDiscovery` phải trùng `SPIDERMESH_NAMESPACE`, và luôn đặt `onError` cho adapter;
      không thì lỗi này im lặng.
    - Mọi node dùng cùng `SIMPLE_DISCOVERY_KEY` và cùng cổng discovery; đồng hồ các máy đồng bộ (NTP).
@@ -367,7 +368,7 @@ Không có `Topology` thì `wait()` bỏ qua tham số, `nodes` rỗng và `__ba
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
 | `SPIDERMESH_NAMESPACE` | `default` | Namespace của node. |
-| `SPIDERMESH_NODE_HOSTNAME` | *(rỗng)* | Địa chỉ để node khác kết nối tới. Bắt buộc với mô hình B. |
+| `SPIDERMESH_NODE_HOSTNAME` | *(rỗng)* | Địa chỉ để node khác kết nối tới. Mô hình B: rỗng thì lấy địa chỉ nguồn gói UDP. |
 | `SPIDERMESH_HTTP2_CONNECT_TIMEOUT_MS` | `2000` | Thời gian chờ mở kết nối HTTP/2. |
 | `SPIDERMESH_HTTP2_RECONNECT_ATTEMPTS` | `3` | Số lần lỗi liên tiếp trước khi coi node là không kết nối được (vẫn tiếp tục thử). |
 | `SPIDERMESH_HTTP2_RECONNECT_DELAY_MS` | `250` | Độ trễ nối lại ban đầu. |
